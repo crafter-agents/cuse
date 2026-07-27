@@ -30,10 +30,12 @@ export function escapeSendKeys(s: string): string {
 export function captureCmd(os: OS, out: string): string[] {
   switch (os) {
     case "macos": return ["screencapture", "-x", out];
-    // Force 8-bit truecolour: on a low-colour display import would emit a
-    // 1-bit PNG, so captures would not be comparable across platforms.
-    case "linux": return ["import", "-window", "root", "-depth", "8",
-      "-define", "png:color-type=2", out];
+    // xwd, not import: the runners ship neither, and x11-apps (which carries
+    // xwd) is a fraction of imagemagick's size. cu converts the dump to PNG
+    // itself, which also fixes what import did on a low-colour display - emit a
+    // 1-bit PNG that could not be compared against the other platforms'.
+    // The dump goes to stdout; the caller writes the PNG.
+    case "linux": return ["xwd", "-root", "-silent"];
     // Bitmap.Save resolves a relative path against the .NET working directory,
     // which is not PowerShell's location - so cu passes an absolute path here.
     case "windows": return ps(

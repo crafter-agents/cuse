@@ -46,7 +46,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb imagemagick x11-utils
+          sudo apt-get install -y -qq --no-install-recommends x11-apps
           out=$(xvfb-run -a --server-args="-screen 0 1280x1024x24" ./cu capture out.png --json)
           echo "$out"
           # A bare Xvfb has nothing drawn on it, so the frame is blank. cu must
@@ -95,7 +95,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb imagemagick xdotool xterm xfonts-base
+          sudo apt-get install -y -qq --no-install-recommends x11-apps xdotool xterm xfonts-base
           cat > drive.sh <<'EOF'
           set -e
           # -T names the window: without it xterm titles itself after the
@@ -175,23 +175,37 @@ jobs:
           grep -q "cu input reached this window" target.txt || {
             echo "the keystrokes never reached the document"; exit 1; }
 
-      # Windows input cannot be proven on a hosted runner: processes the job
-      # starts present no window on the captured desktop (Get-Process returns an
-      # empty MainWindowTitle table), so SendKeys has nothing to post to. Rather
-      # than fake a pass, assert the behaviour that matters in that situation -
-      # cu refuses and names the missing window instead of reporting success.
-      - name: windows - a keystroke with no window refuses, and says why
+      # Recon showed the job runs in the interactive session with a real
+      # foreground window - what failed before was Notepad, which on Windows
+      # Server is the Store build and does not start at all. So cu gets a window
+      # made for the purpose, whose text box writes every change to disk: the
+      # same ground truth the macOS and Linux checks use.
+      - name: windows - type into a window that records what it receives
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File scenarios/win-target.ps1
-          out=$(./cu focus CU_TARGET --json || true)
-          echo "$out"
-          echo "$out" | grep -q "no window matching 'CU_TARGET'" || {
-            echo "expected a named refusal, got: $out"; exit 1; }
+          sink="$PWD/sink.txt"
+          rm -f "$sink" "$sink.ready"
+          powershell -NoProfile -ExecutionPolicy Bypass -Command \
+            "Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','scenarios/win-form.ps1','-Sink','$sink'"
+          for i in $(seq 1 20); do [ -f "$sink.ready" ] && break; sleep 1; done
+          test -f "$sink.ready" || { echo "the target window never appeared"; exit 1; }
+          ./cu focus CU_TARGET --json
+          ./cu settle --json
+          ./cu capture control-a.png --json
+          sleep 1
+          ./cu capture control-b.png --json
+          ./cu diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          ./cu capture before.png --json
+          ./cu type "cu input reached this window" --json
+          sleep 2
+          ./cu capture after.png --json
+          ./cu diff before.png after.png --same-under=0 --json | tee diff.json
+          echo "--- what the window received ---"
+          cat "$sink" || true
+          grep -q "cu input reached this window" "$sink" || {
+            echo "the window never received the keystrokes"; exit 1; }
 
-      # The screen must differ between the two frames. If the keystroke went
-      # nowhere, the verdict is SAME and this fails - which is the point.
       # The pixel delta is reported, not gated. On a CI desktop it is not a
       # stable measurement: it passed twice on caret noise while input was
       # reaching nothing, and failed twice on a window still drawing while input
@@ -199,7 +213,6 @@ jobs:
       # written on macOS, a command executed on Linux - which nothing but real
       # delivered input can produce.
       - name: report how much the screen moved, idle versus typed
-        if: runner.os != 'Windows'
         shell: bash
         run: |
           bun -e '

@@ -24,10 +24,9 @@ describe("detectOS", () => {
 
 describe("capture", () => {
   test("macOS screencapture", () => expect(captureCmd("macos", "o.png")).toEqual(["screencapture", "-x", "o.png"]));
-  test("linux import grabs the root window", () => {
-    const c = captureCmd("linux", "o.png");
-    expect(c.slice(0, 4)).toEqual(["import", "-window", "root", "-depth"]);
-    expect(c.at(-1)).toBe("o.png");
+  test("linux dumps the root window with xwd, and cu converts it", () => {
+    // No imagemagick: the dump comes back on stdout and cu encodes the PNG.
+    expect(captureCmd("linux", "o.png")).toEqual(["xwd", "-root", "-silent"]);
   });
   test("windows GDI CopyFromScreen + path", () => {
     const c = captureCmd("windows", "C:\\tmp\\o.png").join(" ");
@@ -157,24 +156,24 @@ describe("preflight", () => {
     env,
     has: (t: string) => present.includes(t),
   });
-  const ALL = ["import", "xdotool"];
+  const ALL = ["xwd", "xdotool"];
 
   test("linux capture without DISPLAY explains Xvfb", () => {
     const r = preflight("linux", "capture", withEnv({}, ALL));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain("DISPLAY is unset");
   });
-  test("linux capture with DISPLAY and imagemagick passes", () => {
+  test("linux capture with DISPLAY and xwd passes", () => {
     expect(preflight("linux", "capture", withEnv({ DISPLAY: ":99" }, ALL)).ok).toBe(true);
   });
   test("linux capture names the missing tool and its install", () => {
     const r = preflight("linux", "capture", withEnv({ DISPLAY: ":99" }, ["xdotool"]));
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toContain("imagemagick");
+    if (!r.ok) expect(r.reason).toContain("x11-apps");
   });
   test("every linux input action needs xdotool, the mouse ones included", () => {
     for (const a of ["type", "key", "click", "dblclick", "move", "scroll", "copy"]) {
-      const r = preflight("linux", a, withEnv({ DISPLAY: ":99" }, ["import"]));
+      const r = preflight("linux", a, withEnv({ DISPLAY: ":99" }, ["xwd"]));
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.reason).toContain("xdotool");
     }
@@ -268,10 +267,8 @@ describe("focus", () => {
   test("linux focus needs xdotool like the other input actions", () => {
     expect(requiredTool("linux", "focus")).toMatchObject({ tool: "xdotool" });
   });
-  test("linux capture asks for 8-bit truecolour so frames compare across platforms", () => {
-    const c = captureCmd("linux", "o.png");
-    expect(c).toContain("-depth");
-    expect(c).toContain("png:color-type=2");
+  test("linux capture needs only x11-apps, not imagemagick", () => {
+    expect(requiredTool("linux", "capture")).toMatchObject({ tool: "xwd" });
   });
 });
 

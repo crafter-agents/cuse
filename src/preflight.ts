@@ -30,7 +30,7 @@ export function requiredTool(os: OS, action: string): { tool: string; install: s
   // macOS mouse actions go through CoreGraphics in-process, and osascript,
   // screencapture and open all ship with the OS - so nothing to install.
   if (os !== "linux") return null;
-  if (action === "capture") return { tool: "import", install: "apt-get install -y imagemagick" };
+  if (action === "capture") return { tool: "xwd", install: "apt-get install -y x11-apps" };
   if ([...INPUT_ACTIONS, "focus"].includes(action)) return { tool: "xdotool", install: "apt-get install -y xdotool" };
   return null;
 }

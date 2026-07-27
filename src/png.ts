@@ -137,3 +137,64 @@ export function diffImages(a: Image, b: Image, threshold = 30, sameUnder = 1): D
   const same = sameUnder === 0 ? changed === 0 : percent < sameUnder;
   return { changed, total, percent, verdict: same ? "SAME" : "CHANGED" };
 }
+
+// --- encoding -------------------------------------------------------------
+// cu writes PNGs as well as reading them, so a capture backend that emits some
+// other format (xwd on Linux) still yields the one format everything else here
+// understands - and Linux no longer needs imagemagick installed to take a
+// screenshot.
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+export function crc32(bytes: Uint8Array): number {
+  let c = 0xffffffff;
+  for (const b of bytes) c = CRC_TABLE[(c ^ b) & 0xff]! ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function chunk(type: string, body: Uint8Array): Uint8Array {
+  const out = new Uint8Array(12 + body.length);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, body.length);
+  for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+  out.set(body, 8);
+  dv.setUint32(8 + body.length, crc32(out.subarray(4, 8 + body.length)));
+  return out;
+}
+
+/** Encode 8-bit RGB or RGBA samples as a PNG. Filter 0: the frames are already
+ *  compressible and the encode sits on the capture path, so speed wins. */
+export function encodePNG(img: Image, deflate: (d: Uint8Array) => Uint8Array): Uint8Array {
+  const { width, height, channels, data } = img;
+  if (channels !== 3 && channels !== 4) throw new Error(`cannot encode ${channels}-channel image`);
+  const stride = width * channels;
+  const raw = new Uint8Array((stride + 1) * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * (stride + 1)] = 0; // filter: none
+    raw.set(data.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
+  }
+  const ihdr = new Uint8Array(13);
+  const dv = new DataView(ihdr.buffer);
+  dv.setUint32(0, width);
+  dv.setUint32(4, height);
+  ihdr[8] = 8;                              // bit depth
+  ihdr[9] = channels === 4 ? 6 : 2;         // colour type: RGBA or RGB
+  const parts = [
+    new Uint8Array(MAGIC),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflate(raw)),
+    chunk("IEND", new Uint8Array(0)),
+  ];
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}

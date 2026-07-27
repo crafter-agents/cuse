@@ -3,14 +3,16 @@
 // Structured Result + --json. Actions delegate to pure builders (tested).
 
 import { resolve } from "node:path";
-import { inflateSync } from "node:zlib";
+import { inflateSync, deflateSync } from "node:zlib";
 import { detectOS, chordToOS, type OS } from "./os.ts";
 import { captureCmd, typeCmd, launchCmd, focusCmd, comboKey } from "./commands.ts";
 import { movePlan, clickPlan, scrollPlan, type Plan } from "./plan.ts";
 import { preflight, frameWarning, INPUT_ACTIONS, type Probe } from "./preflight.ts";
 import { isSessionLocked, LOCK_QUERY, LOCKED_REASON } from "./session.ts";
 import { decodePNG, diffImages, isUniform, readHeader, type Image } from "./png.ts";
-import { runWithTimeout, explainFailure, timeoutFor } from "./exec.ts";
+import { runWithTimeout, runBytes, explainFailure, timeoutFor } from "./exec.ts";
+import { encodePNG } from "./png.ts";
+import { decodeXWD } from "./xwd.ts";
 
 export type Options = { force?: boolean; sameUnder?: number; timeoutMs?: number };
 
@@ -51,6 +53,24 @@ async function execute(plan: Plan, run: (argv: string[]) => Promise<void>): Prom
 }
 
 const inflate = (d: Uint8Array) => new Uint8Array(inflateSync(d));
+const deflate = (d: Uint8Array) => new Uint8Array(deflateSync(d));
+
+/**
+ * Take a screenshot, whatever the platform's backend emits.
+ *
+ * macOS and Windows write a PNG themselves. Linux hands back an xwd dump on
+ * stdout, which cu converts - that is what removes the imagemagick dependency.
+ */
+async function captureTo(os: OS, out: string, timeoutMs: number,
+                         run: (argv: string[]) => Promise<void>): Promise<void> {
+  const argv = captureCmd(os, out);
+  if (os !== "linux") return run(argv);
+  const r = await runBytes(argv, timeoutMs);
+  const problem = explainFailure(argv, r, timeoutMs);
+  if (problem) throw new Error(problem);
+  if (r.stdout.length === 0) throw new Error("xwd produced no dump (is DISPLAY reachable?)");
+  await Bun.write(out, encodePNG(decodeXWD(r.stdout), deflate));
+}
 
 async function loadImage(path: string): Promise<Image> {
   return decodePNG(new Uint8Array(await Bun.file(path).arrayBuffer()), inflate);
@@ -113,7 +133,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         // Absolute, because the Windows backend saves through .NET, whose
         // working directory is not PowerShell's.
         const out = resolve(args[0] ?? "out.png");
-        await run(captureCmd(os, out));
+        await captureTo(os, out, timeoutMs, run);
         const size = (await Bun.file(out).exists()) ? Bun.file(out).size : 0;
         if (size === 0) return { ok: false, ...base, error: "no file produced" };
         const warn = await inspectFrame(out, size);
@@ -127,7 +147,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         const files: string[] = [];
         for (let i = 0; i < count; i++) {
           const out = resolve(`record-${String(i).padStart(3, "0")}.png`);
-          await run(captureCmd(os, out));
+          await captureTo(os, out, timeoutMs, run);
           files.push(out);
           if (i < count - 1) await Bun.sleep(gapMs);
         }
@@ -158,7 +178,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           }
           await Bun.sleep(gapMs);
           const next = 1 - cur;
-          await run(captureCmd(os, frames[next]!));
+          await captureTo(os, frames[next]!, timeoutMs, run);
           last = diffImages(await loadImage(frames[cur]!), await loadImage(frames[next]!), 30, 0);
           streak = last.verdict === "SAME" ? streak + 1 : 0;
           cur = next;
@@ -214,10 +234,65 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
   }
 }
 
+export const VERSION = "2.1.0";
+
+const HELP = `cu ${VERSION} - cross-platform computer-use CLI
+
+  cu <action> [args] [flags]
+
+Screen
+  capture [out.png]            screenshot; warns when the frame is blank
+  record [n] [gapMs]           n captures in a row
+  settle [tries] [gapMs] [n]   wait until the screen stops changing
+  diff <a.png> <b.png>         how much changed: SAME or CHANGED
+
+Windows and apps
+  launch <app>                 start an app
+  focus <name>                 bring a window to the front
+
+Input
+  type <text>                  send text to the focused window
+  key <chord>                  e.g. cmd+s, ctrl+shift+a, Return
+  move <x> <y>                 move the cursor
+  click | dblclick [x] [y]     click, optionally at a point
+  scroll <up|down> [amount]    scroll the view under the cursor
+  select-all | copy | paste    the platform's own chord for each
+
+Other
+  os                           which platform this is
+
+Flags
+  --json                       structured Result on stdout
+  --timeout=<ms>               deadline for this action
+  --same-under=<pct>           diff tolerance; 0 means "did anything change"
+  --force                      act even if the session looks locked
+  --help, --version
+
+Exit codes
+  0 ok   1 failed   2 bad usage   3 timed out   4 refused (locked or missing dep)`;
+
+/** Exit codes an agent can branch on without parsing prose. */
+export function exitCodeFor(r: Result): number {
+  if (r.ok) return 0;
+  const e = r.error ?? "";
+  if (/^unknown action|needs two PNG paths/.test(e)) return 2;
+  if (/did not finish within|ran out of time|never went quiet/.test(e)) return 3;
+  if (/not found:|DISPLAY is unset|session is locked|unsupported platform/.test(e)) return 4;
+  return 1;
+}
+
 if (import.meta.main) {
   const argv = process.argv.slice(2);
   const json = argv.includes("--json");
   const force = argv.includes("--force");
+  if (argv.includes("--help") || argv.includes("-h") || argv.length === 0) {
+    console.log(HELP);
+    process.exit(0);
+  }
+  if (argv.includes("--version")) {
+    console.log(VERSION);
+    process.exit(0);
+  }
   const flag = (name: string) => argv.find((a) => a.startsWith(`--${name}=`))?.split("=")[1];
   const sameUnder = flag("same-under") !== undefined ? Number(flag("same-under")) : 1;
   const timeoutMs = flag("timeout") !== undefined ? Number(flag("timeout")) : undefined;
@@ -225,7 +300,7 @@ if (import.meta.main) {
   const r = await act(action ?? "", args, { force, sameUnder, timeoutMs });
   console.log(json ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cu: ${r.error}`);
   if (!json && r.warn) console.warn(`cu: warning: ${r.warn}`);
-  process.exit(r.ok ? 0 : 1);
+  process.exit(exitCodeFor(r));
 }
 
 export { act };

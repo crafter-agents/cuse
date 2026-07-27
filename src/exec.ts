@@ -18,6 +18,7 @@
 //      still write.
 
 export type RunResult = { code: number; stdout: string; stderr: string; timedOut: boolean };
+export type BytesResult = { code: number; stdout: Uint8Array; stderr: string; timedOut: boolean };
 
 /** Per-action deadlines. Generous enough for a cold app launch, short enough
  *  that a wedged backend is reported within seconds rather than never. */
@@ -101,18 +102,39 @@ export async function runWithTimeout(argv: string[], ms: number): Promise<RunRes
   return result;
 }
 
+/** Same deadline, but keeping stdout as bytes - xwd writes a binary dump there,
+ *  and reading it as text would quietly corrupt every pixel. */
+export async function runBytes(argv: string[], ms: number): Promise<BytesResult> {
+  const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const collect = (async (): Promise<BytesResult> => {
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).arrayBuffer().then((a) => new Uint8Array(a)),
+      new Response(proc.stderr).text(),
+    ]);
+    return { code: await proc.exited, stdout, stderr, timedOut: false };
+  })();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<BytesResult>((res) => {
+    timer = setTimeout(() => res({ code: -1, stdout: new Uint8Array(0), stderr: "", timedOut: true }), ms);
+  });
+  const result = await Promise.race([collect, expired]);
+  clearTimeout(timer);
+  if (result.timedOut) await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+  return result;
+}
+
 /** The first line of output is the message; the rest is the interpreter's trace. */
 export function firstLine(stderr: string, stdout: string): string | undefined {
   return (stderr || stdout).trim().split("\n").map((l) => l.trim()).filter(Boolean)[0];
 }
 
 /** Turn a finished process into the error an agent can act on. */
-export function explainFailure(argv: string[], r: RunResult, ms: number): string | null {
+export function explainFailure(argv: string[], r: { code: number; stderr: string; stdout: unknown; timedOut: boolean }, ms: number): string | null {
   if (r.timedOut) {
     return `${argv[0]} did not finish within ${ms}ms and was killed ` +
       `(the display or the app it drives is not responding)`;
   }
   if (r.code === 0) return null;
-  const said = firstLine(r.stderr, r.stdout);
+  const said = firstLine(r.stderr, typeof r.stdout === "string" ? r.stdout : "");
   return said ? `${argv[0]}: ${said}` : `${argv[0]} exited ${r.code}`;
 }
