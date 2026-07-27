@@ -37,7 +37,13 @@ if (!win) die(`'${wanted}' is not among the ${wins.length} windows listed`);
 console.log(`window: ${win.title} ${win.width}x${win.height} at ${win.x},${win.y}`);
 if (win.width < 50 || win.height < 50) die(`implausible rectangle for ${win.title}`);
 
-// 2. Cut a patch out of the middle of it, and find that patch again.
+// 2. Cut a patch out of it, and find that patch again.
+//
+// The patch is cut from one frame and searched for in the next, so the screen
+// has to be still between them: a dialog appearing, or a caret blinking, moves
+// the landmark out from under the search.
+const settled = await cuse("settle");
+if (!settled.ok) die(`the screen would not hold still: ${settled.error}`);
 const frame = "aim-frame.png";
 if (!(await cuse("capture", frame)).ok) die("capture failed");
 
