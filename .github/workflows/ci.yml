@@ -95,28 +95,20 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb imagemagick xdotool xterm xfonts-base x11-apps
+          sudo apt-get install -y -qq xvfb imagemagick xdotool xterm xfonts-base
           cat > drive.sh <<'EOF'
           set -e
-          xterm -geometry 100x30+0+0 -e sleep 300 2>xterm.log &
+          # -T names the window: without it xterm titles itself after the
+          # command it runs, so the window was called "sleep" and focus could
+          # not find it. Same trick as the Windows target.
+          xterm -T CU_TARGET -geometry 100x30+0+0 -e sleep 300 2>xterm.log &
           sleep 4
-          echo "--- xterm stderr ---"; cat xterm.log 2>/dev/null || true
           echo "--- windows on :99 ---"
           xdotool search --onlyvisible --name . getwindowname %@ 2>/dev/null || echo "(none)"
-          # xcalc echoes typed digits on its display, so it is a usable fallback
-          # target if xterm will not start on this image.
-          if ! xdotool search --onlyvisible --name xterm >/dev/null 2>&1; then
-            echo "xterm did not map a window; falling back to xcalc"
-            xcalc & sleep 3
-            TARGET=xcalc; TEXT=123456789   # xcalc renders digits, not prose
-          else
-            TARGET=xterm; TEXT="cu input reached this window"
-          fi
-          echo "target=$TARGET"
           # No window manager here, so X focuses nothing until we ask it to.
-          ./cu focus "$TARGET" --json
+          ./cu focus CU_TARGET --json
           ./cu capture before.png --json
-          ./cu type "$TEXT" --json
+          ./cu type "cu input reached this window" --json
           sleep 1
           ./cu capture after.png --json
           ./cu diff before.png after.png --same-under=0 --json | tee diff.json
