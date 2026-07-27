@@ -53,10 +53,11 @@ the resulting PNG and uploads it as a build artifact.
 
 | | macOS | Linux (Xvfb) | Windows |
 | --- | --- | --- | --- |
-| capture | 1024x768, 80 KB | 1280x1024, needs imagemagick | 1024x768, 268 KB |
-| keyboard input | verified | verified | see below |
-| mouse | CoreGraphics, no install | xdotool | user32 mouse_event |
+| capture | `screencapture`, 1024x768 | `xwd` + cu's own encoder, 1280x1024 | GDI CopyFromScreen, 1024x768 |
+| keyboard input | verified | verified | verified |
+| mouse | CoreGraphics, no install | xdotool | user32 `mouse_event` |
 | focus | `open -a` | `windowfocus`, no WM needed | `AppActivate` |
+| needs installing | nothing | `x11-apps`, `xdotool` (~7 s) | nothing |
 
 **Keyboard input is verified by what the app received**, not by the exit code
 and not by pixels. CI opens a real window, focuses it, types, and then checks
@@ -66,6 +67,8 @@ something only delivered input can produce:
   the file on disk.
 - Linux types a command into a shell in an xterm, presses Return with
   `cu key Return`, and requires the file that command creates to exist.
+- Windows types into a window whose text box writes every change to disk, and
+  greps that.
 
 It measures the pixel change too — idle 0 px against 837 typed on Linux, and
 prints both — but does not gate on it. That check was tried and it was wrong in
@@ -74,12 +77,13 @@ landing, and failed twice on a window still drawing while input was landing
 fine. A gate that can pass without the thing it tests is worse than none, so the
 pixel delta is reported as evidence and the file on disk is what has to be true.
 
-**Windows input is not provable on a hosted runner.** Processes the job starts
-present no window on the captured desktop — `Get-Process` returns an empty
-title table — so SendKeys has nothing to post to. Rather than fake a pass, CI
-asserts the behaviour that matters there: `focus` refuses and names the window
-it could not find. The Windows input path itself is unit-tested at the argv
-level and unverified end to end.
+**Windows took two readings to get right.** The first conclusion was that a
+hosted runner cannot receive input at all, because Notepad never appeared. A
+recon job disproved it: the job runs in the interactive session, session 2, with
+a real foreground window and input desktop. What fails is Notepad specifically —
+on Windows Server it is the Store build and `Start-Process` returns nothing.
+Given a window that does exist, SendKeys lands: 2386 pixels changed and the text
+arrived in the box.
 
 ## The blank frame
 
@@ -98,12 +102,37 @@ a black 3024x1964 macOS frame compressed to 112 KB, comfortably above any
 size threshold, and only the decode caught it. The heuristic remains as a
 fallback for images the decoder refuses.
 
+## Nothing waits forever
+
+Every backend cu shells out to can hang — osascript on an app that stopped
+answering, xdotool on a wedged X server, PowerShell on a COM call — and the
+agent driving cu has no timeout of its own. So no command runs without a
+deadline, tuned per action and overridable with `--timeout=<ms>`.
+
+Getting that right took one more step than it looks. Killing the child is not
+enough: a wrapper's own child keeps the stdout pipe open, so the read never
+finishes and the deadline achieves nothing. cu returns the moment the deadline
+passes and then kills the whole descendant tree, bounded so that cleanup cannot
+become the new way to hang.
+
+```console
+$ cu capture out.png --timeout=3000 --json     # with a backend that never returns
+{"ok":false,"action":"capture","os":"macos",
+ "error":"screencapture did not finish within 3000ms and was killed (the display or the app it drives is not responding)"}
+$ echo $?
+3
+```
+
+Exit codes are meant to be branched on without parsing prose: `0` ok, `1`
+failed, `2` bad usage, `3` timed out, `4` refused because the machine cannot do
+it (missing dependency, no display, locked session).
+
 ## Design
 
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input
   plans (`src/plan.ts`), capability reasoning (`src/preflight.ts`), lock-state
   parsing (`src/session.ts`) and image comparison (`src/png.ts`) are pure
-  functions. 72 tests, no machine side effects. The CLI only wires execution
+  functions. 95 tests, no machine side effects. The CLI only wires execution
   around them.
 - **Structured output.** Every action returns a typed `Result` ({ok, action, os,
   detail?, error?, warn?, data?}); `--json` emits it. A missing dependency comes
@@ -115,14 +144,16 @@ fallback for images the decoder refuses.
   keystrokes and routes them to the password field. Input actions check the
   session first; a definite lock blocks, an unreadable state never does, and
   `--force` overrides.
-- **No image library.** `src/png.ts` decodes what the capture backends emit, so
-  `diff` and blank detection work with nothing installed.
+- **No image library.** `src/png.ts` decodes and encodes PNG and `src/xwd.ts`
+  reads the dump format `xwd` writes, so `diff`, blank detection and the Linux
+  capture path all work with nothing installed. That is what lets Linux take a
+  screenshot with `x11-apps` instead of imagemagick.
 - **Ships as a binary.** `bun build --compile` produces a standalone executable.
 
 ## Develop
 
 ```sh
-bun test          # 72 tests, the agnostic core
+bun test          # 95 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cu
 ```
 
@@ -138,11 +169,16 @@ bun run build     # compile a standalone binary to dist/cu
   guarantee. An app that has been launched but has not drawn yet is perfectly
   still, and one quiet interval used to be enough to fool it.
 - `scroll` on Windows sends Page Up/Down rather than a wheel event.
-- Linux needs `xdotool` and `imagemagick`, and an X display. Wayland is not
-  supported.
+- Linux needs `x11-apps` and `xdotool`, and an X display. Both install in about
+  seven seconds on a runner; Wayland is not supported.
+- The binary name collides with `cu(1)` from UUCP, which ships with macOS and
+  many Linux distributions. Install it under another name or call it by path
+  until that is settled.
 
 ## Status
 
 v2 is a TypeScript rewrite of the original bash spike (kept as
 `bin/cu-legacy.sh`). CI runs the unit tests, a capture gate and an input gate on
-macOS, Linux and Windows. Built by Kai.
+macOS, Linux and Windows, and a `recon` workflow that reports what each runner
+actually provides — which is where the dependency and Windows decisions above
+came from. Built by Kai.
