@@ -123,7 +123,7 @@ jobs:
           ./cu capture control-b.png --json
           ./cu diff control-a.png control-b.png --same-under=0 --json | tee control.json
           ./cu capture before.png --json
-          ./cu type "cu input reached this window" --json
+          ./cu type "cu input reached this window and this line is long on purpose" --json
           sleep 1
           ./cu capture after.png --json
           ./cu diff before.png after.png --same-under=0 --json | tee diff.json
@@ -142,7 +142,7 @@ jobs:
           ./cu capture control-b.png --json
           ./cu diff control-a.png control-b.png --same-under=0 --json | tee control.json
           ./cu capture before.png --json
-          ./cu type "cu input reached this window" --json
+          ./cu type "cu input reached this window and this line is long on purpose" --json
           sleep 2
           ./cu capture after.png --json
           ./cu diff before.png after.png --same-under=0 --json | tee diff.json
@@ -164,24 +164,25 @@ jobs:
 
       # The screen must differ between the two frames. If the keystroke went
       # nowhere, the verdict is SAME and this fails - which is the point.
-      # An idle screen must be SAME and a typed-on screen must be CHANGED. The
-      # control is what makes the second assertion mean something: without it, a
-      # blinking cursor would pass as proof that input landed.
-      - name: assert an idle screen does not change on its own
+      # An idle macOS screen is not static: the text caret blinks, which moved
+      # 126 pixels between two frames. So the check is not "idle is identical"
+      # but "typing moves far more than idling does" - self-calibrating, and it
+      # still fails if the keystroke goes nowhere.
+      - name: assert typing moves the screen far more than idling does
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          cat control.json
-          grep -q '"verdict":"SAME"' control.json || {
-            echo "the screen changes without input, so the input check proves nothing"; exit 1; }
-
-      - name: assert the screen changed because of the keystroke
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          cat diff.json
-          grep -q '"verdict":"CHANGED"' diff.json || {
-            echo "input did not change the screen: the keystroke was delivered to nothing"; exit 1; }
+          cat control.json diff.json
+          bun -e '
+            const idle = (await Bun.file("control.json").json()).data.changed;
+            const typed = (await Bun.file("diff.json").json()).data.changed;
+            const floor = Math.max(idle, 1) * 5;
+            console.log(`idle ${idle}px, typed ${typed}px, need > ${floor}px`);
+            if (typed <= floor) {
+              throw new Error("typing did not move the screen beyond its own noise: " +
+                "the keystroke was delivered to nothing");
+            }
+          '
 
       - uses: actions/upload-artifact@v4
         if: always()
