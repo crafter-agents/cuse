@@ -15,7 +15,7 @@ import { encodePNG } from "./png.ts";
 import { decodeXWD } from "./xwd.ts";
 import { listWindowsCmd, parseWindows, pickWindow, pointIn, frontmostCmd, parseFrontmost,
          frontmostMatches, type Win } from "./window.ts";
-import { findTemplate, crop } from "./match.ts";
+import { findTemplate, crop, variance, MIN_VARIANCE } from "./match.ts";
 
 export type Options = {
   force?: boolean; sameUnder?: number; timeoutMs?: number;
@@ -149,6 +149,12 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
     await captureTo(os, shot, timeoutMs, run);
     const hay = await loadImage(shot);
     const needle = await loadImage(opts.find);
+    const plainness = variance(needle);
+    if (plainness < MIN_VARIANCE) {
+      throw new Error(
+        `'${opts.find}' is too plain to locate (variance ${plainness.toFixed(2)}, needs ${MIN_VARIANCE}): ` +
+        `a patch this flat matches many places equally well`);
+    }
     const m = findTemplate(hay, needle, opts.minScore ?? 0.9);
     if (!m) throw new Error(`'${opts.find}' is not on screen (nothing matched above ${opts.minScore ?? 0.9})`);
     // The frame may be larger than the coordinate space input uses: a Retina

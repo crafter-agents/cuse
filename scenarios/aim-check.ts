@@ -41,12 +41,33 @@ if (win.width < 50 || win.height < 50) die(`implausible rectangle for ${win.titl
 const frame = "aim-frame.png";
 if (!(await cuse("capture", frame)).ok) die("capture failed");
 
-// Cut from the top-left, where these windows keep their text. The centre of a
-// text window is blank, and a blank patch matches a hundred equally blank
-// places - which is how a match 166px away once passed for a hit.
-const patch = { w: Math.min(220, Math.max(40, win.width - 20)), h: Math.min(70, Math.max(20, win.height - 20)) };
-const px = Math.max(0, Math.round(win.x + 6));
-const py = Math.max(0, Math.round(win.y + 6));
+// Pick the patch with the most structure in it, rather than a fixed spot.
+// A blank stretch matches a hundred equally blank places - that is how one run
+// "found" a patch 166px from where it was cut, and another 65px. An agent
+// choosing a landmark has the same problem, and the same answer.
+const { decodePNG } = await import("../src/png.ts");
+const { crop, variance } = await import("../src/match.ts");
+const { inflateSync } = await import("node:zlib");
+
+const frameImg = decodePNG(new Uint8Array(await Bun.file(frame).arrayBuffer()),
+  (d) => new Uint8Array(inflateSync(d)));
+const k = (screen.data as { scale: number }).scale;
+
+const patch = { w: Math.min(160, Math.max(40, win.width - 20)), h: Math.min(50, Math.max(20, win.height - 20)) };
+let best = { x: win.x + 6, y: win.y + 6, v: -1 };
+for (let gy = 0; gy < 6; gy++) {
+  for (let gx = 0; gx < 6; gx++) {
+    const cx = Math.round(win.x + 4 + gx * (win.width - patch.w - 8) / 5);
+    const cy = Math.round(win.y + 4 + gy * (win.height - patch.h - 8) / 5);
+    if (cx < 0 || cy < 0) continue;
+    if ((cx + patch.w) * k > frameImg.width || (cy + patch.h) * k > frameImg.height) continue;
+    const v = variance(crop(frameImg, cx * k, cy * k, patch.w * k, patch.h * k));
+    if (v > best.v) best = { x: cx, y: cy, v };
+  }
+}
+if (best.v <= 0) die("no part of this window has any structure to aim at");
+console.log(`most distinctive patch: ${patch.w}x${patch.h} at ${best.x},${best.y} (variance ${best.v.toFixed(1)})`);
+const px = best.x, py = best.y;
 
 console.log(`cropping ${patch.w}x${patch.h} at ${px},${py} (click space)`);
 const cropped = await cuse("crop", frame, String(px), String(py), String(patch.w), String(patch.h), "aim-needle.png");

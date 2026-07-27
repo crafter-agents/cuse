@@ -122,6 +122,36 @@ export function findTemplate(hay: Image, needle: Image, minScore = 0.9): Match |
   return candidate;
 }
 
+/**
+ * How much structure a patch has, as the mean absolute deviation of its pixels.
+ *
+ * A template with none - a blank stretch of text box, an empty panel - matches
+ * a hundred equally blank places, and the winner among them is decided by
+ * rounding. Observed: a patch of a white text box was located 65px from where
+ * it was cut, with a perfect score. So cuse measures this and refuses, rather
+ * than handing an agent a confident coordinate that is simply wrong.
+ */
+export function variance(img: Image): number {
+  const { data, channels } = img;
+  const pixels = Math.floor(data.length / channels);
+  if (pixels === 0) return 0;
+  let mean = 0;
+  for (let p = 0; p < pixels; p++) {
+    mean += (data[p * channels]! + data[p * channels + 1]! + data[p * channels + 2]!) / 3;
+  }
+  mean /= pixels;
+  let dev = 0;
+  for (let p = 0; p < pixels; p++) {
+    const v = (data[p * channels]! + data[p * channels + 1]! + data[p * channels + 2]!) / 3;
+    dev += Math.abs(v - mean);
+  }
+  return dev / pixels;
+}
+
+/** Below this a template is too plain to locate: the value is in grey levels,
+ *  and a patch of flat colour scores 0 while a line of text scores tens. */
+export const MIN_VARIANCE = 3;
+
 /** Cut a rectangle out of an image - how a needle gets made from a screenshot. */
 export function crop(img: Image, x: number, y: number, w: number, h: number): Image {
   if (x < 0 || y < 0 || x + w > img.width || y + h > img.height || w <= 0 || h <= 0) {

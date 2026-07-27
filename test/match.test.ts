@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { findTemplate, crop, downsample } from "../src/match.ts";
+import { findTemplate, crop, downsample, variance, MIN_VARIANCE } from "../src/match.ts";
 import type { Image } from "../src/png.ts";
 
 /** A synthetic screen with a distinctive mark at a known place. */
@@ -86,5 +86,31 @@ describe("findTemplate", () => {
     const hay = screen(1280, 1024, { x: 803, y: 611, size: 40 });
     const m = findTemplate(hay, crop(hay, 803, 611, 40, 40))!;
     expect([m.x, m.y]).toEqual([803, 611]);
+  });
+});
+
+describe("templates that cannot be located", () => {
+  const flat = (v: number): Image => ({
+    width: 40, height: 20, channels: 3, data: new Uint8Array(40 * 20 * 3).fill(v),
+  });
+
+  test("a patch of flat colour has no structure to match on", () => {
+    expect(variance(flat(255))).toBe(0);
+    expect(variance(flat(0))).toBe(0);
+  });
+  test("a patch with an edge in it does", () => {
+    // Straddling the mark's boundary is what makes a patch locatable at all.
+    const hay = screen(200, 120, { x: 40, y: 30, size: 30 });
+    expect(variance(crop(hay, 25, 15, 40, 40))).toBeGreaterThan(MIN_VARIANCE);
+  });
+  test("the inside of a solid block is as unlocatable as blank paper", () => {
+    const hay = screen(200, 120, { x: 40, y: 30, size: 30 });
+    expect(variance(crop(hay, 42, 32, 20, 20))).toBeLessThan(MIN_VARIANCE);
+  });
+  test("the threshold separates the blank text box from a line of text", () => {
+    // The white text box that was located 65px from where it was cut.
+    const nearlyFlat = flat(255);
+    nearlyFlat.data[0] = 250;
+    expect(variance(nearlyFlat)).toBeLessThan(MIN_VARIANCE);
   });
 });
