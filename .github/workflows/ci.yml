@@ -98,7 +98,7 @@ jobs:
           sudo apt-get install -y -qq xvfb imagemagick xdotool xterm xfonts-base
           cat > drive.sh <<'EOF'
           set -e
-          xterm -geometry 100x30+0+0 -e "sleep 300" &
+          xterm -geometry 100x30+0+0 -e sleep 300 &
           sleep 3
           xdotool search --onlyvisible --name . getwindowname %@ || echo "(no windows)"
           # No window manager here, so X focuses nothing until we ask it to.
