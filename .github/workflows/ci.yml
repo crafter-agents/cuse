@@ -103,8 +103,12 @@ jobs:
           # not find it. Same trick as the Windows target.
           # A shell, not `-e sleep`: the shell echoes what is typed, so the
           # pixels that change are the keystroke itself and nothing else.
-          xterm -T CU_TARGET -geometry 100x30+0+0 2>xterm.log &
+          # `sh -i` rather than bash, and allowTitleOps off, because Ubuntu's
+          # bash prompt renames the window and focus would stop finding it.
+          xterm -T CU_TARGET -xrm 'XTerm*allowTitleOps: false' \
+                -geometry 100x30+0+0 -e sh -i 2>xterm.log &
           sleep 4
+          echo "--- xterm stderr ---"; cat xterm.log 2>/dev/null || true
           echo "--- windows on :99 ---"
           xdotool search --onlyvisible --name . getwindowname %@ 2>/dev/null || echo "(none)"
           # No window manager here, so X focuses nothing until we ask it to.
