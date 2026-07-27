@@ -5,7 +5,7 @@ import { $ } from "bun";
 import { resolve } from "node:path";
 import { inflateSync } from "node:zlib";
 import { detectOS, chordToOS, type OS } from "./os.ts";
-import { captureCmd, typeCmd, launchCmd, comboKey } from "./commands.ts";
+import { captureCmd, typeCmd, launchCmd, focusCmd, comboKey } from "./commands.ts";
 import { movePlan, clickPlan, scrollPlan, type Plan } from "./plan.ts";
 import { preflight, frameWarning, INPUT_ACTIONS, type Probe } from "./preflight.ts";
 import { isSessionLocked, LOCK_QUERY, LOCKED_REASON } from "./session.ts";
@@ -123,6 +123,7 @@ async function act(action: string, args: string[], force = false): Promise<Resul
       }
 
       case "type": { await run(typeCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: "typed" }; }
+      case "focus": { await run(focusCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: `focused ${args[0]}` }; }
       case "launch": { await run(launchCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: `launched ${args[0]}` }; }
       case "key": { await run(chordToOS(os, args[0] ?? "").cmd); return { ok: true, ...base, detail: `sent ${args[0]}` }; }
 

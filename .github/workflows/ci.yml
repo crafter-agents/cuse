@@ -100,6 +100,8 @@ jobs:
           set -e
           xterm -geometry 100x30+0+0 &
           sleep 3
+          # No window manager here, so X focuses nothing until we ask it to.
+          ./cu focus xterm --json
           ./cu capture before.png --json
           ./cu type "cu input reached this window" --json
           sleep 1
@@ -126,6 +128,8 @@ jobs:
         run: |
           ./cu launch notepad --json
           sleep 5
+          # SendKeys posts to the active window; without this it posts to nothing.
+          ./cu focus Notepad --json
           ./cu capture before.png --json
           ./cu type "cu input reached this window" --json
           sleep 2

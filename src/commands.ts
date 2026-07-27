@@ -27,7 +27,10 @@ export function escapeSendKeys(s: string): string {
 export function captureCmd(os: OS, out: string): string[] {
   switch (os) {
     case "macos": return ["screencapture", "-x", out];
-    case "linux": return ["import", "-window", "root", out];
+    // Force 8-bit truecolour: on a low-colour display import would emit a
+    // 1-bit PNG, so captures would not be comparable across platforms.
+    case "linux": return ["import", "-window", "root", "-depth", "8",
+      "-define", "png:color-type=2", out];
     // Bitmap.Save resolves a relative path against the .NET working directory,
     // which is not PowerShell's location - so cu passes an absolute path here.
     case "windows": return ps(
@@ -57,6 +60,25 @@ export function launchCmd(os: OS, app: string): string[] {
     case "linux": return ["sh", "-c", `("${app}" >/dev/null 2>&1 &)`];
     case "windows": return ps(`Start-Process '${escapePowerShell(app)}'`);
     default: throw new Error(`launch unsupported on ${os}`);
+  }
+}
+
+/**
+ * Bring a window to the front so that input has somewhere to land.
+ *
+ * Without this, `type` is a silent no-op whenever nothing happens to be
+ * focused - SendKeys posts to the active window of the caller's input queue,
+ * and an X session with no window manager focuses nothing by default.
+ */
+export function focusCmd(os: OS, name: string): string[] {
+  switch (os) {
+    case "macos": return ["open", "-a", name];
+    case "linux": return ["xdotool", "search", "--sync", "--onlyvisible", "--name", name,
+      "windowactivate", "windowfocus", "--sync", "%1"];
+    case "windows": return ps(
+      `$s=New-Object -ComObject WScript.Shell;` +
+      `if(-not $s.AppActivate('${escapePowerShell(name)}')){throw "no window matching '${escapePowerShell(name)}'"}`);
+    default: throw new Error(`focus unsupported on ${os}`);
   }
 }
 

@@ -13,6 +13,9 @@ export type Probe = {
 
 export const INPUT_ACTIONS = ["type", "key", "move", "scroll", "click", "dblclick", "select-all", "copy", "paste"];
 
+/** Actions that drive a window but are not keystrokes, so no lock guard. */
+export const WINDOW_ACTIONS = ["launch", "focus"];
+
 /** Everything that draws or reads the screen needs the same thing on Linux. */
 export function displayPreflight(os: OS, probe: Probe): Preflight {
   if (os !== "linux") return { ok: true };
@@ -28,7 +31,7 @@ export function requiredTool(os: OS, action: string): { tool: string; install: s
   // screencapture and open all ship with the OS - so nothing to install.
   if (os !== "linux") return null;
   if (action === "capture") return { tool: "import", install: "apt-get install -y imagemagick" };
-  if (INPUT_ACTIONS.includes(action)) return { tool: "xdotool", install: "apt-get install -y xdotool" };
+  if ([...INPUT_ACTIONS, "focus"].includes(action)) return { tool: "xdotool", install: "apt-get install -y xdotool" };
   return null;
 }
 

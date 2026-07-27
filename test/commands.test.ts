@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { detectOS, chordToOS } from "../src/os.ts";
 import {
-  captureCmd, typeCmd, launchCmd, comboKey,
+  captureCmd, typeCmd, launchCmd, focusCmd, comboKey,
   escapeAppleScript, escapePowerShell, escapeSendKeys,
 } from "../src/commands.ts";
 import { movePlan, clickPlan, scrollPlan } from "../src/plan.ts";
@@ -24,7 +24,11 @@ describe("detectOS", () => {
 
 describe("capture", () => {
   test("macOS screencapture", () => expect(captureCmd("macos", "o.png")).toEqual(["screencapture", "-x", "o.png"]));
-  test("linux import", () => expect(captureCmd("linux", "o.png")).toEqual(["import", "-window", "root", "o.png"]));
+  test("linux import grabs the root window", () => {
+    const c = captureCmd("linux", "o.png");
+    expect(c.slice(0, 4)).toEqual(["import", "-window", "root", "-depth"]);
+    expect(c.at(-1)).toBe("o.png");
+  });
   test("windows GDI CopyFromScreen + path", () => {
     const c = captureCmd("windows", "C:\\tmp\\o.png").join(" ");
     expect(c).toContain("CopyFromScreen");
@@ -236,5 +240,30 @@ describe("locked session", () => {
   });
   test("the refusal tells the user how to override it", () => {
     expect(LOCKED_REASON).toContain("--force");
+  });
+});
+
+describe("focus", () => {
+  test("macOS reuses open -a, which both launches and fronts the app", () => {
+    expect(focusCmd("macos", "TextEdit")).toEqual(["open", "-a", "TextEdit"]);
+  });
+  test("linux activates and focuses the matching window, synchronously", () => {
+    const c = focusCmd("linux", "xterm");
+    expect(c.slice(0, 3)).toEqual(["xdotool", "search", "--sync"]);
+    expect(c).toContain("windowactivate");
+    expect(c).toContain("windowfocus");
+  });
+  test("windows raises a real error when no window matches, rather than typing into the void", () => {
+    const c = focusCmd("windows", "Notepad").join(" ");
+    expect(c).toContain("AppActivate");
+    expect(c).toContain("throw");
+  });
+  test("linux focus needs xdotool like the other input actions", () => {
+    expect(requiredTool("linux", "focus")).toMatchObject({ tool: "xdotool" });
+  });
+  test("linux capture asks for 8-bit truecolour so frames compare across platforms", () => {
+    const c = captureCmd("linux", "o.png");
+    expect(c).toContain("-depth");
+    expect(c).toContain("png:color-type=2");
   });
 });
