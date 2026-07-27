@@ -127,6 +127,14 @@ jobs:
           sleep 1
           ./cu capture after.png --json
           ./cu diff before.png after.png --same-under=0 --json | tee diff.json
+          # Ground truth: make the keystrokes do something the filesystem can
+          # confirm. Pixels can be faked by a cursor; a created file cannot.
+          rm -f /tmp/cu-input-ok
+          ./cu type "touch /tmp/cu-input-ok" --json
+          ./cu key Return --json
+          sleep 2
+          test -f /tmp/cu-input-ok || { echo "the shell never received the keystrokes"; exit 1; }
+          echo "shell executed the typed command"
           EOF
           chmod +x drive.sh
           timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" ./drive.sh
@@ -142,11 +150,19 @@ jobs:
           sleep 1
           ./cu capture control-b.png --json
           ./cu diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          # Front it again immediately before typing: keystrokes go to whatever
+          # is frontmost, and settling takes seconds.
+          ./cu focus TextEdit --json
           ./cu capture before.png --json
           ./cu type "cu input reached this window and this line is long on purpose" --json
           sleep 2
           ./cu capture after.png --json
           ./cu diff before.png after.png --same-under=0 --json | tee diff.json
+          # Ground truth, not pixels: ask the app what it received. A blinking
+          # caret can fake a pixel change; it cannot fake the document text.
+          osascript -e 'tell application "TextEdit" to get text of document 1' | tee typed.txt
+          grep -q "cu input reached this window" typed.txt || {
+            echo "TextEdit never received the keystrokes"; exit 1; }
 
       # Windows input cannot be proven on a hosted runner: processes the job
       # starts present no window on the captured desktop (Get-Process returns an
@@ -177,7 +193,10 @@ jobs:
           bun -e '
             const idle = (await Bun.file("control.json").json()).data.changed;
             const typed = (await Bun.file("diff.json").json()).data.changed;
-            const floor = Math.max(idle, 1) * 5;
+            // The floor also has an absolute term: a blinking caret is ~126px,
+            // and twice CI passed on caret noise alone while the keystroke was
+            // going nowhere. Beating idle noise is not enough on its own.
+            const floor = Math.max(idle * 5, 300);
             console.log(`idle ${idle}px, typed ${typed}px, need > ${floor}px`);
             if (typed <= floor) {
               throw new Error("typing did not move the screen beyond its own noise: " +
