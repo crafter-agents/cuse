@@ -4,14 +4,25 @@
 import { $ } from "bun";
 import { detectOS, chordToOS, type OS } from "./os.ts";
 import { captureCmd, typeCmd, launchCmd, moveCmd, scrollCmd, comboKey } from "./commands.ts";
+import { preflight, type Probe } from "./preflight.ts";
 
 export type Result = { ok: boolean; action: string; os: OS; detail?: string; error?: string };
 
 async function run(cmd: string[]): Promise<void> { await $`${cmd}`.quiet(); }
 
+const probe: Probe = { env: process.env, has: (tool) => Bun.which(tool) !== null };
+
 async function act(action: string, args: string[]): Promise<Result> {
   const os = detectOS();
   const base = { action, os };
+
+  // Fail before touching the machine, with the reason and the fix, not an opaque
+  // exit code from a missing binary or an absent display.
+  if (action !== "os") {
+    const pre = preflight(os, action, probe);
+    if (!pre.ok) return { ok: false, ...base, error: pre.reason };
+  }
+
   try {
     switch (action) {
       case "os": return { ok: true, ...base, detail: os };

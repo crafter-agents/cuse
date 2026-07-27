@@ -1,6 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { detectOS, chordToOS } from "../src/os.ts";
 import { captureCmd, typeCmd, launchCmd, moveCmd, scrollCmd, comboKey } from "../src/commands.ts";
+import { preflight } from "../src/preflight.ts";
 import type { OS } from "../src/os.ts";
 
 const OSES: OS[] = ["macos", "linux", "windows"];
@@ -63,5 +64,45 @@ describe("move / scroll / combos", () => {
     expect(comboKey("macos", "select-all")).toBe("cmd+a");
     expect(comboKey("windows", "select-all")).toBe("ctrl+a");
     expect(comboKey("linux", "copy")).toBe("ctrl+c");
+  });
+});
+
+describe("preflight", () => {
+  const withEnv = (env: Record<string, string | undefined>, present: string[] = []) => ({
+    env,
+    has: (t: string) => present.includes(t),
+  });
+  const ALL = ["import", "xdotool"];
+
+  test("linux capture without DISPLAY explains Xvfb", () => {
+    const r = preflight("linux", "capture", withEnv({}, ALL));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain("DISPLAY is unset");
+  });
+  test("linux capture with DISPLAY and imagemagick passes", () => {
+    expect(preflight("linux", "capture", withEnv({ DISPLAY: ":99" }, ALL)).ok).toBe(true);
+  });
+  test("linux capture names the missing tool and its install", () => {
+    const r = preflight("linux", "capture", withEnv({ DISPLAY: ":99" }, ["xdotool"]));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain("imagemagick");
+  });
+  test("linux input actions need xdotool", () => {
+    const r = preflight("linux", "type", withEnv({ DISPLAY: ":99" }, ["import"]));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain("xdotool");
+  });
+  test("macOS and Windows need no display bootstrap", () => {
+    for (const os of ["macos", "windows"] as OS[]) {
+      expect(preflight(os, "capture", withEnv({})).ok).toBe(true);
+      expect(preflight(os, "type", withEnv({})).ok).toBe(true);
+    }
+  });
+  test("unknown platform is refused, not attempted", () => {
+    expect(preflight("unknown", "capture", withEnv({}, ALL)).ok).toBe(false);
+  });
+  test("DISPLAY alone is not enough on linux — tools are checked first", () => {
+    const r = preflight("linux", "capture", withEnv({ DISPLAY: ":99" }, []));
+    expect(r.ok).toBe(false);
   });
 });

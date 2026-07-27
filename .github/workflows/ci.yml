@@ -15,8 +15,58 @@ jobs:
         run: bun test
       - name: build standalone binary
         run: bun build --compile src/cli.ts --outfile cu-${{ matrix.os }}
-      - name: smoke — os + capture work on this platform
+      - name: os detection
+        run: ./cu-${{ matrix.os }} os --json
+
+  # capture is the action that actually depends on the machine having a screen.
+  # Hard gate on all three platforms: no `|| true`, and the PNG is decoded to
+  # prove it is a real frame rather than a 0-byte file.
+  capture:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - name: build
+        run: bun build --compile src/cli.ts --outfile cu
+
+      # Linux runners are headless: no display, no imagemagick. cu reports both
+      # as structured errors instead of failing opaquely - assert that it does.
+      - name: linux - preflight refuses headless, with a reason
+        if: runner.os == 'Linux'
+        run: |
+          out=$(./cu capture out.png --json || true)
+          echo "$out"
+          echo "$out" | grep -q '"ok":false' || { echo "expected a refusal on a headless runner"; exit 1; }
+      - name: linux - provide the display cu asks for, then capture for real
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb imagemagick x11-utils
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" ./cu capture out.png --json
+
+      - name: macos/windows - capture on the runner's own session
+        if: runner.os != 'Linux'
+        run: ./cu capture out.png --json
+
+      # A PNG magic number is not proof of a frame; read the IHDR dimensions.
+      - name: assert the capture is a real frame
         shell: bash
         run: |
-          ./cu-${{ matrix.os }} os --json
-          ./cu-${{ matrix.os }} capture smoke.png --json || echo "capture needs a display on this runner"
+          bun -e '
+            const b = new Uint8Array(await Bun.file("out.png").arrayBuffer());
+            if (![0x89, 0x50, 0x4e, 0x47].every((v, i) => b[i] === v))
+              throw new Error("not a PNG: " + b.length + " bytes");
+            const dv = new DataView(b.buffer);
+            const [w, h] = [dv.getUint32(16), dv.getUint32(20)];
+            if (w < 100 || h < 100) throw new Error(`implausible frame ${w}x${h}`);
+            console.log(`ok: ${w}x${h}, ${b.length} bytes`);
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capture-${{ matrix.os }}
+          path: out.png
