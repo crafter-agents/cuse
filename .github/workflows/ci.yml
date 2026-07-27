@@ -109,6 +109,9 @@ jobs:
           xdotool search --onlyvisible --name . getwindowname %@ 2>/dev/null || echo "(none)"
           # No window manager here, so X focuses nothing until we ask it to.
           ./cu focus CU_TARGET --json
+          # Let the window finish drawing; otherwise the control below measures
+          # the animation rather than the absence of input.
+          ./cu settle --json
           # Control: two frames with nothing typed between them must be SAME.
           # Without it, a blinking cursor would look exactly like a keystroke.
           ./cu capture control-a.png --json
@@ -129,6 +132,7 @@ jobs:
         run: |
           ./cu launch TextEdit --json
           sleep 5
+          ./cu settle --json
           ./cu capture control-a.png --json
           sleep 1
           ./cu capture control-b.png --json

@@ -128,6 +128,26 @@ async function act(action: string, args: string[], force = false, sameUnder = 1)
         return { ok: true, ...base, detail: `${files.length} frames every ${gapMs}ms`, data: files };
       }
 
+      // Wait until the screen stops moving. An agent that acts while a window is
+      // still drawing cannot tell its own effect from the animation - which is
+      // exactly what broke the input check in CI.
+      case "settle": {
+        const tries = Number(args[0] ?? 20);
+        const gapMs = Number(args[1] ?? 500);
+        const [a, b] = [resolve("settle-a.png"), resolve("settle-b.png")];
+        for (let i = 1; i <= tries; i++) {
+          await run(captureCmd(os, a));
+          await Bun.sleep(gapMs);
+          await run(captureCmd(os, b));
+          const d = diffImages(await loadImage(a), await loadImage(b), 30, 0);
+          if (d.verdict === "SAME") {
+            return { ok: true, ...base, detail: `settled after ${i} check${i > 1 ? "s" : ""}`, data: d };
+          }
+        }
+        return { ok: false, ...base,
+          error: `the screen never went quiet: still changing after ${tries} checks` };
+      }
+
       case "diff": {
         const [a, b] = [args[0], args[1]];
         if (!a || !b) return { ok: false, ...base, error: "diff needs two PNG paths" };
