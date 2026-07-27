@@ -95,7 +95,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb imagemagick xdotool xterm
+          sudo apt-get install -y -qq xvfb imagemagick xdotool xterm xfonts-base
           cat > drive.sh <<'EOF'
           set -e
           xterm -geometry 100x30+0+0 -e "sleep 300" &
