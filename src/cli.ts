@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // cu - cross-platform computer-use CLI. One verb, the right OS primitive.
 // Structured Result + --json. Actions delegate to pure builders (tested).
-import { $ } from "bun";
+
 import { resolve } from "node:path";
 import { inflateSync } from "node:zlib";
 import { detectOS, chordToOS, type OS } from "./os.ts";
@@ -10,6 +10,9 @@ import { movePlan, clickPlan, scrollPlan, type Plan } from "./plan.ts";
 import { preflight, frameWarning, INPUT_ACTIONS, type Probe } from "./preflight.ts";
 import { isSessionLocked, LOCK_QUERY, LOCKED_REASON } from "./session.ts";
 import { decodePNG, diffImages, isUniform, readHeader, type Image } from "./png.ts";
+import { runWithTimeout, explainFailure, timeoutFor } from "./exec.ts";
+
+export type Options = { force?: boolean; sameUnder?: number; timeoutMs?: number };
 
 export type Result = {
   ok: boolean; action: string; os: OS;
@@ -17,23 +20,24 @@ export type Result = {
 };
 
 /**
- * Run a command, and on failure report what the OS actually said.
+ * Run a command under a deadline, and on failure report what the OS said.
  *
- * Bun's default throw carries only the exit code, which turns a precise message
- * ("no window matching 'Notepad'") into "Failed with exit code 1" - useless to
- * the agent that has to decide what to do next.
+ * Both halves matter. Bun's default throw carries only an exit code, which
+ * turns "no window matching 'Notepad'" into "Failed with exit code 1"; and
+ * without a timeout a wedged backend hangs the agent driving cu, which has no
+ * deadline of its own.
  */
-async function run(argv: string[]): Promise<void> {
-  const r = await $`${argv}`.quiet().nothrow();
-  if (r.exitCode === 0) return;
-  // The first line is the message; what follows is the interpreter's own trace.
-  const said = (r.stderr.toString() || r.stdout.toString()).trim().split("\n").map((l) => l.trim()).filter(Boolean)[0];
-  throw new Error(said ? `${argv[0]}: ${said}` : `${argv[0]} exited ${r.exitCode}`);
+function runner(action: string, timeoutMs: number) {
+  return async function run(argv: string[]): Promise<void> {
+    const r = await runWithTimeout(argv, timeoutMs);
+    const problem = explainFailure(argv, r, timeoutMs);
+    if (problem) throw new Error(problem);
+  };
 }
 
 /** Execute a plan. The macOS branch is loaded lazily so that importing the CLI
  *  on Linux or Windows never touches bun:ffi or a framework that is not there. */
-async function execute(plan: Plan): Promise<void> {
+async function execute(plan: Plan, run: (argv: string[]) => Promise<void>): Promise<void> {
   switch (plan.kind) {
     case "exec": return run(plan.argv);
     case "exec-many": { for (const a of plan.argvs) await run(a); return; }
@@ -71,19 +75,21 @@ const probe: Probe = { env: process.env, has: (tool) => Bun.which(tool) !== null
 async function readLockState(os: OS): Promise<string | null> {
   const query = LOCK_QUERY[os];
   if (!query) return null;
-  try {
-    return await $`${query}`.quiet().text();
-  } catch {
-    return null;
-  }
+  // Short deadline of its own: an unanswerable lock query must not delay the
+  // action it guards. Unreadable means unknown, and unknown never blocks.
+  const r = await runWithTimeout(query, 5000);
+  return r.code === 0 && !r.timedOut ? r.stdout : null;
 }
 
 const xy = (a?: string, b?: string) =>
   a === undefined ? {} : { x: Number(a), y: Number(b) };
 
-async function act(action: string, args: string[], force = false, sameUnder = 1): Promise<Result> {
+async function act(action: string, args: string[], opts: Options = {}): Promise<Result> {
   const os = detectOS();
   const base = { action, os };
+  const { force = false, sameUnder = 1 } = opts;
+  const timeoutMs = timeoutFor(action, opts.timeoutMs);
+  const run = runner(action, timeoutMs);
 
   // Fail before touching the machine, with the reason and the fix, not an opaque
   // exit code from a missing binary or an absent display.
@@ -137,6 +143,9 @@ async function act(action: string, args: string[], force = false, sameUnder = 1)
       // window's arrival as if it were your own doing. So require several quiet
       // intervals in a row.
       case "settle": {
+        // Bounded twice: by the number of checks and by wall-clock, so a
+        // display that captures slower than expected still returns.
+        const deadline = Date.now() + (opts.timeoutMs ?? 120_000);
         const tries = Number(args[0] ?? 30);
         const gapMs = Number(args[1] ?? 500);
         const needed = Number(args[2] ?? 3);
@@ -144,6 +153,9 @@ async function act(action: string, args: string[], force = false, sameUnder = 1)
         let cur = 0, streak = 0, last;
         await run(captureCmd(os, frames[cur]!));
         for (let i = 1; i <= tries; i++) {
+          if (Date.now() > deadline) {
+            return { ok: false, ...base, error: `settle ran out of time after ${i - 1} checks` };
+          }
           await Bun.sleep(gapMs);
           const next = 1 - cur;
           await run(captureCmd(os, frames[next]!));
@@ -174,19 +186,19 @@ async function act(action: string, args: string[], force = false, sameUnder = 1)
       case "key": { await run(chordToOS(os, args[0] ?? "").cmd); return { ok: true, ...base, detail: `sent ${args[0]}` }; }
 
       case "move": {
-        await execute(movePlan(os, Number(args[0]), Number(args[1])));
+        await execute(movePlan(os, Number(args[0]), Number(args[1])), run);
         return { ok: true, ...base, detail: `moved ${args[0]},${args[1]}` };
       }
       case "click": case "dblclick": {
         const count = action === "dblclick" ? 2 : 1;
         const at = xy(args[0], args[1]);
-        await execute(clickPlan(os, count, at.x, at.y));
+        await execute(clickPlan(os, count, at.x, at.y), run);
         return { ok: true, ...base, detail: at.x === undefined ? action : `${action} at ${at.x},${at.y}` };
       }
       case "scroll": {
         const dir = (args[0] as "up" | "down") ?? "down";
         const amount = Number(args[1] ?? 3);
-        await execute(scrollPlan(os, dir, amount));
+        await execute(scrollPlan(os, dir, amount), run);
         return { ok: true, ...base, detail: `scrolled ${dir} ${amount}` };
       }
 
@@ -206,10 +218,11 @@ if (import.meta.main) {
   const argv = process.argv.slice(2);
   const json = argv.includes("--json");
   const force = argv.includes("--force");
-  const su = argv.find((a) => a.startsWith("--same-under="));
-  const sameUnder = su ? Number(su.split("=")[1]) : 1;
+  const flag = (name: string) => argv.find((a) => a.startsWith(`--${name}=`))?.split("=")[1];
+  const sameUnder = flag("same-under") !== undefined ? Number(flag("same-under")) : 1;
+  const timeoutMs = flag("timeout") !== undefined ? Number(flag("timeout")) : undefined;
   const [action, ...args] = argv.filter((a) => !a.startsWith("--"));
-  const r = await act(action ?? "", args, force, sameUnder);
+  const r = await act(action ?? "", args, { force, sameUnder, timeoutMs });
   console.log(json ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cu: ${r.error}`);
   if (!json && r.warn) console.warn(`cu: warning: ${r.warn}`);
   process.exit(r.ok ? 0 : 1);
