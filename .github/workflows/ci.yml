@@ -130,6 +130,10 @@ jobs:
           # Ground truth: make the keystrokes do something the filesystem can
           # confirm. Pixels can be faked by a cursor; a created file cannot.
           rm -f /tmp/cu-input-ok
+          # The line typed above is still sitting at the prompt unsubmitted, so
+          # send it first - otherwise the next command concatenates onto it.
+          ./cu key Return --json
+          sleep 1
           ./cu type "touch /tmp/cu-input-ok" --json
           ./cu key Return --json
           sleep 2
@@ -142,7 +146,11 @@ jobs:
       - name: macos - type into TextEdit
         if: runner.os == 'macOS'
         run: |
-          ./cu launch TextEdit --json
+          # Open a real file rather than bare TextEdit: on a fresh runner the
+          # app can come up showing the document picker, and typing into that
+          # changes plenty of pixels while reaching no document at all.
+          echo "initial line" > target.txt
+          open -a TextEdit "$PWD/target.txt"
           sleep 5
           ./cu focus TextEdit --json
           ./cu settle --json
@@ -158,11 +166,14 @@ jobs:
           sleep 2
           ./cu capture after.png --json
           ./cu diff before.png after.png --same-under=0 --json | tee diff.json
-          # Ground truth, not pixels: ask the app what it received. A blinking
-          # caret can fake a pixel change; it cannot fake the document text.
-          osascript -e 'tell application "TextEdit" to get text of document 1' | tee typed.txt
-          grep -q "cu input reached this window" typed.txt || {
-            echo "TextEdit never received the keystrokes"; exit 1; }
+          # Ground truth, not pixels: save with cmd+s and read the file back off
+          # disk. A blinking caret can fake a pixel change; it cannot write text
+          # into a file. This exercises capture, focus, type and key at once.
+          ./cu key cmd+s --json
+          sleep 3
+          cat target.txt
+          grep -q "cu input reached this window" target.txt || {
+            echo "the keystrokes never reached the document"; exit 1; }
 
       # Windows input cannot be proven on a hosted runner: processes the job
       # starts present no window on the captured desktop (Get-Process returns an
