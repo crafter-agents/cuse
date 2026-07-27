@@ -41,9 +41,12 @@ if (win.width < 50 || win.height < 50) die(`implausible rectangle for ${win.titl
 const frame = "aim-frame.png";
 if (!(await cuse("capture", frame)).ok) die("capture failed");
 
-const patch = { w: Math.min(120, Math.floor(win.width / 3)), h: Math.min(60, Math.floor(win.height / 3)) };
-const px = Math.max(0, Math.round(win.x + win.width / 2 - patch.w / 2));
-const py = Math.max(0, Math.round(win.y + win.height / 2 - patch.h / 2));
+// Cut from the top-left, where these windows keep their text. The centre of a
+// text window is blank, and a blank patch matches a hundred equally blank
+// places - which is how a match 166px away once passed for a hit.
+const patch = { w: Math.min(220, Math.max(40, win.width - 20)), h: Math.min(70, Math.max(20, win.height - 20)) };
+const px = Math.max(0, Math.round(win.x + 6));
+const py = Math.max(0, Math.round(win.y + 6));
 
 console.log(`cropping ${patch.w}x${patch.h} at ${px},${py} (click space)`);
 const cropped = await cuse("crop", frame, String(px), String(py), String(patch.w), String(patch.h), "aim-needle.png");
