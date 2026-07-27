@@ -4,11 +4,19 @@
 import { $ } from "bun";
 import { detectOS, chordToOS, type OS } from "./os.ts";
 import { captureCmd, typeCmd, launchCmd, moveCmd, scrollCmd, comboKey } from "./commands.ts";
-import { preflight, type Probe } from "./preflight.ts";
+import { preflight, blankFrameWarning, type Probe } from "./preflight.ts";
 
-export type Result = { ok: boolean; action: string; os: OS; detail?: string; error?: string };
+export type Result = { ok: boolean; action: string; os: OS; detail?: string; error?: string; warn?: string };
 
 async function run(cmd: string[]): Promise<void> { await $`${cmd}`.quiet(); }
+
+/** width/height straight out of the IHDR, so no image library is needed. */
+async function pngDimensions(path: string): Promise<{ width: number; height: number } | null> {
+  const b = new Uint8Array(await Bun.file(path).arrayBuffer());
+  if (b.length < 24 || ![0x89, 0x50, 0x4e, 0x47].every((v, i) => b[i] === v)) return null;
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  return { width: dv.getUint32(16), height: dv.getUint32(20) };
+}
 
 const probe: Probe = { env: process.env, has: (tool) => Bun.which(tool) !== null };
 
@@ -30,7 +38,10 @@ async function act(action: string, args: string[]): Promise<Result> {
         const out = args[0] ?? "out.png";
         await run(captureCmd(os, out));
         const size = (await Bun.file(out).exists()) ? Bun.file(out).size : 0;
-        return size > 0 ? { ok: true, ...base, detail: `${size}B -> ${out}` } : { ok: false, ...base, error: "no file produced" };
+        if (size === 0) return { ok: false, ...base, error: "no file produced" };
+        const dim = await pngDimensions(out);
+        const warn = dim ? blankFrameWarning(size, dim.width, dim.height) : undefined;
+        return { ok: true, ...base, detail: `${size}B -> ${out}`, ...(warn ? { warn } : {}) };
       }
       case "type": { await run(typeCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: "typed" }; }
       case "launch": { await run(launchCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: `launched ${args[0]}` }; }
@@ -51,6 +62,7 @@ if (import.meta.main) {
   const [action, ...args] = argv.filter((a) => a !== "--json");
   const r = await act(action ?? "", args);
   console.log(json ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cu: ${r.error}`);
+  if (!json && r.warn) console.warn(`cu: warning: ${r.warn}`);
   process.exit(r.ok ? 0 : 1);
 }
 

@@ -30,6 +30,26 @@ export function requiredTool(os: OS, action: string): { tool: string; install: s
   return null;
 }
 
+/**
+ * The quiet failure of computer-use: capture succeeds, the frame is blank. A
+ * display with nothing drawn on it still yields a correctly sized PNG, and an
+ * agent reading only `ok: true` will keep acting against an empty screen.
+ *
+ * A uniform image compresses to almost nothing, so bytes-per-pixel separates
+ * the two cases by orders of magnitude. Observed in CI: a blank Xvfb frame is
+ * 0.0002 B/px, real macOS and Windows sessions are 0.10 and 0.34. This is a
+ * heuristic, so it warns - it never turns a successful capture into a failure.
+ */
+export function blankFrameWarning(bytes: number, width: number, height: number): string | undefined {
+  const pixels = width * height;
+  if (pixels <= 0) return undefined;
+  const bpp = bytes / pixels;
+  if (bpp < 0.005) {
+    return `frame looks blank (${bytes}B for ${width}x${height}): the display is on but nothing is drawn on it`;
+  }
+  return undefined;
+}
+
 export function preflight(os: OS, action: string, probe: Probe): Preflight {
   if (os === "unknown") return { ok: false, reason: `unsupported platform` };
   const needed = requiredTool(os, action);

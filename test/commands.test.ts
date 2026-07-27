@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { detectOS, chordToOS } from "../src/os.ts";
 import { captureCmd, typeCmd, launchCmd, moveCmd, scrollCmd, comboKey } from "../src/commands.ts";
-import { preflight } from "../src/preflight.ts";
+import { preflight, blankFrameWarning } from "../src/preflight.ts";
 import type { OS } from "../src/os.ts";
 
 const OSES: OS[] = ["macos", "linux", "windows"];
@@ -104,5 +104,19 @@ describe("preflight", () => {
   test("DISPLAY alone is not enough on linux — tools are checked first", () => {
     const r = preflight("linux", "capture", withEnv({ DISPLAY: ":99" }, []));
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("blankFrameWarning", () => {
+  test("flags a blank Xvfb frame (observed in CI: 295B at 1280x1024)", () => {
+    expect(blankFrameWarning(295, 1280, 1024)).toContain("looks blank");
+  });
+  test("stays quiet on real sessions observed in CI", () => {
+    expect(blankFrameWarning(80431, 1024, 768)).toBeUndefined();   // macos runner
+    expect(blankFrameWarning(267703, 1024, 768)).toBeUndefined();  // windows runner
+    expect(blankFrameWarning(1238767, 3024, 1964)).toBeUndefined(); // retina desktop
+  });
+  test("no dimensions -> no claim", () => {
+    expect(blankFrameWarning(295, 0, 0)).toBeUndefined();
   });
 });

@@ -47,7 +47,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb imagemagick x11-utils
-          xvfb-run -a --server-args="-screen 0 1280x1024x24" ./cu capture out.png --json
+          out=$(xvfb-run -a --server-args="-screen 0 1280x1024x24" ./cu capture out.png --json)
+          echo "$out"
+          # A bare Xvfb has nothing drawn on it, so the frame is blank. cu must
+          # say so rather than hand an agent an empty screen as a success.
+          echo "$out" | grep -q '"warn"' || { echo "expected a blank-frame warning on a bare Xvfb"; exit 1; }
 
       - name: macos/windows - capture on the runner's own session
         if: runner.os != 'Linux'
