@@ -117,3 +117,27 @@ describe("diff threshold", () => {
     expect(diffImages(dec(BLACK), dec(ONE_PIXEL), 30, 1).verdict).toBe("CHANGED");
   });
 });
+
+describe("what counts as a still screen", () => {
+  const dec = (p: Uint8Array) => decodePNG(p, inflate);
+  const W = 400, H = 300, TOTAL = W * H;
+  const blank = makePNG(W, H, () => [255, 255, 255]);
+  // A blinking caret: a handful of pixels, forever.
+  const caret = makePNG(W, H, (x, y) => (x > 8 && x < 11 && y > 20 && y < 36 ? [0, 0, 0] : [255, 255, 255]));
+  // A window still drawing: a large region changes.
+  const drawing = makePNG(W, H, (x, y) => (x < 200 && y < 150 ? [30, 30, 30] : [255, 255, 255]));
+
+  test("a caret is noise, not motion", () => {
+    const d = diffImages(dec(blank), dec(caret), 30, 0.1);
+    expect(d.changed).toBeLessThan(TOTAL * 0.001);
+    expect(d.verdict).toBe("SAME");
+  });
+  test("a window still drawing is motion", () => {
+    expect(diffImages(dec(blank), dec(drawing), 30, 0.1).verdict).toBe("CHANGED");
+  });
+  test("demanding pixel-perfection would wait forever on the caret", () => {
+    // This is why settle never returned on macOS: with a zero budget the caret
+    // alone keeps the screen 'changing' for as long as the window is open.
+    expect(diffImages(dec(blank), dec(caret), 30, 0).verdict).toBe("CHANGED");
+  });
+});

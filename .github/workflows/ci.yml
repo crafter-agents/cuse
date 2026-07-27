@@ -115,7 +115,7 @@ jobs:
           ./cuse focus CU_TARGET --json
           # Let the window finish drawing; otherwise the control below measures
           # the animation rather than the absence of input.
-          ./cuse settle --json
+          ./cuse settle --json   # a caret is not motion; see --same-under
           # Control: two frames with nothing typed between them must be SAME.
           # Without it, a blinking cursor would look exactly like a keystroke.
           ./cuse capture control-a.png --json
@@ -159,7 +159,7 @@ jobs:
           open -a TextEdit "$PWD/target.txt"
           sleep 5
           ./cuse focus TextEdit --json
-          ./cuse settle --json
+          ./cuse settle --json   # a caret is not motion; see --same-under
           ./cuse capture control-a.png --json
           sleep 1
           ./cuse capture control-b.png --json
@@ -212,7 +212,7 @@ jobs:
             exit 1
           fi
           ./cuse focus CU_TARGET --json
-          ./cuse settle --json
+          ./cuse settle --json   # a caret is not motion; see --same-under
           ./cuse capture control-a.png --json
           sleep 1
           ./cuse capture control-b.png --json

@@ -271,6 +271,11 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         const tries = Number(args[0] ?? 30);
         const gapMs = Number(args[1] ?? 500);
         const needed = Number(args[2] ?? 3);
+        // "Still" cannot mean pixel-identical: a blinking text caret keeps ~39
+        // pixels moving forever, and demanding perfection meant settle never
+        // returned on a window with a cursor in it. A window still drawing
+        // moves thousands, so the two are nowhere near each other.
+        const quietUnder = opts.sameUnder ?? 0.1;
         const frames = [resolve("settle-a.png"), resolve("settle-b.png")];
         let cur = 0, streak = 0, last;
         await captureTo(os, frames[cur]!, timeoutMs, run);
@@ -281,7 +286,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           await Bun.sleep(gapMs);
           const next = 1 - cur;
           await captureTo(os, frames[next]!, timeoutMs, run);
-          last = diffImages(await loadImage(frames[cur]!), await loadImage(frames[next]!), 30, 0);
+          last = diffImages(await loadImage(frames[cur]!), await loadImage(frames[next]!), 30, quietUnder);
           streak = last.verdict === "SAME" ? streak + 1 : 0;
           cur = next;
           if (streak >= needed) {
@@ -420,6 +425,7 @@ Screen
   capture [out.png]            screenshot; warns when the frame is blank
   record [n] [gapMs]           n captures in a row
   settle [tries] [gapMs] [n]   wait until the screen stops changing
+                               (--same-under sets how much noise counts as still)
   diff <a.png> <b.png>         how much changed: SAME or CHANGED
 
 Windows and apps
