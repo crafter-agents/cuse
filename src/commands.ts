@@ -27,25 +27,36 @@ export function escapeSendKeys(s: string): string {
   return escapePowerShell(s.replace(/[+^%~(){}\[\]]/g, (c) => `{${c}}`));
 }
 
-export function captureCmd(os: OS, out: string): string[] {
+/**
+ * How a screenshot is taken, and crucially where the bytes end up.
+ *
+ * macOS and Windows write the file themselves; xwd streams a dump to stdout for
+ * cu to convert. That difference is in the type rather than in a comment, so a
+ * caller cannot forget it - forgetting it once left `settle` running xwd and
+ * then looking for a file nobody had written.
+ */
+export type CapturePlan =
+  | { argv: string[]; output: "file" }
+  | { argv: string[]; output: "stdout" };
+
+export function captureCmd(os: OS, out: string): CapturePlan {
   switch (os) {
-    case "macos": return ["screencapture", "-x", out];
+    case "macos": return { argv: ["screencapture", "-x", out], output: "file" };
     // xwd, not import: the runners ship neither, and x11-apps (which carries
-    // xwd) is a fraction of imagemagick's size. cu converts the dump to PNG
-    // itself, which also fixes what import did on a low-colour display - emit a
-    // 1-bit PNG that could not be compared against the other platforms'.
-    // The dump goes to stdout; the caller writes the PNG.
-    case "linux": return ["xwd", "-root", "-silent"];
+    // xwd) is a fraction of imagemagick's size. cu converts the dump itself,
+    // which also fixes what import did on a low-colour display - emit a 1-bit
+    // PNG that could not be compared against the other platforms'.
+    case "linux": return { argv: ["xwd", "-root", "-silent"], output: "stdout" };
     // Bitmap.Save resolves a relative path against the .NET working directory,
     // which is not PowerShell's location - so cu passes an absolute path here.
-    case "windows": return ps(
+    case "windows": return { argv: ps(
       `Add-Type -AssemblyName System.Windows.Forms,System.Drawing;` +
       `$v=[System.Windows.Forms.SystemInformation]::VirtualScreen;` +
       `$b=New-Object System.Drawing.Bitmap($v.Width,$v.Height);` +
       `$g=[System.Drawing.Graphics]::FromImage($b);` +
       `$g.CopyFromScreen($v.Left,$v.Top,0,0,$b.Size);` +
       `$b.Save('${escapePowerShell(out)}',[System.Drawing.Imaging.ImageFormat]::Png);` +
-      `$g.Dispose();$b.Dispose()`);
+      `$g.Dispose();$b.Dispose()`), output: "file" };
     default: throw new Error(`capture unsupported on ${os}`);
   }
 }

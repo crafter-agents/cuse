@@ -63,12 +63,12 @@ const deflate = (d: Uint8Array) => new Uint8Array(deflateSync(d));
  */
 async function captureTo(os: OS, out: string, timeoutMs: number,
                          run: (argv: string[]) => Promise<void>): Promise<void> {
-  const argv = captureCmd(os, out);
-  if (os !== "linux") return run(argv);
-  const r = await runBytes(argv, timeoutMs);
-  const problem = explainFailure(argv, r, timeoutMs);
+  const plan = captureCmd(os, out);
+  if (plan.output === "file") return run(plan.argv);
+  const r = await runBytes(plan.argv, timeoutMs);
+  const problem = explainFailure(plan.argv, r, timeoutMs);
   if (problem) throw new Error(problem);
-  if (r.stdout.length === 0) throw new Error("xwd produced no dump (is DISPLAY reachable?)");
+  if (r.stdout.length === 0) throw new Error(`${plan.argv[0]} produced no dump (is DISPLAY reachable?)`);
   await Bun.write(out, encodePNG(decodeXWD(r.stdout), deflate));
 }
 
@@ -171,7 +171,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         const needed = Number(args[2] ?? 3);
         const frames = [resolve("settle-a.png"), resolve("settle-b.png")];
         let cur = 0, streak = 0, last;
-        await run(captureCmd(os, frames[cur]!));
+        await captureTo(os, frames[cur]!, timeoutMs, run);
         for (let i = 1; i <= tries; i++) {
           if (Date.now() > deadline) {
             return { ok: false, ...base, error: `settle ran out of time after ${i - 1} checks` };

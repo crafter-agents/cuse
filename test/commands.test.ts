@@ -23,26 +23,34 @@ describe("detectOS", () => {
 });
 
 describe("capture", () => {
-  test("macOS screencapture", () => expect(captureCmd("macos", "o.png")).toEqual(["screencapture", "-x", "o.png"]));
-  test("linux dumps the root window with xwd, and cu converts it", () => {
-    // No imagemagick: the dump comes back on stdout and cu encodes the PNG.
-    expect(captureCmd("linux", "o.png")).toEqual(["xwd", "-root", "-silent"]);
+  test("macOS screencapture writes the file itself", () => {
+    expect(captureCmd("macos", "o.png")).toEqual({ argv: ["screencapture", "-x", "o.png"], output: "file" });
+  });
+  test("linux dumps the root window to stdout, and cu encodes the PNG", () => {
+    // No imagemagick. The output kind is in the type so a caller cannot treat
+    // the dump as if xwd had written a file - which is a bug that happened.
+    expect(captureCmd("linux", "o.png")).toEqual({ argv: ["xwd", "-root", "-silent"], output: "stdout" });
+  });
+  test("only the stdout backend needs converting, and it is marked as such", () => {
+    expect(captureCmd("macos", "o.png").output).toBe("file");
+    expect(captureCmd("windows", "o.png").output).toBe("file");
+    expect(captureCmd("linux", "o.png").output).toBe("stdout");
   });
   test("windows GDI CopyFromScreen + path", () => {
-    const c = captureCmd("windows", "C:\\tmp\\o.png").join(" ");
+    const c = captureCmd("windows", "C:\\tmp\\o.png").argv.join(" ");
     expect(c).toContain("CopyFromScreen");
     expect(c).toContain("C:\\tmp\\o.png");
   });
   test("windows names the PNG encoder rather than guessing from the extension", () => {
-    expect(captureCmd("windows", "o.png").join(" ")).toContain("ImageFormat]::Png");
+    expect(captureCmd("windows", "o.png").argv.join(" ")).toContain("ImageFormat]::Png");
   });
   test("windows releases the GDI objects", () => {
-    const c = captureCmd("windows", "o.png").join(" ");
+    const c = captureCmd("windows", "o.png").argv.join(" ");
     expect(c).toContain("$g.Dispose()");
     expect(c).toContain("$b.Dispose()");
   });
   test("every supported OS builds a command", () => {
-    for (const os of OSES) expect(captureCmd(os, "o.png").length).toBeGreaterThan(0);
+    for (const os of OSES) expect(captureCmd(os, "o.png").argv.length).toBeGreaterThan(0);
   });
 });
 
