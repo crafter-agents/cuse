@@ -101,12 +101,20 @@ jobs:
           # -T names the window: without it xterm titles itself after the
           # command it runs, so the window was called "sleep" and focus could
           # not find it. Same trick as the Windows target.
-          xterm -T CU_TARGET -geometry 100x30+0+0 -e sleep 300 2>xterm.log &
+          # A shell, not `-e sleep`: the shell echoes what is typed, so the
+          # pixels that change are the keystroke itself and nothing else.
+          xterm -T CU_TARGET -geometry 100x30+0+0 2>xterm.log &
           sleep 4
           echo "--- windows on :99 ---"
           xdotool search --onlyvisible --name . getwindowname %@ 2>/dev/null || echo "(none)"
           # No window manager here, so X focuses nothing until we ask it to.
           ./cu focus CU_TARGET --json
+          # Control: two frames with nothing typed between them must be SAME.
+          # Without it, a blinking cursor would look exactly like a keystroke.
+          ./cu capture control-a.png --json
+          sleep 1
+          ./cu capture control-b.png --json
+          ./cu diff control-a.png control-b.png --same-under=0 --json | tee control.json
           ./cu capture before.png --json
           ./cu type "cu input reached this window" --json
           sleep 1
@@ -121,6 +129,10 @@ jobs:
         run: |
           ./cu launch TextEdit --json
           sleep 5
+          ./cu capture control-a.png --json
+          sleep 1
+          ./cu capture control-b.png --json
+          ./cu diff control-a.png control-b.png --same-under=0 --json | tee control.json
           ./cu capture before.png --json
           ./cu type "cu input reached this window" --json
           sleep 2
@@ -144,6 +156,17 @@ jobs:
 
       # The screen must differ between the two frames. If the keystroke went
       # nowhere, the verdict is SAME and this fails - which is the point.
+      # An idle screen must be SAME and a typed-on screen must be CHANGED. The
+      # control is what makes the second assertion mean something: without it, a
+      # blinking cursor would pass as proof that input landed.
+      - name: assert an idle screen does not change on its own
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cat control.json
+          grep -q '"verdict":"SAME"' control.json || {
+            echo "the screen changes without input, so the input check proves nothing"; exit 1; }
+
       - name: assert the screen changed because of the keystroke
         if: runner.os != 'Windows'
         shell: bash
@@ -160,3 +183,4 @@ jobs:
             before.png
             after.png
             diff.json
+            control.json
