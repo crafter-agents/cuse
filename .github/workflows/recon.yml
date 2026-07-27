@@ -2,7 +2,12 @@ name: recon
 # What do these machines actually give us? Every capability cu depends on is
 # probed here and printed, so decisions about defaults and dependencies are
 # made against the runners rather than against folklore.
-on: [workflow_dispatch]
+# Runs on demand, and whenever this file itself changes - so the probe can be
+# re-asked without touching the rest of CI.
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/recon.yml']
 
 jobs:
   recon:
