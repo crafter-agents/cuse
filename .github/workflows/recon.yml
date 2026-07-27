@@ -1,0 +1,117 @@
+name: recon
+# What do these machines actually give us? Every capability cu depends on is
+# probed here and printed, so decisions about defaults and dependencies are
+# made against the runners rather than against folklore.
+on: [workflow_dispatch]
+
+jobs:
+  recon:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+
+      - name: machine
+        shell: bash
+        run: |
+          echo "runner.os=${{ runner.os }} arch=$(uname -m 2>/dev/null || echo ?)"
+          echo "cpus=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo ?)"
+          uname -a 2>/dev/null || true
+
+      - name: which tools are already here
+        shell: bash
+        run: |
+          for t in xdotool import convert xwd scrot ffmpeg python3 xvfb-run Xvfb \
+                   xdpyinfo wmctrl openbox fluxbox cliclick screencapture osascript \
+                   ioreg powershell pwsh magick; do
+            p=$(command -v "$t" 2>/dev/null) && echo "HAVE $t -> $p" || echo "MISS $t"
+          done
+
+      # --- Linux: what does a capture cost, and can we avoid imagemagick? ---
+      - name: linux - cost of each capture dependency
+        if: runner.os == 'Linux'
+        run: |
+          echo "### install sizes (dry run, no downloads)"
+          for p in imagemagick x11-apps xdotool xvfb openbox scrot; do
+            size=$(apt-get install -s --no-install-recommends $p 2>/dev/null |
+                   grep -oP 'After this operation, \K[0-9.]+ [kMG]B' | head -1)
+            echo "$p: ${size:-unknown}"
+          done
+          echo "### timing the minimal set"
+          /usr/bin/time -f "apt install took %e s" sudo apt-get install -y -qq \
+            --no-install-recommends xvfb x11-apps xdotool 2>&1 | tail -2
+          echo "### is xwd enough on its own?"
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" sh -c '
+            xdpyinfo | head -5
+            xwd -root -silent > root.xwd && ls -l root.xwd
+            head -c 100 root.xwd | od -A d -t x1 | head -4
+          '
+
+      # --- macOS: which input planes are actually permitted? ---
+      - name: macos - permissions and input planes
+        if: runner.os == 'macOS'
+        run: |
+          sw_vers
+          echo "### displays"
+          system_profiler SPDisplaysDataType 2>/dev/null | grep -iE "resolution|display type" | head -6
+          echo "### can we post CoreGraphics events (no Accessibility prompt should block this)"
+          bun -e '
+            const { dlopen, FFIType: T } = await import("bun:ffi");
+            const cg = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", {
+              CGWarpMouseCursorPosition: { args: [T.double, T.double], returns: T.i32 },
+              CGEventCreate: { args: [T.ptr], returns: T.ptr },
+              CGEventPost: { args: [T.u32, T.ptr], returns: T.void },
+            }).symbols;
+            console.log("warp ->", cg.CGWarpMouseCursorPosition(50, 50));
+            console.log("event ->", cg.CGEventCreate(null) ? "created" : "refused");
+          '
+          echo "### does System Events keystroke need approval here"
+          osascript -e 'tell application "System Events" to keystroke ""' 2>&1 | head -2 || echo "(refused)"
+          echo "### screen recording: does a capture contain windows"
+          screencapture -x shot.png && ls -l shot.png
+
+      # --- Windows: why is there no window, and is there a way around it? ---
+      - name: windows - sessions, windows, and what SendKeys can reach
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          Write-Host "### who and where"
+          whoami
+          Write-Host "session id: $((Get-Process -Id $PID).SessionId)"
+          Write-Host "### sessions on this box"
+          query session 2>&1 | Out-String
+          Write-Host "### processes that own a window handle (not just a title)"
+          Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } |
+            Select-Object Id, SessionId, ProcessName, MainWindowTitle | Format-Table -AutoSize | Out-String
+          Write-Host "### start notepad and watch for a handle"
+          $p = Start-Process notepad -PassThru
+          for ($i = 0; $i -lt 10; $i++) {
+            Start-Sleep -Seconds 1
+            $p.Refresh()
+            Write-Host "  t+$i handle=$($p.MainWindowHandle) session=$($p.SessionId) exited=$($p.HasExited)"
+            if ($p.MainWindowHandle -ne 0) { break }
+          }
+          Write-Host "### can AppActivate reach it by pid"
+          try {
+            $s = New-Object -ComObject WScript.Shell
+            Write-Host "AppActivate(pid) -> $($s.AppActivate($p.Id))"
+          } catch { Write-Host "AppActivate threw: $_" }
+          Write-Host "### does the desktop we capture belong to this session"
+          Add-Type -AssemblyName System.Windows.Forms
+          Write-Host "virtual screen: $([System.Windows.Forms.SystemInformation]::VirtualScreen)"
+          Write-Host "### is there an interactive desktop at all"
+          Add-Type @"
+            using System; using System.Runtime.InteropServices;
+            public class D {
+              [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+              [DllImport("user32.dll")] public static extern IntPtr OpenInputDesktop(uint f, bool inherit, uint access);
+            }
+"@
+          Write-Host "foreground window: $([D]::GetForegroundWindow())"
+          Write-Host "input desktop:     $([D]::OpenInputDesktop(0, $false, 0x0100))"
+          try { $p.Kill() } catch {}
