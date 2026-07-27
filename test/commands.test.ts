@@ -247,9 +247,9 @@ describe("focus", () => {
   test("macOS reuses open -a, which both launches and fronts the app", () => {
     expect(focusCmd("macos", "TextEdit")).toEqual(["open", "-a", "TextEdit"]);
   });
-  test("linux activates and focuses the matching window, synchronously", () => {
-    const c = focusCmd("linux", "xterm");
-    expect(c.slice(0, 3)).toEqual(["xdotool", "search", "--sync"]);
+  test("linux finds the window, then activates and focuses it", () => {
+    const c = focusCmd("linux", "xterm").join(" ");
+    expect(c).toContain("xdotool search --onlyvisible --name");
     expect(c).toContain("windowactivate");
     expect(c).toContain("windowfocus");
   });
@@ -265,5 +265,24 @@ describe("focus", () => {
     const c = captureCmd("linux", "o.png");
     expect(c).toContain("-depth");
     expect(c).toContain("png:color-type=2");
+  });
+});
+
+describe("focus does not hang", () => {
+  test("linux polls for a bounded time instead of waiting forever", () => {
+    const c = focusCmd("linux", "xterm").join(" ");
+    // `--sync` is what blocks indefinitely when the window never appears.
+    expect(c).not.toContain("--sync");
+    expect(c).toContain("while");
+  });
+  test("linux passes the name as an argument, not spliced into the script", () => {
+    // Splicing would let a window name like `"; rm -rf /` run as shell.
+    const c = focusCmd("linux", 'evil"; touch /tmp/pwned #');
+    expect(c.at(-1)).toBe('evil"; touch /tmp/pwned #');
+    expect(c[2]).not.toContain("pwned");
+  });
+  test("linux and windows both fail by naming the window that is missing", () => {
+    expect(focusCmd("linux", "xterm").join(" ")).toContain("no window matching");
+    expect(focusCmd("windows", "CU_TARGET").join(" ")).toContain("no window matching");
   });
 });

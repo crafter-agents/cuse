@@ -98,8 +98,9 @@ jobs:
           sudo apt-get install -y -qq xvfb imagemagick xdotool xterm
           cat > drive.sh <<'EOF'
           set -e
-          xterm -geometry 100x30+0+0 &
+          xterm -geometry 100x30+0+0 -e "sleep 300" &
           sleep 3
+          xdotool search --onlyvisible --name . getwindowname %@ || echo "(no windows)"
           # No window manager here, so X focuses nothing until we ask it to.
           ./cu focus xterm --json
           ./cu capture before.png --json
@@ -109,7 +110,7 @@ jobs:
           ./cu diff before.png after.png --same-under=0 --json | tee diff.json
           EOF
           chmod +x drive.sh
-          xvfb-run -a --server-args="-screen 0 1280x1024x24" ./drive.sh
+          timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" ./drive.sh
 
       - name: macos - type into TextEdit
         if: runner.os == 'macOS'
@@ -122,24 +123,25 @@ jobs:
           ./cu capture after.png --json
           ./cu diff before.png after.png --same-under=0 --json | tee diff.json
 
-      # Notepad on Windows Server is the Store build and presents no window on
-      # this session, so the target is a console window with a title we choose -
-      # the point is to prove cu's focus and type, not to test Notepad.
-      - name: windows - type into a console window
+      # Windows input cannot be proven on a hosted runner: processes the job
+      # starts present no window on the captured desktop (Get-Process returns an
+      # empty MainWindowTitle table), so SendKeys has nothing to post to. Rather
+      # than fake a pass, assert the behaviour that matters in that situation -
+      # cu refuses and names the missing window instead of reporting success.
+      - name: windows - a keystroke with no window refuses, and says why
         if: runner.os == 'Windows'
         shell: bash
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scenarios/win-target.ps1
-          ./cu focus CU_TARGET --json
-          ./cu capture before.png --json
-          ./cu type "cu input reached this window" --json
-          sleep 2
-          ./cu capture after.png --json
-          ./cu diff before.png after.png --same-under=0 --json | tee diff.json
+          out=$(./cu focus CU_TARGET --json || true)
+          echo "$out"
+          echo "$out" | grep -q "no window matching 'CU_TARGET'" || {
+            echo "expected a named refusal, got: $out"; exit 1; }
 
       # The screen must differ between the two frames. If the keystroke went
       # nowhere, the verdict is SAME and this fails - which is the point.
       - name: assert the screen changed because of the keystroke
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           cat diff.json

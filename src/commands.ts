@@ -6,6 +6,9 @@ import type { OS } from "./os.ts";
 
 const ps = (script: string) => ["powershell", "-NoProfile", "-Command", script];
 
+/** How long focus waits for a window to show up: 20 tries, half a second apart. */
+const FOCUS_TRIES = 20, FOCUS_SLEEP = 0.5;
+
 /** AppleScript string literal: backslash and double quote are the only escapes. */
 export function escapeAppleScript(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -73,8 +76,16 @@ export function launchCmd(os: OS, app: string): string[] {
 export function focusCmd(os: OS, name: string): string[] {
   switch (os) {
     case "macos": return ["open", "-a", name];
-    case "linux": return ["xdotool", "search", "--sync", "--onlyvisible", "--name", name,
-      "windowactivate", "windowfocus", "--sync", "%1"];
+    // `xdotool search --sync` waits for a matching window forever, which turns
+    // a missing app into a hung agent. Poll for a bounded time instead, then
+    // fail the same way Windows does: by naming what was not found.
+    case "linux": return ["sh", "-c",
+      `n=0; while [ $n -lt ${FOCUS_TRIES} ]; do ` +
+      `id=$(xdotool search --onlyvisible --name "$1" 2>/dev/null | head -1); ` +
+      `if [ -n "$id" ]; then exec xdotool windowactivate "$id" windowfocus "$id"; fi; ` +
+      `n=$((n+1)); sleep ${FOCUS_SLEEP}; done; ` +
+      `echo "no window matching '$1'" >&2; exit 1`,
+      "sh", name];
     case "windows": return ps(
       `$s=New-Object -ComObject WScript.Shell;` +
       `if(-not $s.AppActivate('${escapePowerShell(name)}')){throw "no window matching '${escapePowerShell(name)}'"}`);
