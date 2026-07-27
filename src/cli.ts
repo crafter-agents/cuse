@@ -343,8 +343,24 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
       // Where is this picture on the screen? Returns a point to click.
       case "find": {
-        const needlePath = args[0];
+        const [needlePath, hayPath] = args;
         if (!needlePath) return { ok: false, ...base, error: "find needs a template PNG" };
+        // With a second frame, search inside that file instead of the screen.
+        // Deterministic, and it makes the matcher answerable offline - the live
+        // screen is a moving target, which is a bad thing to test a matcher on.
+        if (hayPath) {
+          const [hay, needle] = [await loadImage(hayPath), await loadImage(needlePath)];
+          const plain = variance(needle);
+          if (plain < MIN_VARIANCE) {
+            return { ok: false, ...base,
+              error: `'${needlePath}' is too plain to locate (variance ${plain.toFixed(2)}, needs ${MIN_VARIANCE})` };
+          }
+          const m = findTemplate(hay, needle, opts.minScore ?? 0.9);
+          if (!m) return { ok: false, ...base, error: `'${needlePath}' is not in '${hayPath}'` };
+          return { ok: true, ...base,
+            detail: `found at ${m.x},${m.y} centre ${m.centerX},${m.centerY} (score ${m.score.toFixed(3)})`,
+            data: { x: m.centerX, y: m.centerY, left: m.x, top: m.y, score: m.score } };
+        }
         const t = await resolveTarget(os, { ...opts, find: needlePath }, timeoutMs, run);
         return { ok: true, ...base, detail: `found ${t.how} -> click ${t.x},${t.y}`,
           data: { x: t.x, y: t.y } };
@@ -435,7 +451,7 @@ Windows and apps
   frontmost                    which window currently has the keyboard
 
 Finding things
-  find <template.png>          where that picture is; prints a point to click
+  find <template.png> [in.png] where that picture is: on screen, or in a frame
   crop <in.png> x y w h <out>  cut a template out of a screenshot
 
 Input

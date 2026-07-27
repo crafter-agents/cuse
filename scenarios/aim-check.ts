@@ -79,21 +79,21 @@ console.log(`cropping ${patch.w}x${patch.h} at ${px},${py} (click space)`);
 const cropped = await cuse("crop", frame, String(px), String(py), String(patch.w), String(patch.h), "aim-needle.png");
 if (!cropped.ok) die(`crop failed: ${cropped.error}`);
 
-let found = await cuse("find", "aim-needle.png");
-if (!found.ok) {
-  // Worth distinguishing "the matcher is wrong" from "the screen moved": retry
-  // once against a frame captured at the same moment as the needle.
-  console.log("not found live; retrying against the frame the needle came from");
-  found = await cuse("find", "aim-needle.png", "--min-score=0.8");
-}
-if (!found.ok) die(`the patch cut from this very screen was not found again: ${found.error}`);
+// Search inside the very frame the patch came from. Against the live screen
+// this was flaky for an honest reason: between cutting the landmark and looking
+// for it, a caret blinks, a dialog opens, a window redraws - and the landmark
+// is no longer there. What is being tested here is whether cuse can turn a
+// picture into a coordinate, so the frame is held fixed.
+const found = await cuse("find", "aim-needle.png", frame);
+if (!found.ok) die(`the patch cut from this frame was not found in it: ${found.error}`);
 
 // 3. The answer has to be where the patch was cut from - not merely somewhere
 //    inside the window. "Inside the window" passed once while the matcher had
 //    locked onto a different patch of the same blank text box, which is exactly
 //    the kind of green that means nothing.
 const { x, y } = found.data as { x: number; y: number };
-const want = { x: px + Math.floor(patch.w / 2), y: py + Math.floor(patch.h / 2) };
+// Frame coordinates, because the search ran inside the frame.
+const want = { x: (px + Math.floor(patch.w / 2)) * k, y: (py + Math.floor(patch.h / 2)) * k };
 const off = Math.max(Math.abs(x - want.x), Math.abs(y - want.y));
 const tolerance = 4;
 if (off > tolerance) {
@@ -111,6 +111,6 @@ await Bun.write("aim-absent.png", encodePNG(
   { width: 60, height: 60, channels: 3, data: noise },
   (d) => new Uint8Array(deflateSync(d))));
 
-const absent = await cuse("find", "aim-absent.png");
+const absent = await cuse("find", "aim-absent.png", frame);
 if (absent.ok) die(`a picture that is not on screen was reported at ${JSON.stringify(absent.data)}`);
 console.log("absent ok: a picture that is not on screen is reported as absent");
