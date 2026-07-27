@@ -1,25 +1,36 @@
-# cu
+# cuse
 
 Cross-platform computer-use CLI. One verb, the right OS primitive.
 
-The agent writes the same command on every OS; cu detects the platform and
+The agent writes the same command on every OS; cuse detects the platform and
 translates to the native primitive (osascript and CoreGraphics on macOS, xdotool
 on Linux, SendKeys and GDI on Windows).
 
 ```sh
-cu capture out.png        # screencapture / import / GDI CopyFromScreen
-cu focus TextEdit         # put a window in front, so input has a target
-cu type "hello"           # osascript / xdotool / SendKeys
-cu key cmd+a              # chord mapped to each OS input plane
-cu click 400 300          # also dblclick, move, scroll
-cu select-all | copy | paste
-cu settle                 # wait until the screen stops changing
-cu diff a.png b.png       # how much changed, SAME or CHANGED
-cu record 5 500           # 5 frames, 500ms apart
-cu launch TextEdit
-cu os                     # which platform
-cu <action> --json        # structured Result for agents
+cuse capture out.png        # screencapture / xwd / GDI CopyFromScreen
+cuse focus TextEdit         # put a window in front, so input has a target
+cuse type "hello"           # osascript / xdotool / SendKeys
+cuse key cmd+a              # chord mapped to each OS input plane
+cuse click 400 300          # also dblclick, move, scroll
+cuse select-all | copy | paste
+cuse settle                 # wait until the screen stops changing
+cuse diff a.png b.png       # how much changed, SAME or CHANGED
+cuse record 5 500           # 5 frames, 500ms apart
+cuse launch TextEdit
+cuse os                     # which platform
+cuse <action> --json        # structured Result for agents
 ```
+
+## Install
+
+```sh
+bun install
+bun run build          # standalone binary at dist/cuse, no runtime needed
+```
+
+Named `cuse` rather than `cu` because `cu(1)` from UUCP already ships with macOS
+and most Linux distributions, and shadowing it would be a nasty surprise for
+anyone who actually uses it.
 
 ## Why
 
@@ -43,7 +54,7 @@ building this was a case where the tool reported `ok` and nothing had happened:
 - a locked machine quietly accepting keystrokes into its password field
 
 None of these produce an error. They produce a confident agent acting on
-nothing. So cu refuses before it acts when it can name the reason, and warns
+nothing. So cuse refuses before it acts when it can name the reason, and warns
 after it acts when the result is suspicious.
 
 ## What actually works where
@@ -53,7 +64,7 @@ the resulting PNG and uploads it as a build artifact.
 
 | | macOS | Linux (Xvfb) | Windows |
 | --- | --- | --- | --- |
-| capture | `screencapture`, 1024x768 | `xwd` + cu's own encoder, 1280x1024 | GDI CopyFromScreen, 1024x768 |
+| capture | `screencapture`, 1024x768 | `xwd` + cuse's own encoder, 1280x1024 | GDI CopyFromScreen, 1024x768 |
 | keyboard input | verified | verified | verified |
 | mouse | CoreGraphics, no install | xdotool | user32 `mouse_event` |
 | focus | `open -a` | `windowfocus`, no WM needed | `AppActivate` |
@@ -63,10 +74,10 @@ the resulting PNG and uploads it as a build artifact.
 and not by pixels. CI opens a real window, focuses it, types, and then checks
 something only delivered input can produce:
 
-- macOS types into a file open in TextEdit, saves with `cu key cmd+s`, and greps
+- macOS types into a file open in TextEdit, saves with `cuse key cmd+s`, and greps
   the file on disk.
 - Linux types a command into a shell in an xterm, presses Return with
-  `cu key Return`, and requires the file that command creates to exist.
+  `cuse key Return`, and requires the file that command creates to exist.
 - Windows types into a window whose text box writes every change to disk, and
   greps that.
 
@@ -91,12 +102,12 @@ A display with nothing drawn on it still yields a correctly sized PNG. An agent
 reading only `ok: true` will keep clicking against it.
 
 ```console
-$ cu capture out.png --json
+$ cuse capture out.png --json
 {"ok":true,"action":"capture","os":"linux","detail":"295B -> out.png",
  "warn":"frame is blank: the display is on but nothing is drawn on it - input actions will be delivered to no window"}
 ```
 
-cu decodes the frame and checks whether every pixel is identical, which is
+cuse decodes the frame and checks whether every pixel is identical, which is
 exact. It first shipped as a bytes-per-pixel heuristic, and that was not enough:
 a black 3024x1964 macOS frame compressed to 112 KB, comfortably above any
 size threshold, and only the decode caught it. The heuristic remains as a
@@ -104,19 +115,19 @@ fallback for images the decoder refuses.
 
 ## Nothing waits forever
 
-Every backend cu shells out to can hang — osascript on an app that stopped
+Every backend cuse shells out to can hang — osascript on an app that stopped
 answering, xdotool on a wedged X server, PowerShell on a COM call — and the
-agent driving cu has no timeout of its own. So no command runs without a
+agent driving cuse has no timeout of its own. So no command runs without a
 deadline, tuned per action and overridable with `--timeout=<ms>`.
 
 Getting that right took one more step than it looks. Killing the child is not
 enough: a wrapper's own child keeps the stdout pipe open, so the read never
-finishes and the deadline achieves nothing. cu returns the moment the deadline
+finishes and the deadline achieves nothing. cuse returns the moment the deadline
 passes and then kills the whole descendant tree, bounded so that cleanup cannot
 become the new way to hang.
 
 ```console
-$ cu capture out.png --timeout=3000 --json     # with a backend that never returns
+$ cuse capture out.png --timeout=3000 --json     # with a backend that never returns
 {"ok":false,"action":"capture","os":"macos",
  "error":"screencapture did not finish within 3000ms and was killed (the display or the app it drives is not responding)"}
 $ echo $?
@@ -154,7 +165,7 @@ it (missing dependency, no display, locked session).
 
 ```sh
 bun test          # 95 tests, the agnostic core
-bun run build     # compile a standalone binary to dist/cu
+bun run build     # compile a standalone binary to dist/cuse
 ```
 
 ## Known limits
@@ -171,14 +182,14 @@ bun run build     # compile a standalone binary to dist/cu
 - `scroll` on Windows sends Page Up/Down rather than a wheel event.
 - Linux needs `x11-apps` and `xdotool`, and an X display. Both install in about
   seven seconds on a runner; Wayland is not supported.
-- The binary name collides with `cu(1)` from UUCP, which ships with macOS and
+- The binary name collides with `cuse(1)` from UUCP, which ships with macOS and
   many Linux distributions. Install it under another name or call it by path
   until that is settled.
 
 ## Status
 
-v2 is a TypeScript rewrite of the original bash spike (kept as
-`bin/cu-legacy.sh`). CI runs the unit tests, a capture gate and an input gate on
+v2 is a TypeScript rewrite of the original bash spike, kept as
+`bin/cu-legacy.sh` under its original name. CI runs the unit tests, a capture gate and an input gate on
 macOS, Linux and Windows, and a `recon` workflow that reports what each runner
 actually provides — which is where the dependency and Windows decisions above
 came from. Built by Kai.

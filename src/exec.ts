@@ -1,6 +1,6 @@
 // Running other people's programs, defensively.
 //
-// Every backend cu shells out to can hang: osascript waits on an app that is
+// Every backend cuse shells out to can hang: osascript waits on an app that is
 // not answering, xdotool blocks on an X server that stopped responding,
 // PowerShell sits on a COM call. A computer-use tool that hangs is worse than
 // one that fails - the agent driving it has no timeout of its own and simply
@@ -14,7 +14,7 @@
 //      reading the output never finishes and the deadline achieves nothing.
 //      The whole descendant tree has to go.
 //   2. Waiting for the output at all is a liability. Once the deadline passes,
-//      cu returns; it does not stay to collect what a wedged process might
+//      cuse returns; it does not stay to collect what a wedged process might
 //      still write.
 
 export type RunResult = { code: number; stdout: string; stderr: string; timedOut: boolean };
@@ -73,7 +73,7 @@ async function killTree(pid: number): Promise<void> {
  *
  * The deadline is a hard promise: when it expires this returns, whatever the
  * child is doing. The kill happens in the background so that even a process
- * that ignores signals cannot hold cu open.
+ * that ignores signals cannot hold cuse open.
  */
 export async function runWithTimeout(argv: string[], ms: number): Promise<RunResult> {
   const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
@@ -95,7 +95,7 @@ export async function runWithTimeout(argv: string[], ms: number): Promise<RunRes
   clearTimeout(timer);
   if (result.timedOut) {
     // Clean up the tree, but bounded: reaping must not become the new way to
-    // hang. Without waiting at all, cu exits first and leaves the grandchild
+    // hang. Without waiting at all, cuse exits first and leaves the grandchild
     // running - observed with a wrapper script holding a sleep.
     await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
   }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// cu - cross-platform computer-use CLI. One verb, the right OS primitive.
+// cuse - cross-platform computer-use CLI. One verb, the right OS primitive.
 // Structured Result + --json. Actions delegate to pure builders (tested).
 
 import { resolve } from "node:path";
@@ -26,7 +26,7 @@ export type Result = {
  *
  * Both halves matter. Bun's default throw carries only an exit code, which
  * turns "no window matching 'Notepad'" into "Failed with exit code 1"; and
- * without a timeout a wedged backend hangs the agent driving cu, which has no
+ * without a timeout a wedged backend hangs the agent driving cuse, which has no
  * deadline of its own.
  */
 function runner(action: string, timeoutMs: number) {
@@ -59,7 +59,7 @@ const deflate = (d: Uint8Array) => new Uint8Array(deflateSync(d));
  * Take a screenshot, whatever the platform's backend emits.
  *
  * macOS and Windows write a PNG themselves. Linux hands back an xwd dump on
- * stdout, which cu converts - that is what removes the imagemagick dependency.
+ * stdout, which cuse converts - that is what removes the imagemagick dependency.
  */
 async function captureTo(os: OS, out: string, timeoutMs: number,
                          run: (argv: string[]) => Promise<void>): Promise<void> {
@@ -236,9 +236,9 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
 export const VERSION = "2.1.0";
 
-const HELP = `cu ${VERSION} - cross-platform computer-use CLI
+const HELP = `cuse ${VERSION} - cross-platform computer-use CLI
 
-  cu <action> [args] [flags]
+  cuse <action> [args] [flags]
 
 Screen
   capture [out.png]            screenshot; warns when the frame is blank
@@ -298,8 +298,8 @@ if (import.meta.main) {
   const timeoutMs = flag("timeout") !== undefined ? Number(flag("timeout")) : undefined;
   const [action, ...args] = argv.filter((a) => !a.startsWith("--"));
   const r = await act(action ?? "", args, { force, sameUnder, timeoutMs });
-  console.log(json ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cu: ${r.error}`);
-  if (!json && r.warn) console.warn(`cu: warning: ${r.warn}`);
+  console.log(json ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cuse: ${r.error}`);
+  if (!json && r.warn) console.warn(`cuse: warning: ${r.warn}`);
   process.exit(exitCodeFor(r));
 }
 

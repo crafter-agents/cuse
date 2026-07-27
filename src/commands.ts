@@ -31,7 +31,7 @@ export function escapeSendKeys(s: string): string {
  * How a screenshot is taken, and crucially where the bytes end up.
  *
  * macOS and Windows write the file themselves; xwd streams a dump to stdout for
- * cu to convert. That difference is in the type rather than in a comment, so a
+ * cuse to convert. That difference is in the type rather than in a comment, so a
  * caller cannot forget it - forgetting it once left `settle` running xwd and
  * then looking for a file nobody had written.
  */
@@ -43,12 +43,12 @@ export function captureCmd(os: OS, out: string): CapturePlan {
   switch (os) {
     case "macos": return { argv: ["screencapture", "-x", out], output: "file" };
     // xwd, not import: the runners ship neither, and x11-apps (which carries
-    // xwd) is a fraction of imagemagick's size. cu converts the dump itself,
+    // xwd) is a fraction of imagemagick's size. cuse converts the dump itself,
     // which also fixes what import did on a low-colour display - emit a 1-bit
     // PNG that could not be compared against the other platforms'.
     case "linux": return { argv: ["xwd", "-root", "-silent"], output: "stdout" };
     // Bitmap.Save resolves a relative path against the .NET working directory,
-    // which is not PowerShell's location - so cu passes an absolute path here.
+    // which is not PowerShell's location - so cuse passes an absolute path here.
     case "windows": return { argv: ps(
       `Add-Type -AssemblyName System.Windows.Forms,System.Drawing;` +
       `$v=[System.Windows.Forms.SystemInformation]::VirtualScreen;` +

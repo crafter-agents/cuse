@@ -1,4 +1,4 @@
-# A window cu can aim at, which records what it receives.
+# A window cuse can aim at, which records what it receives.
 #
 # Notepad cannot be the target on a Windows Server runner: it is the Store build
 # and Start-Process returns nothing at all. Recon showed the job does sit in the

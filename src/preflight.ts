@@ -20,7 +20,7 @@ export const WINDOW_ACTIONS = ["launch", "focus"];
 export function displayPreflight(os: OS, probe: Probe): Preflight {
   if (os !== "linux") return { ok: true };
   if (!probe.env.DISPLAY) {
-    return { ok: false, reason: "no X display: DISPLAY is unset (run under Xvfb, e.g. `xvfb-run -a cu ...`)" };
+    return { ok: false, reason: "no X display: DISPLAY is unset (run under Xvfb, e.g. `xvfb-run -a cuse ...`)" };
   }
   return { ok: true };
 }

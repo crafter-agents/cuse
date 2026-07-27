@@ -1,5 +1,5 @@
 name: recon
-# What do these machines actually give us? Every capability cu depends on is
+# What do these machines actually give us? Every capability cuse depends on is
 # probed here and printed, so decisions about defaults and dependencies are
 # made against the runners rather than against folklore.
 # Runs on demand, and whenever this file itself changes - so the probe can be

@@ -1,7 +1,7 @@
 // Is anyone actually able to receive input right now?
 //
 // A locked Mac still accepts synthetic events: they go to the login window, so
-// `cu type` silently fills the password field. That is the worst possible place
+// `cuse type` silently fills the password field. That is the worst possible place
 // for a stray keystroke, so input actions check the session first.
 //
 // The parsing is pure and the probe is injected, which keeps this testable

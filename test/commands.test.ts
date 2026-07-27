@@ -26,7 +26,7 @@ describe("capture", () => {
   test("macOS screencapture writes the file itself", () => {
     expect(captureCmd("macos", "o.png")).toEqual({ argv: ["screencapture", "-x", "o.png"], output: "file" });
   });
-  test("linux dumps the root window to stdout, and cu encodes the PNG", () => {
+  test("linux dumps the root window to stdout, and cuse encodes the PNG", () => {
     // No imagemagick. The output kind is in the type so a caller cannot treat
     // the dump as if xwd had written a file - which is a bug that happened.
     expect(captureCmd("linux", "o.png")).toEqual({ argv: ["xwd", "-root", "-silent"], output: "stdout" });

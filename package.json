@@ -1,1 +1,12 @@
-{"name":"@crafter/cu","version":"2.0.0","type":"module","bin":{"cu":"./src/cli.ts"},"scripts":{"test":"bun test","build":"bun build --compile src/cli.ts --outfile dist/cu"},"description":"Cross-platform computer-use CLI. One verb, the right OS primitive."}
+{
+  "name": "@crafter/cuse",
+  "version": "2.1.0",
+  "type": "module",
+  "description": "Cross-platform computer-use CLI. One verb, the right OS primitive.",
+  "bin": { "cuse": "./src/cli.ts" },
+  "files": ["src", "README.md"],
+  "scripts": {
+    "test": "bun test",
+    "build": "bun build --compile src/cli.ts --outfile dist/cuse"
+  }
+}

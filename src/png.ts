@@ -139,7 +139,7 @@ export function diffImages(a: Image, b: Image, threshold = 30, sameUnder = 1): D
 }
 
 // --- encoding -------------------------------------------------------------
-// cu writes PNGs as well as reading them, so a capture backend that emits some
+// cuse writes PNGs as well as reading them, so a capture backend that emits some
 // other format (xwd on Linux) still yields the one format everything else here
 // understands - and Linux no longer needs imagemagick installed to take a
 // screenshot.

@@ -14,9 +14,9 @@ jobs:
       - name: test (pure core, runs everywhere)
         run: bun test
       - name: build standalone binary
-        run: bun build --compile src/cli.ts --outfile cu-${{ matrix.os }}
+        run: bun build --compile src/cli.ts --outfile cuse-${{ matrix.os }}
       - name: os detection
-        run: ./cu-${{ matrix.os }} os --json
+        run: ./cuse-${{ matrix.os }} os --json
 
   # capture is the action that actually depends on the machine having a screen.
   # Hard gate on all three platforms: no `|| true`, and the PNG is decoded to
@@ -32,30 +32,30 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
       - name: build
-        run: bun build --compile src/cli.ts --outfile cu
+        run: bun build --compile src/cli.ts --outfile cuse
 
-      # Linux runners are headless: no display, no imagemagick. cu reports both
+      # Linux runners are headless: no display, no imagemagick. cuse reports both
       # as structured errors instead of failing opaquely - assert that it does.
       - name: linux - preflight refuses headless, with a reason
         if: runner.os == 'Linux'
         run: |
-          out=$(./cu capture out.png --json || true)
+          out=$(./cuse capture out.png --json || true)
           echo "$out"
           echo "$out" | grep -q '"ok":false' || { echo "expected a refusal on a headless runner"; exit 1; }
-      - name: linux - provide the display cu asks for, then capture for real
+      - name: linux - provide the display cuse asks for, then capture for real
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends x11-apps
-          out=$(xvfb-run -a --server-args="-screen 0 1280x1024x24" ./cu capture out.png --json)
+          out=$(xvfb-run -a --server-args="-screen 0 1280x1024x24" ./cuse capture out.png --json)
           echo "$out"
-          # A bare Xvfb has nothing drawn on it, so the frame is blank. cu must
+          # A bare Xvfb has nothing drawn on it, so the frame is blank. cuse must
           # say so rather than hand an agent an empty screen as a success.
           echo "$out" | grep -q '"warn"' || { echo "expected a blank-frame warning on a bare Xvfb"; exit 1; }
 
       - name: macos/windows - capture on the runner's own session
         if: runner.os != 'Linux'
-        run: ./cu capture out.png --json
+        run: ./cuse capture out.png --json
 
       # A PNG magic number is not proof of a frame; read the IHDR dimensions.
       - name: assert the capture is a real frame
@@ -76,7 +76,7 @@ jobs:
           path: out.png
 
   # Does input actually land in a window? Capture, act, capture again, and let
-  # cu's own differ decide - the only check that cannot pass while the keystroke
+  # cuse's own differ decide - the only check that cannot pass while the keystroke
   # goes nowhere. Runs against a throwaway app on the runner, never a real desktop.
   input:
     strategy:
@@ -89,7 +89,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
       - name: build
-        run: bun build --compile src/cli.ts --outfile cu
+        run: bun build --compile src/cli.ts --outfile cuse
 
       - name: linux - type into an xterm under Xvfb
         if: runner.os == 'Linux'
@@ -112,30 +112,30 @@ jobs:
           echo "--- windows on :99 ---"
           xdotool search --onlyvisible --name . getwindowname %@ 2>/dev/null || echo "(none)"
           # No window manager here, so X focuses nothing until we ask it to.
-          ./cu focus CU_TARGET --json
+          ./cuse focus CU_TARGET --json
           # Let the window finish drawing; otherwise the control below measures
           # the animation rather than the absence of input.
-          ./cu settle --json
+          ./cuse settle --json
           # Control: two frames with nothing typed between them must be SAME.
           # Without it, a blinking cursor would look exactly like a keystroke.
-          ./cu capture control-a.png --json
+          ./cuse capture control-a.png --json
           sleep 1
-          ./cu capture control-b.png --json
-          ./cu diff control-a.png control-b.png --same-under=0 --json | tee control.json
-          ./cu capture before.png --json
-          ./cu type "cu input reached this window and this line is long on purpose" --json
+          ./cuse capture control-b.png --json
+          ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          ./cuse capture before.png --json
+          ./cuse type "cuse input reached this window and this line is long on purpose" --json
           sleep 1
-          ./cu capture after.png --json
-          ./cu diff before.png after.png --same-under=0 --json | tee diff.json
+          ./cuse capture after.png --json
+          ./cuse diff before.png after.png --same-under=0 --json | tee diff.json
           # Ground truth: make the keystrokes do something the filesystem can
           # confirm. Pixels can be faked by a cursor; a created file cannot.
           rm -f /tmp/cu-input-ok
           # The line typed above is still sitting at the prompt unsubmitted, so
           # send it first - otherwise the next command concatenates onto it.
-          ./cu key Return --json
+          ./cuse key Return --json
           sleep 1
-          ./cu type "touch /tmp/cu-input-ok" --json
-          ./cu key Return --json
+          ./cuse type "touch /tmp/cu-input-ok" --json
+          ./cuse key Return --json
           sleep 2
           test -f /tmp/cu-input-ok || { echo "the shell never received the keystrokes"; exit 1; }
           echo "shell executed the typed command"
@@ -152,32 +152,32 @@ jobs:
           echo "initial line" > target.txt
           open -a TextEdit "$PWD/target.txt"
           sleep 5
-          ./cu focus TextEdit --json
-          ./cu settle --json
-          ./cu capture control-a.png --json
+          ./cuse focus TextEdit --json
+          ./cuse settle --json
+          ./cuse capture control-a.png --json
           sleep 1
-          ./cu capture control-b.png --json
-          ./cu diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          ./cuse capture control-b.png --json
+          ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
           # Front it again immediately before typing: keystrokes go to whatever
           # is frontmost, and settling takes seconds.
-          ./cu focus TextEdit --json
-          ./cu capture before.png --json
-          ./cu type "cu input reached this window and this line is long on purpose" --json
+          ./cuse focus TextEdit --json
+          ./cuse capture before.png --json
+          ./cuse type "cuse input reached this window and this line is long on purpose" --json
           sleep 2
-          ./cu capture after.png --json
-          ./cu diff before.png after.png --same-under=0 --json | tee diff.json
+          ./cuse capture after.png --json
+          ./cuse diff before.png after.png --same-under=0 --json | tee diff.json
           # Ground truth, not pixels: save with cmd+s and read the file back off
           # disk. A blinking caret can fake a pixel change; it cannot write text
           # into a file. This exercises capture, focus, type and key at once.
-          ./cu key cmd+s --json
+          ./cuse key cmd+s --json
           sleep 3
           cat target.txt
-          grep -q "cu input reached this window" target.txt || {
+          grep -q "cuse input reached this window" target.txt || {
             echo "the keystrokes never reached the document"; exit 1; }
 
       # Recon showed the job runs in the interactive session with a real
       # foreground window - what failed before was Notepad, which on Windows
-      # Server is the Store build and does not start at all. So cu gets a window
+      # Server is the Store build and does not start at all. So cuse gets a window
       # made for the purpose, whose text box writes every change to disk: the
       # same ground truth the macOS and Linux checks use.
       - name: windows - type into a window that records what it receives
@@ -196,20 +196,20 @@ jobs:
             cat form-err.txt form-out.txt 2>/dev/null
             exit 1
           fi
-          ./cu focus CU_TARGET --json
-          ./cu settle --json
-          ./cu capture control-a.png --json
+          ./cuse focus CU_TARGET --json
+          ./cuse settle --json
+          ./cuse capture control-a.png --json
           sleep 1
-          ./cu capture control-b.png --json
-          ./cu diff control-a.png control-b.png --same-under=0 --json | tee control.json
-          ./cu capture before.png --json
-          ./cu type "cu input reached this window" --json
+          ./cuse capture control-b.png --json
+          ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          ./cuse capture before.png --json
+          ./cuse type "cuse input reached this window" --json
           sleep 2
-          ./cu capture after.png --json
-          ./cu diff before.png after.png --same-under=0 --json | tee diff.json
+          ./cuse capture after.png --json
+          ./cuse diff before.png after.png --same-under=0 --json | tee diff.json
           echo "--- what the window received ---"
           cat "$sink" || true
-          grep -q "cu input reached this window" "$sink" || {
+          grep -q "cuse input reached this window" "$sink" || {
             echo "the window never received the keystrokes"; exit 1; }
 
       # The pixel delta is reported, not gated. On a CI desktop it is not a

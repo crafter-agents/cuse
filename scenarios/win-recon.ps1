@@ -1,5 +1,5 @@
 # Why does a Windows job see no window on the desktop it can screenshot?
-# Everything here is a question about the runner, not about cu.
+# Everything here is a question about the runner, not about cuse.
 Write-Host "### who and where"
 whoami
 Write-Host "session id: $((Get-Process -Id $PID).SessionId)"
