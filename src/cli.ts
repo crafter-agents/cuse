@@ -26,7 +26,8 @@ export type Result = {
 async function run(argv: string[]): Promise<void> {
   const r = await $`${argv}`.quiet().nothrow();
   if (r.exitCode === 0) return;
-  const said = (r.stderr.toString() || r.stdout.toString()).trim().split("\n").filter(Boolean).at(-1);
+  // The first line is the message; what follows is the interpreter's own trace.
+  const said = (r.stderr.toString() || r.stdout.toString()).trim().split("\n").map((l) => l.trim()).filter(Boolean)[0];
   throw new Error(said ? `${argv[0]}: ${said}` : `${argv[0]} exited ${r.exitCode}`);
 }
 
