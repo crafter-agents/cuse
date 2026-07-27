@@ -98,3 +98,22 @@ describe("diffImages", () => {
     expect(() => diffImages(dec(BLACK), dec(makePNG(4, 4, () => [0, 0, 0])))).toThrow("size mismatch");
   });
 });
+
+describe("diff threshold", () => {
+  const dec = (p: Uint8Array) => decodePNG(p, inflate);
+  // One pixel of 64 is 1.56%, so it lands on either side depending on the question.
+  const ONE_PIXEL = makePNG(8, 8, (x, y) => (x === 0 && y === 0 ? [255, 255, 255] : [0, 0, 0]));
+
+  test("the default 1% tolerance calls a tiny change SAME", () => {
+    expect(diffImages(dec(BLACK), dec(makePNG(16, 16, (x, y) => (x + y === 0 ? [255, 255, 255] : [0, 0, 0]))).width === 16
+      ? dec(BLACK) : dec(BLACK)).verdict).toBe("SAME");
+  });
+  test("sameUnder 0 answers 'did anything change at all'", () => {
+    expect(diffImages(dec(BLACK), dec(ONE_PIXEL), 30, 0)).toMatchObject({ changed: 1, verdict: "CHANGED" });
+    expect(diffImages(dec(BLACK), dec(BLACK), 30, 0).verdict).toBe("SAME");
+  });
+  test("a stricter threshold can call the same frames CHANGED", () => {
+    expect(diffImages(dec(BLACK), dec(ONE_PIXEL), 30, 5).verdict).toBe("SAME");
+    expect(diffImages(dec(BLACK), dec(ONE_PIXEL), 30, 1).verdict).toBe("CHANGED");
+  });
+});

@@ -16,7 +16,19 @@ export type Result = {
   detail?: string; error?: string; warn?: string; data?: unknown;
 };
 
-async function run(argv: string[]): Promise<void> { await $`${argv}`.quiet(); }
+/**
+ * Run a command, and on failure report what the OS actually said.
+ *
+ * Bun's default throw carries only the exit code, which turns a precise message
+ * ("no window matching 'Notepad'") into "Failed with exit code 1" - useless to
+ * the agent that has to decide what to do next.
+ */
+async function run(argv: string[]): Promise<void> {
+  const r = await $`${argv}`.quiet().nothrow();
+  if (r.exitCode === 0) return;
+  const said = (r.stderr.toString() || r.stdout.toString()).trim().split("\n").filter(Boolean).at(-1);
+  throw new Error(said ? `${argv[0]}: ${said}` : `${argv[0]} exited ${r.exitCode}`);
+}
 
 /** Execute a plan. The macOS branch is loaded lazily so that importing the CLI
  *  on Linux or Windows never touches bun:ffi or a framework that is not there. */
@@ -68,7 +80,7 @@ async function readLockState(os: OS): Promise<string | null> {
 const xy = (a?: string, b?: string) =>
   a === undefined ? {} : { x: Number(a), y: Number(b) };
 
-async function act(action: string, args: string[], force = false): Promise<Result> {
+async function act(action: string, args: string[], force = false, sameUnder = 1): Promise<Result> {
   const os = detectOS();
   const base = { action, os };
 
@@ -118,7 +130,7 @@ async function act(action: string, args: string[], force = false): Promise<Resul
       case "diff": {
         const [a, b] = [args[0], args[1]];
         if (!a || !b) return { ok: false, ...base, error: "diff needs two PNG paths" };
-        const d = diffImages(await loadImage(a), await loadImage(b));
+        const d = diffImages(await loadImage(a), await loadImage(b), 30, sameUnder);
         return { ok: true, ...base, detail: `changed ${d.percent}% - ${d.verdict}`, data: d };
       }
 
@@ -160,8 +172,10 @@ if (import.meta.main) {
   const argv = process.argv.slice(2);
   const json = argv.includes("--json");
   const force = argv.includes("--force");
-  const [action, ...args] = argv.filter((a) => a !== "--json" && a !== "--force");
-  const r = await act(action ?? "", args, force);
+  const su = argv.find((a) => a.startsWith("--same-under="));
+  const sameUnder = su ? Number(su.split("=")[1]) : 1;
+  const [action, ...args] = argv.filter((a) => !a.startsWith("--"));
+  const r = await act(action ?? "", args, force, sameUnder);
   console.log(json ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cu: ${r.error}`);
   if (!json && r.warn) console.warn(`cu: warning: ${r.warn}`);
   process.exit(r.ok ? 0 : 1);

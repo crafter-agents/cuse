@@ -106,7 +106,7 @@ jobs:
           ./cu type "cu input reached this window" --json
           sleep 1
           ./cu capture after.png --json
-          ./cu diff before.png after.png --json | tee diff.json
+          ./cu diff before.png after.png --same-under=0 --json | tee diff.json
           EOF
           chmod +x drive.sh
           xvfb-run -a --server-args="-screen 0 1280x1024x24" ./drive.sh
@@ -120,21 +120,22 @@ jobs:
           ./cu type "cu input reached this window" --json
           sleep 2
           ./cu capture after.png --json
-          ./cu diff before.png after.png --json | tee diff.json
+          ./cu diff before.png after.png --same-under=0 --json | tee diff.json
 
       - name: windows - type into notepad
         if: runner.os == 'Windows'
         shell: bash
         run: |
           ./cu launch notepad --json
-          sleep 5
+          sleep 8
+          powershell -NoProfile -Command "Get-Process | Where-Object {$_.MainWindowTitle} | Select-Object ProcessName,MainWindowTitle | Format-Table -AutoSize"
           # SendKeys posts to the active window; without this it posts to nothing.
-          ./cu focus Notepad --json
+          ./cu focus "Notepad" --json
           ./cu capture before.png --json
           ./cu type "cu input reached this window" --json
           sleep 2
           ./cu capture after.png --json
-          ./cu diff before.png after.png --json | tee diff.json
+          ./cu diff before.png after.png --same-under=0 --json | tee diff.json
 
       # The screen must differ between the two frames. If the keystroke went
       # nowhere, the verdict is SAME and this fails - which is the point.

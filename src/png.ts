@@ -116,7 +116,7 @@ export type Diff = { changed: number; total: number; percent: number; verdict: "
  * noise and cursor antialiasing do not read as a change. Mirrors the v1 bash
  * behaviour (threshold 30 over summed channels, SAME under 1%).
  */
-export function diffImages(a: Image, b: Image, threshold = 30): Diff {
+export function diffImages(a: Image, b: Image, threshold = 30, sameUnder = 1): Diff {
   if (a.width !== b.width || a.height !== b.height) {
     throw new Error(`size mismatch: ${a.width}x${a.height} vs ${b.width}x${b.height}`);
   }
@@ -132,5 +132,8 @@ export function diffImages(a: Image, b: Image, threshold = 30): Diff {
     if (sum > threshold) changed++;
   }
   const percent = Math.round((10000 * changed) / total) / 100;
-  return { changed, total, percent, verdict: percent < 1 ? "SAME" : "CHANGED" };
+  // sameUnder 0 answers "did anything at all change", which is the question when
+  // proving a keystroke landed: a line of text is a fraction of a percent.
+  const same = sameUnder === 0 ? changed === 0 : percent < sameUnder;
+  return { changed, total, percent, verdict: same ? "SAME" : "CHANGED" };
 }
