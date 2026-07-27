@@ -114,3 +114,47 @@ describe("templates that cannot be located", () => {
     expect(variance(nearlyFlat)).toBeLessThan(MIN_VARIANCE);
   });
 });
+
+describe("the coarse pass keeps more than one candidate", () => {
+  /** A frame with several similar-looking blocks and one that differs. */
+  function blocks(w: number, h: number, marked: Array<[number, number]>): Image {
+    const data = new Uint8Array(w * h * 3).fill(240);
+    for (const [mx, my] of marked) {
+      for (let y = my; y < my + 40 && y < h; y++) {
+        for (let x = mx; x < mx + 120 && x < w; x++) {
+          const i = (y * w + x) * 3;
+          // a gradient block: enough structure to match on, and its position in
+          // the gradient makes each copy distinguishable from the others
+          data[i] = (x - mx) * 2; data[i + 1] = (y - my) * 5; data[i + 2] = 90;
+        }
+      }
+    }
+    return { width: w, height: h, channels: 3, data };
+  }
+
+  test("finds the right block when several look alike at a distance", () => {
+    // Shrunk by 8 these blocks are near-identical grey smudges, so the best
+    // coarse candidate is not reliably the right one - which is exactly the
+    // case that made a patch unfindable in the frame it came from.
+    const hay = blocks(1024, 768, [[80, 84], [500, 300], [840, 640]]);
+    for (const [x, y] of [[80, 84], [500, 300], [840, 640]]) {
+      const m = findTemplate(hay, crop(hay, x!, y!, 120, 40));
+      expect(m).not.toBeNull();
+      expect(m!.score).toBeGreaterThan(0.99);
+    }
+  });
+});
+
+describe("what the score does not tell you", () => {
+  test("the score is a pixel distance, so flat content scores high anywhere", () => {
+    // Documented rather than fixed: on sparse or low-contrast content the score
+    // overstates confidence, which is why `find` also refuses templates whose
+    // own variance is too low. A normalised correlation would judge better.
+    const pale: Image = { width: 300, height: 200, channels: 3,
+      data: new Uint8Array(300 * 200 * 3).fill(250) };
+    const patch = crop(pale, 10, 10, 60, 30);
+    const m = findTemplate(pale, patch);
+    expect(m!.score).toBeGreaterThan(0.99);   // a perfect score...
+    expect(variance(patch)).toBeLessThan(MIN_VARIANCE); // ...on nothing at all
+  });
+});

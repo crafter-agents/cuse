@@ -64,24 +64,34 @@ function meanDiff(hay: Image, needle: Image, ox: number, oy: number, cutoff: num
   return count ? total / count / 3 : Infinity;
 }
 
-function searchExhaustive(hay: Image, needle: Image, step: number,
-                          x0: number, y0: number, x1: number, y1: number): Match | null {
-  let best: Match | null = null;
-  let bestDiff = Infinity;
+/** The `keep` best positions in a region, worst-case exhaustive. */
+function searchTop(hay: Image, needle: Image, keep: number,
+                   x0: number, y0: number, x1: number, y1: number): Array<{ x: number; y: number; diff: number }> {
+  const found: Array<{ x: number; y: number; diff: number }> = [];
+  let worstKept = Infinity;
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
-      const d = meanDiff(hay, needle, x, y, bestDiff, step);
-      if (d < bestDiff) {
-        bestDiff = d;
-        best = { x, y, score: 0, centerX: 0, centerY: 0 };
+      const d = meanDiff(hay, needle, x, y, worstKept);
+      if (d === Infinity) continue;
+      found.push({ x, y, diff: d });
+      if (found.length > keep * 8) {
+        found.sort((a, b) => a.diff - b.diff);
+        found.length = keep;
+        worstKept = found[found.length - 1]!.diff;
       }
     }
   }
-  if (!best) return null;
-  best.score = Math.max(0, 1 - bestDiff / 255);
-  best.centerX = best.x + Math.floor(needle.width / 2);
-  best.centerY = best.y + Math.floor(needle.height / 2);
-  return best;
+  found.sort((a, b) => a.diff - b.diff);
+  return found.slice(0, keep);
+}
+
+function asMatch(hit: { x: number; y: number; diff: number }, needle: Image): Match {
+  return {
+    x: hit.x, y: hit.y,
+    score: Math.max(0, 1 - hit.diff / 255),
+    centerX: hit.x + Math.floor(needle.width / 2),
+    centerY: hit.y + Math.floor(needle.height / 2),
+  };
 }
 
 /**
@@ -95,31 +105,40 @@ export function findTemplate(hay: Image, needle: Image, minScore = 0.9): Match |
   if (needle.width > hay.width || needle.height > hay.height) {
     throw new Error(`needle ${needle.width}x${needle.height} is larger than the frame ${hay.width}x${hay.height}`);
   }
+  const maxX = hay.width - needle.width, maxY = hay.height - needle.height;
   // Shrink until the coarse search is cheap, but never past a usable needle.
   const factor = Math.max(1, Math.min(8, Math.floor(Math.min(needle.width, needle.height) / 4)));
 
-  let candidate: Match | null;
-  if (factor > 1) {
-    const smallHay = downsample(hay, factor);
-    const smallNeedle = downsample(needle, factor);
-    const coarse = searchExhaustive(smallHay, smallNeedle, 1,
-      0, 0, smallHay.width - smallNeedle.width, smallHay.height - smallNeedle.height);
-    if (!coarse) return null;
-    // Refine at full resolution around the coarse hit, allowing for the error
-    // the shrink introduced (up to one coarse pixel in each direction).
-    const pad = factor * 2;
-    const cx = coarse.x * factor, cy = coarse.y * factor;
-    candidate = searchExhaustive(hay, needle, 1,
-      Math.max(0, cx - pad), Math.max(0, cy - pad),
-      Math.min(hay.width - needle.width, cx + pad),
-      Math.min(hay.height - needle.height, cy + pad));
-  } else {
-    candidate = searchExhaustive(hay, needle, 1,
-      0, 0, hay.width - needle.width, hay.height - needle.height);
+  if (factor === 1) {
+    const hit = searchTop(hay, needle, 1, 0, 0, maxX, maxY)[0];
+    if (!hit) return null;
+    const m = asMatch(hit, needle);
+    return m.score >= minScore ? m : null;
   }
 
-  if (!candidate || candidate.score < minScore) return null;
-  return candidate;
+  const smallHay = downsample(hay, factor);
+  const smallNeedle = downsample(needle, factor);
+  // Several candidates, not one. Shrinking by 8 blurs a line of text into a
+  // grey smear, and the best coarse position can be further from the truth
+  // than a small refine window reaches - which is how a patch cut from a frame
+  // failed to be found in that very frame.
+  const coarse = searchTop(smallHay, smallNeedle, 5,
+    0, 0, smallHay.width - smallNeedle.width, smallHay.height - smallNeedle.height);
+  if (!coarse.length) return null;
+
+  const pad = factor * 3;
+  let best: Match | null = null;
+  for (const c of coarse) {
+    const cx = c.x * factor, cy = c.y * factor;
+    const hit = searchTop(hay, needle, 1,
+      Math.max(0, cx - pad), Math.max(0, cy - pad),
+      Math.min(maxX, cx + pad), Math.min(maxY, cy + pad))[0];
+    if (!hit) continue;
+    const m = asMatch(hit, needle);
+    if (!best || m.score > best.score) best = m;
+    if (best.score >= 0.999) break; // an exact hit; nothing can beat it
+  }
+  return best && best.score >= minScore ? best : null;
 }
 
 /**
