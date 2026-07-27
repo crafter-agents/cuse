@@ -136,15 +136,12 @@ jobs:
         run: |
           ./cu launch TextEdit --json
           sleep 5
+          ./cu focus TextEdit --json
           ./cu settle --json
           ./cu capture control-a.png --json
           sleep 1
           ./cu capture control-b.png --json
           ./cu diff control-a.png control-b.png --same-under=0 --json | tee control.json
-          # Front the window again right before typing: keystrokes go to
-          # whatever is frontmost, and settling took long enough that TextEdit
-          # could no longer be assumed to be it.
-          ./cu focus TextEdit --json
           ./cu capture before.png --json
           ./cu type "cu input reached this window and this line is long on purpose" --json
           sleep 2

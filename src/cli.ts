@@ -131,21 +131,34 @@ async function act(action: string, args: string[], force = false, sameUnder = 1)
       // Wait until the screen stops moving. An agent that acts while a window is
       // still drawing cannot tell its own effect from the animation - which is
       // exactly what broke the input check in CI.
+      //
+      // One quiet interval is not enough: an app that has been launched but has
+      // not drawn yet is perfectly still, and settling there means measuring the
+      // window's arrival as if it were your own doing. So require several quiet
+      // intervals in a row.
       case "settle": {
-        const tries = Number(args[0] ?? 20);
+        const tries = Number(args[0] ?? 30);
         const gapMs = Number(args[1] ?? 500);
-        const [a, b] = [resolve("settle-a.png"), resolve("settle-b.png")];
+        const needed = Number(args[2] ?? 3);
+        const frames = [resolve("settle-a.png"), resolve("settle-b.png")];
+        let cur = 0, streak = 0, last;
+        await run(captureCmd(os, frames[cur]!));
         for (let i = 1; i <= tries; i++) {
-          await run(captureCmd(os, a));
           await Bun.sleep(gapMs);
-          await run(captureCmd(os, b));
-          const d = diffImages(await loadImage(a), await loadImage(b), 30, 0);
-          if (d.verdict === "SAME") {
-            return { ok: true, ...base, detail: `settled after ${i} check${i > 1 ? "s" : ""}`, data: d };
+          const next = 1 - cur;
+          await run(captureCmd(os, frames[next]!));
+          last = diffImages(await loadImage(frames[cur]!), await loadImage(frames[next]!), 30, 0);
+          streak = last.verdict === "SAME" ? streak + 1 : 0;
+          cur = next;
+          if (streak >= needed) {
+            return { ok: true, ...base,
+              detail: `settled after ${i} check${i > 1 ? "s" : ""} (${needed} quiet in a row)`,
+              data: last };
           }
         }
         return { ok: false, ...base,
-          error: `the screen never went quiet: still changing after ${tries} checks` };
+          error: `the screen never went quiet: still changing after ${tries} checks`,
+          data: last };
       }
 
       case "diff": {
