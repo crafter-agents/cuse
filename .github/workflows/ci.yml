@@ -122,6 +122,9 @@ jobs:
           sleep 1
           ./cuse capture control-b.png --json
           ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          # Aim without being told a coordinate, then click by name.
+          bun scenarios/aim-check.ts ./cuse CU_TARGET
+          ./cuse click --window=CU_TARGET --json
           ./cuse capture before.png --json
           ./cuse type "cuse input reached this window and this line is long on purpose" --json
           sleep 1
@@ -158,9 +161,12 @@ jobs:
           sleep 1
           ./cuse capture control-b.png --json
           ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          bun scenarios/aim-check.ts ./cuse target
           # Front it again immediately before typing: keystrokes go to whatever
           # is frontmost, and settling takes seconds.
           ./cuse focus TextEdit --json
+          # Click by name rather than by coordinate - the whole point of aiming.
+          ./cuse click --window=target --json
           ./cuse capture before.png --json
           ./cuse type "cuse input reached this window and this line is long on purpose" --json
           sleep 2
@@ -198,6 +204,8 @@ jobs:
           fi
           ./cuse focus CU_TARGET --json
           ./cuse settle --json
+          bun scenarios/aim-check.ts ./cuse CU_TARGET
+          ./cuse click --window=CU_TARGET --json
           ./cuse capture control-a.png --json
           sleep 1
           ./cuse capture control-b.png --json

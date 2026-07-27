@@ -13,8 +13,19 @@ import { decodePNG, diffImages, isUniform, readHeader, type Image } from "./png.
 import { runWithTimeout, runBytes, explainFailure, timeoutFor } from "./exec.ts";
 import { encodePNG } from "./png.ts";
 import { decodeXWD } from "./xwd.ts";
+import { listWindowsCmd, parseWindows, pickWindow, pointIn, type Win } from "./window.ts";
+import { findTemplate, crop } from "./match.ts";
 
-export type Options = { force?: boolean; sameUnder?: number; timeoutMs?: number };
+export type Options = {
+  force?: boolean; sameUnder?: number; timeoutMs?: number;
+  /** aim at a window by title instead of at absolute coordinates */
+  window?: string;
+  /** aim at whatever matches this template image */
+  find?: string;
+  /** where inside the target to aim, as fractions of its size */
+  at?: [number, number];
+  minScore?: number;
+};
 
 export type Result = {
   ok: boolean; action: string; os: OS;
@@ -99,6 +110,72 @@ async function readLockState(os: OS): Promise<string | null> {
   // action it guards. Unreadable means unknown, and unknown never blocks.
   const r = await runWithTimeout(query, 5000);
   return r.code === 0 && !r.timedOut ? r.stdout : null;
+}
+
+/** Ask the OS what windows exist, and parse whatever shape it answers in. */
+async function listWindows(os: OS, timeoutMs: number): Promise<Win[]> {
+  const argv = listWindowsCmd(os);
+  const r = await runWithTimeout(argv, timeoutMs);
+  const problem = explainFailure(argv, r, timeoutMs);
+  if (problem) throw new Error(problem);
+  return parseWindows(r.stdout);
+}
+
+/**
+ * Turn an intention into a coordinate.
+ *
+ * This is the piece that makes cuse usable by an agent that has a screenshot
+ * rather than a coordinate: aim at a window by name, or at a picture of the
+ * thing to press, and cuse works out where that is right now.
+ */
+async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
+                             run: (argv: string[]) => Promise<void>): Promise<{ x: number; y: number; how: string }> {
+  const [fx, fy] = opts.at ?? [0.5, 0.5];
+  if (opts.window) {
+    const wins = await listWindows(os, timeoutMs);
+    const w = pickWindow(wins, opts.window);
+    if (!w) {
+      const seen = wins.map((v) => v.title).filter(Boolean).slice(0, 8).join(", ") || "none";
+      throw new Error(`no window matching '${opts.window}' (visible windows: ${seen})`);
+    }
+    const p = pointIn(w, fx, fy);
+    return { ...p, how: `${w.title} at ${Math.round(fx * 100)}%,${Math.round(fy * 100)}%` };
+  }
+  if (opts.find) {
+    const shot = resolve("find-frame.png");
+    await captureTo(os, shot, timeoutMs, run);
+    const hay = await loadImage(shot);
+    const needle = await loadImage(opts.find);
+    const m = findTemplate(hay, needle, opts.minScore ?? 0.9);
+    if (!m) throw new Error(`'${opts.find}' is not on screen (nothing matched above ${opts.minScore ?? 0.9})`);
+    // The frame may be larger than the coordinate space input uses: a Retina
+    // capture is twice the point size, so scale the hit back before clicking.
+    const scale = await pointScale(os, hay.width);
+    return {
+      x: Math.round((m.x + needle.width * fx) / scale),
+      y: Math.round((m.y + needle.height * fy) / scale),
+      how: `${opts.find} at ${m.centerX},${m.centerY} in the frame (score ${m.score.toFixed(3)})`,
+    };
+  }
+  throw new Error("no target: pass coordinates, --window=<name> or --find=<template.png>");
+}
+
+/**
+ * Captured pixels per input point.
+ *
+ * On a Retina Mac the screenshot is twice the size of the coordinate space that
+ * mouse events use, so a match found in the frame has to be halved before it is
+ * clicked. Other platforms capture and click in the same units.
+ */
+async function pointScale(os: OS, frameWidth: number): Promise<number> {
+  if (os !== "macos") return 1;
+  const r = await runWithTimeout(["osascript", "-e",
+    'tell application "Finder" to get bounds of window of desktop'], 5000);
+  const logical = Number(r.stdout.split(",")[2]);
+  if (!Number.isFinite(logical) || logical <= 0) return 1;
+  const ratio = frameWidth / logical;
+  // Only trust a clean integer ratio; anything else means the guess is wrong.
+  return Math.abs(ratio - Math.round(ratio)) < 0.01 ? Math.round(ratio) : 1;
 }
 
 const xy = (a?: string, b?: string) =>
@@ -193,6 +270,59 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           data: last };
       }
 
+      // Two coordinate spaces exist and they are not always the same one: a
+      // Retina capture is twice the size of the space clicks live in. Anything
+      // that turns a pixel into a click has to know the ratio, so cuse says it
+      // rather than leaving every caller to guess.
+      case "screen": {
+        const shot = resolve("screen-probe.png");
+        await captureTo(os, shot, timeoutMs, run);
+        const img = readHeader(new Uint8Array(await Bun.file(shot).arrayBuffer()));
+        if (!img) return { ok: false, ...base, error: "capture produced something that is not a PNG" };
+        const scale = await pointScale(os, img.width);
+        const data = {
+          frameWidth: img.width, frameHeight: img.height,
+          pointWidth: Math.round(img.width / scale), pointHeight: Math.round(img.height / scale),
+          scale,
+        };
+        return { ok: true, ...base,
+          detail: `${data.frameWidth}x${data.frameHeight} pixels, ${data.pointWidth}x${data.pointHeight} points (scale ${scale})`,
+          data };
+      }
+
+      // What is on screen right now, and where. The first half of aiming.
+      case "windows": {
+        const wins = await listWindows(os, timeoutMs);
+        const named = wins.filter((w) => w.title);
+        return { ok: true, ...base,
+          detail: named.length ? named.map((w) => `${w.title} ${w.width}x${w.height}+${w.x}+${w.y}`).join("; ")
+                               : "no titled windows",
+          data: wins };
+      }
+
+      // Where is this picture on the screen? Returns a point to click.
+      case "find": {
+        const needlePath = args[0];
+        if (!needlePath) return { ok: false, ...base, error: "find needs a template PNG" };
+        const t = await resolveTarget(os, { ...opts, find: needlePath }, timeoutMs, run);
+        return { ok: true, ...base, detail: `found ${t.how} -> click ${t.x},${t.y}`,
+          data: { x: t.x, y: t.y } };
+      }
+
+      // Cut a template out of a screenshot, which is how a needle gets made.
+      case "crop": {
+        const [src, x, y, w, h, out] = args;
+        if (!src || !out) return { ok: false, ...base, error: "crop needs <in.png> <x> <y> <w> <h> <out.png>" };
+        const full = await loadImage(src);
+        // Coordinates are given in the space clicks use; the frame may be
+        // denser. Scale them so a crop taken from a window rectangle lands on
+        // that window rather than a quarter of the way into the screen.
+        const k = await pointScale(os, full.width);
+        const img = crop(full, Number(x) * k, Number(y) * k, Number(w) * k, Number(h) * k);
+        await Bun.write(resolve(out), encodePNG(img, deflate));
+        return { ok: true, ...base, detail: `${img.width}x${img.height} -> ${out}` };
+      }
+
       case "diff": {
         const [a, b] = [args[0], args[1]];
         if (!a || !b) return { ok: false, ...base, error: "diff needs two PNG paths" };
@@ -206,14 +336,24 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       case "key": { await run(chordToOS(os, args[0] ?? "").cmd); return { ok: true, ...base, detail: `sent ${args[0]}` }; }
 
       case "move": {
-        await execute(movePlan(os, Number(args[0]), Number(args[1])), run);
-        return { ok: true, ...base, detail: `moved ${args[0]},${args[1]}` };
+        const t = args[0] !== undefined
+          ? { x: Number(args[0]), y: Number(args[1]), how: `${args[0]},${args[1]}` }
+          : await resolveTarget(os, opts, timeoutMs, run);
+        await execute(movePlan(os, t.x, t.y), run);
+        return { ok: true, ...base, detail: `moved to ${t.how}`, data: { x: t.x, y: t.y } };
       }
       case "click": case "dblclick": {
         const count = action === "dblclick" ? 2 : 1;
-        const at = xy(args[0], args[1]);
-        await execute(clickPlan(os, count, at.x, at.y), run);
-        return { ok: true, ...base, detail: at.x === undefined ? action : `${action} at ${at.x},${at.y}` };
+        // Coordinates if given; otherwise aim at a window or a picture. A bare
+        // click with neither still clicks wherever the cursor already is.
+        const aimed = opts.window || opts.find;
+        const t = args[0] !== undefined
+          ? { x: Number(args[0]), y: Number(args[1]), how: `${args[0]},${args[1]}` }
+          : aimed ? await resolveTarget(os, opts, timeoutMs, run) : null;
+        await execute(clickPlan(os, count, t?.x, t?.y), run);
+        return { ok: true, ...base,
+          detail: t ? `${action} at ${t.how}` : action,
+          ...(t ? { data: { x: t.x, y: t.y } } : {}) };
       }
       case "scroll": {
         const dir = (args[0] as "up" | "down") ?? "down";
@@ -249,22 +389,32 @@ Screen
 Windows and apps
   launch <app>                 start an app
   focus <name>                 bring a window to the front
+  windows                      list visible windows with their rectangles
+
+Finding things
+  find <template.png>          where that picture is; prints a point to click
+  crop <in.png> x y w h <out>  cut a template out of a screenshot
 
 Input
   type <text>                  send text to the focused window
   key <chord>                  e.g. cmd+s, ctrl+shift+a, Return
   move <x> <y>                 move the cursor
-  click | dblclick [x] [y]     click, optionally at a point
+  click | dblclick [x] [y]     click; or aim with --window / --find
   scroll <up|down> [amount]    scroll the view under the cursor
   select-all | copy | paste    the platform's own chord for each
 
 Other
   os                           which platform this is
+  screen                       frame size, point size, and the ratio between
 
 Flags
   --json                       structured Result on stdout
   --timeout=<ms>               deadline for this action
   --same-under=<pct>           diff tolerance; 0 means "did anything change"
+  --window=<name>              aim at a window instead of a coordinate
+  --find=<template.png>        aim at whatever matches this picture
+  --at=<fx,fy>                 where inside the target, 0..1 (default centre)
+  --min-score=<0..1>           how close a match must be (default 0.9)
   --force                      act even if the session looks locked
   --help, --version
 
@@ -296,8 +446,13 @@ if (import.meta.main) {
   const flag = (name: string) => argv.find((a) => a.startsWith(`--${name}=`))?.split("=")[1];
   const sameUnder = flag("same-under") !== undefined ? Number(flag("same-under")) : 1;
   const timeoutMs = flag("timeout") !== undefined ? Number(flag("timeout")) : undefined;
+  const window = flag("window");
+  const find = flag("find");
+  const minScore = flag("min-score") !== undefined ? Number(flag("min-score")) : undefined;
+  const atRaw = flag("at");
+  const at = atRaw ? atRaw.split(",").map(Number) as [number, number] : undefined;
   const [action, ...args] = argv.filter((a) => !a.startsWith("--"));
-  const r = await act(action ?? "", args, { force, sameUnder, timeoutMs });
+  const r = await act(action ?? "", args, { force, sameUnder, timeoutMs, window, find, at, minScore });
   console.log(json ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cuse: ${r.error}`);
   if (!json && r.warn) console.warn(`cuse: warning: ${r.warn}`);
   process.exit(exitCodeFor(r));
