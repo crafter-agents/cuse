@@ -158,3 +158,33 @@ describe("what the score does not tell you", () => {
     expect(variance(patch)).toBeLessThan(MIN_VARIANCE); // ...on nothing at all
   });
 });
+
+describe("a patch that does not sit on the shrink grid", () => {
+  /** Fine detail, like text: this is what a heavy shrink destroys. */
+  function detailed(w: number, h: number): Image {
+    const data = new Uint8Array(w * h * 3).fill(250);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        // slanted thin lines plus a slow gradient: locally distinctive
+        if ((x * 2 + y * 3) % 23 < 2) {
+          const i = (y * w + x) * 3;
+          data[i] = 30 + (x % 60); data[i + 1] = 40; data[i + 2] = 200 - (y % 50);
+        }
+      }
+    }
+    return { width: w, height: h, channels: 3, data };
+  }
+
+  test("is still found exactly, at offsets that are not multiples of 8", () => {
+    // 386 is 48*8+2. Shrinking by 8 averages different blocks than the needle's
+    // own, so the true position scored worse than unrelated ones and a
+    // single-jump pyramid returned a confident wrong answer 74px away.
+    const hay = detailed(1024, 768);
+    for (const [x, y] of [[386, 212], [387, 213], [101, 99]]) {
+      const m = findTemplate(hay, crop(hay, x!, y!, 160, 50));
+      expect(m).not.toBeNull();
+      expect([m!.x, m!.y]).toEqual([x, y]);
+      expect(m!.score).toBeGreaterThan(0.999);
+    }
+  });
+});

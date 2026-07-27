@@ -106,37 +106,57 @@ export function findTemplate(hay: Image, needle: Image, minScore = 0.9): Match |
     throw new Error(`needle ${needle.width}x${needle.height} is larger than the frame ${hay.width}x${hay.height}`);
   }
   const maxX = hay.width - needle.width, maxY = hay.height - needle.height;
-  // Shrink until the coarse search is cheap, but never past a usable needle.
-  const factor = Math.max(1, Math.min(8, Math.floor(Math.min(needle.width, needle.height) / 4)));
 
-  if (factor === 1) {
-    const hit = searchTop(hay, needle, 1, 0, 0, maxX, maxY)[0];
-    if (!hit) return null;
-    const m = asMatch(hit, needle);
-    return m.score >= minScore ? m : null;
+  // Levels, not one big jump. Shrinking straight to 1/8 was wrong in a way that
+  // took a real frame to see: a patch at x=386 does not sit on the 8-pixel grid,
+  // so its averaged blocks differ from the ones the search compares against, and
+  // the true position scored worse than unrelated ones. Halving repeatedly keeps
+  // every step's misalignment to a pixel or two, which the next refine absorbs.
+  const levels: number[] = [];
+  for (let f = 8; f >= 2; f = Math.floor(f / 2)) {
+    if (Math.min(needle.width, needle.height) / f >= 8) levels.push(f);
   }
 
-  const smallHay = downsample(hay, factor);
-  const smallNeedle = downsample(needle, factor);
-  // Several candidates, not one. Shrinking by 8 blurs a line of text into a
-  // grey smear, and the best coarse position can be further from the truth
-  // than a small refine window reaches - which is how a patch cut from a frame
-  // failed to be found in that very frame.
-  const coarse = searchTop(smallHay, smallNeedle, 5,
-    0, 0, smallHay.width - smallNeedle.width, smallHay.height - smallNeedle.height);
-  if (!coarse.length) return null;
+  let candidates: Array<{ x: number; y: number; diff: number }> | null = null;
 
-  const pad = factor * 3;
+  for (const f of levels) {
+    const sh = downsample(hay, f), sn = downsample(needle, f);
+    if (!candidates) {
+      candidates = searchTop(sh, sn, 6, 0, 0, sh.width - sn.width, sh.height - sn.height)
+        .map((c) => ({ ...c, x: c.x * f, y: c.y * f }));
+      continue;
+    }
+    // Refine each candidate at this finer level, in its own neighbourhood.
+    const pad = f * 3;
+    const next: Array<{ x: number; y: number; diff: number }> = [];
+    for (const c of candidates) {
+      const hits = searchTop(sh, sn, 2,
+        Math.max(0, Math.floor((c.x - pad) / f)), Math.max(0, Math.floor((c.y - pad) / f)),
+        Math.min(sh.width - sn.width, Math.ceil((c.x + pad) / f)),
+        Math.min(sh.height - sn.height, Math.ceil((c.y + pad) / f)));
+      for (const h of hits) next.push({ ...h, x: h.x * f, y: h.y * f });
+    }
+    if (next.length) {
+      next.sort((a, b) => a.diff - b.diff);
+      candidates = next.slice(0, 6);
+    }
+  }
+
+  // Full resolution, around whatever survived - or everywhere, for a needle too
+  // small to have had a pyramid at all.
   let best: Match | null = null;
-  for (const c of coarse) {
-    const cx = c.x * factor, cy = c.y * factor;
-    const hit = searchTop(hay, needle, 1,
-      Math.max(0, cx - pad), Math.max(0, cy - pad),
-      Math.min(maxX, cx + pad), Math.min(maxY, cy + pad))[0];
+  const windows = candidates?.length
+    ? candidates.map((c) => [
+        Math.max(0, c.x - 6), Math.max(0, c.y - 6),
+        Math.min(maxX, c.x + 6), Math.min(maxY, c.y + 6)] as const)
+    : [[0, 0, maxX, maxY] as const];
+
+  for (const [x0, y0, x1, y1] of windows) {
+    const hit = searchTop(hay, needle, 1, x0, y0, x1, y1)[0];
     if (!hit) continue;
     const m = asMatch(hit, needle);
     if (!best || m.score > best.score) best = m;
-    if (best.score >= 0.999) break; // an exact hit; nothing can beat it
+    if (best.score >= 0.999) break;
   }
   return best && best.score >= minScore ? best : null;
 }
