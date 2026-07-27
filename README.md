@@ -58,16 +58,21 @@ the resulting PNG and uploads it as a build artifact.
 | mouse | CoreGraphics, no install | xdotool | user32 mouse_event |
 | focus | `open -a` | `windowfocus`, no WM needed | `AppActivate` |
 
-**Keyboard input is verified by driving a real window**, not by trusting the
-exit code: focus an app, capture, type, capture again, and require cu's own
-differ to report a change. Measured on the last run — macOS moved 1910 pixels,
-Linux 837.
+**Keyboard input is verified by what the app received**, not by the exit code
+and not by pixels. CI opens a real window, focuses it, types, and then checks
+something only delivered input can produce:
 
-That check is only meaningful with a control, because an idle screen is not
-always still: macOS blinks a text caret, which moved 160 pixels with nothing
-typed at all. So CI measures both and requires typing to move at least five
-times more than idling does. It calibrates itself per platform and still fails
-outright if a keystroke goes nowhere.
+- macOS types into a file open in TextEdit, saves with `cu key cmd+s`, and greps
+  the file on disk.
+- Linux types a command into a shell in an xterm, presses Return with
+  `cu key Return`, and requires the file that command creates to exist.
+
+It measures the pixel change too — idle 0 px against 837 typed on Linux, and
+prints both — but does not gate on it. That check was tried and it was wrong in
+both directions: it passed twice on a blinking text caret while no keystroke was
+landing, and failed twice on a window still drawing while input was landing
+fine. A gate that can pass without the thing it tests is worse than none, so the
+pixel delta is reported as evidence and the file on disk is what has to be true.
 
 **Windows input is not provable on a hosted runner.** Processes the job starts
 present no window on the captured desktop — `Get-Process` returns an empty
@@ -129,6 +134,9 @@ bun run build     # compile a standalone binary to dist/cu
 - macOS keystrokes go to the frontmost app, so `focus` before `type`. CI hit
   exactly this: after waiting for the screen to settle, TextEdit was no longer
   frontmost and the keystroke moved 126 pixels, the size of the caret.
+- `settle` waits for three quiet intervals in a row, which is a heuristic, not a
+  guarantee. An app that has been launched but has not drawn yet is perfectly
+  still, and one quiet interval used to be enough to fool it.
 - `scroll` on Windows sends Page Up/Down rather than a wheel event.
 - Linux needs `xdotool` and `imagemagick`, and an X display. Wayland is not
   supported.
