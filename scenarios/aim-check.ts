@@ -58,15 +58,18 @@ if (!found.ok) {
 }
 if (!found.ok) die(`the patch cut from this very screen was not found again: ${found.error}`);
 
-// 3. The answer has to be inside the window the patch came from. A matcher that
-//    returns a plausible-looking point somewhere else is worse than one that
-//    returns nothing, because an agent would click it.
+// 3. The answer has to be where the patch was cut from - not merely somewhere
+//    inside the window. "Inside the window" passed once while the matcher had
+//    locked onto a different patch of the same blank text box, which is exactly
+//    the kind of green that means nothing.
 const { x, y } = found.data as { x: number; y: number };
-const inside = x >= win.x && x <= win.x + win.width && y >= win.y && y <= win.y + win.height;
-if (!inside) {
-  die(`found ${x},${y}, which is outside ${win.title} (${win.x},${win.y} ${win.width}x${win.height})`);
+const want = { x: px + Math.floor(patch.w / 2), y: py + Math.floor(patch.h / 2) };
+const off = Math.max(Math.abs(x - want.x), Math.abs(y - want.y));
+const tolerance = 4;
+if (off > tolerance) {
+  die(`found ${x},${y} but the patch was cut from ${want.x},${want.y} - off by ${off}px`);
 }
-console.log(`aim ok: ${x},${y} is inside ${win.title}`);
+console.log(`aim ok: ${x},${y} is where the patch came from (off by ${off}px)`);
 
 // 4. And a picture that is not on screen must come back as absent, not as the
 //    least-bad guess anywhere on the desktop.

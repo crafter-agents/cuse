@@ -80,6 +80,52 @@ export function parseWindows(text: string): Win[] {
   return out;
 }
 
+/**
+ * Which window has the keyboard right now?
+ *
+ * Observed in CI: macOS raised a Screen Recording permission dialog in the
+ * middle of a run, it took focus, and every keystroke afterwards went into it
+ * while cuse happily reported success. Knowing what is in front is the only way
+ * to notice that before typing a password into someone else's dialog.
+ */
+export function frontmostCmd(os: OS): string[] {
+  switch (os) {
+    case "macos": return ["osascript", "-e",
+      'tell application "System Events"\n' +
+      '  set p to first application process whose frontmost is true\n' +
+      '  set n to name of p\n' +
+      '  try\n' +
+      '    set n to n & "\t" & (name of front window of p)\n' +
+      '  end try\n' +
+      '  return n\n' +
+      'end tell'];
+    case "linux": return ["sh", "-c",
+      'id=$(xdotool getactivewindow 2>/dev/null) || exit 0; xdotool getwindowname "$id" 2>/dev/null'];
+    case "windows": return ps(
+      "Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes;" +
+      "$e=[System.Windows.Automation.AutomationElement]::FocusedElement;" +
+      "if($e){Write-Output $e.Current.Name}");
+    default: throw new Error(`frontmost unsupported on ${os}`);
+  }
+}
+
+/** The names the frontmost query prints, process and window, tab separated. */
+export function parseFrontmost(text: string): string {
+  return text.split("\n").map((l) => l.trim()).filter(Boolean).join(" ").replace(/\t/g, " ").trim();
+}
+
+/**
+ * Is the thing in front the thing we meant to type at?
+ *
+ * Substring, case-insensitive, matching how windows are named elsewhere. An
+ * unreadable answer is not treated as a mismatch: the guard must not block work
+ * on a platform that cannot answer the question.
+ */
+export function frontmostMatches(front: string, expected: string): boolean {
+  if (!front) return true;
+  return front.toLowerCase().includes(expected.toLowerCase());
+}
+
 /** Case-insensitive substring match, the same rule `focus` uses. */
 export function pickWindow(wins: Win[], name: string): Win | null {
   const n = name.toLowerCase();

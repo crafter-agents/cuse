@@ -1,5 +1,6 @@
 import { test, expect, describe } from "bun:test";
-import { listWindowsCmd, parseWindows, pickWindow, pointIn } from "../src/window.ts";
+import { listWindowsCmd, parseWindows, pickWindow, pointIn,
+         frontmostCmd, parseFrontmost, frontmostMatches } from "../src/window.ts";
 import type { OS } from "../src/os.ts";
 
 describe("listing windows", () => {
@@ -68,5 +69,28 @@ describe("aiming at a window", () => {
     expect(pointIn(wins[0]!, 0, 0)).toEqual({ x: 100, y: 50 });
     expect(pointIn(wins[0]!, 1, 1)).toEqual({ x: 500, y: 250 });
     expect(pointIn({ ...wins[0]!, x: 300, width: 800 }, 0.5, 0.5)).toEqual({ x: 700, y: 150 });
+  });
+});
+
+describe("who has the keyboard", () => {
+  test("every OS can be asked", () => {
+    for (const os of ["macos", "linux", "windows"] as OS[]) {
+      expect(frontmostCmd(os).length).toBeGreaterThan(0);
+    }
+  });
+  test("the answer is flattened to one line, process and window together", () => {
+    expect(parseFrontmost("TextEdit\ttarget.txt\n")).toBe("TextEdit target.txt");
+    expect(parseFrontmost("  CU_TARGET \n")).toBe("CU_TARGET");
+  });
+  test("a match is a case-insensitive substring, like focus", () => {
+    expect(frontmostMatches("TextEdit target.txt", "textedit")).toBe(true);
+    expect(frontmostMatches("TextEdit target.txt", "target")).toBe(true);
+  });
+  test("the dialog that actually stole focus in CI would be caught", () => {
+    // "bash is requesting to bypass the system private window picker"
+    expect(frontmostMatches("universalAccessAuthWarn", "TextEdit")).toBe(false);
+  });
+  test("an unreadable answer never blocks: unknown is not a mismatch", () => {
+    expect(frontmostMatches("", "TextEdit")).toBe(true);
   });
 });

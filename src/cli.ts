@@ -13,7 +13,8 @@ import { decodePNG, diffImages, isUniform, readHeader, type Image } from "./png.
 import { runWithTimeout, runBytes, explainFailure, timeoutFor } from "./exec.ts";
 import { encodePNG } from "./png.ts";
 import { decodeXWD } from "./xwd.ts";
-import { listWindowsCmd, parseWindows, pickWindow, pointIn, type Win } from "./window.ts";
+import { listWindowsCmd, parseWindows, pickWindow, pointIn, frontmostCmd, parseFrontmost,
+         frontmostMatches, type Win } from "./window.ts";
 import { findTemplate, crop } from "./match.ts";
 
 export type Options = {
@@ -25,6 +26,8 @@ export type Options = {
   /** where inside the target to aim, as fractions of its size */
   at?: [number, number];
   minScore?: number;
+  /** refuse to send input unless this is the frontmost window */
+  expectFront?: string;
 };
 
 export type Result = {
@@ -202,6 +205,22 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
     if (locked === true) return { ok: false, ...base, error: LOCKED_REASON };
   }
 
+  // The same problem one layer up: the session is unlocked, but a dialog took
+  // focus and would receive the keystrokes instead. Opt-in, because cuse cannot
+  // know what the caller meant to type at.
+  if (opts.expectFront && INPUT_ACTIONS.includes(action) && !force) {
+    try {
+      const argv = frontmostCmd(os);
+      const r = await runWithTimeout(argv, 5000);
+      const front = r.code === 0 && !r.timedOut ? parseFrontmost(r.stdout) : "";
+      if (!frontmostMatches(front, opts.expectFront)) {
+        return { ok: false, ...base,
+          error: `'${front}' is in front, not '${opts.expectFront}' - ` +
+            `something took focus and would have received this input` };
+      }
+    } catch { /* cannot tell: do not block on it */ }
+  }
+
   try {
     switch (action) {
       case "os": return { ok: true, ...base, detail: os };
@@ -288,6 +307,17 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         return { ok: true, ...base,
           detail: `${data.frameWidth}x${data.frameHeight} pixels, ${data.pointWidth}x${data.pointHeight} points (scale ${scale})`,
           data };
+      }
+
+      // Who has the keyboard? A system dialog that steals focus is invisible to
+      // an agent reading only exit codes.
+      case "frontmost": {
+        const argv = frontmostCmd(os);
+        const r = await runWithTimeout(argv, timeoutMs);
+        const problem = explainFailure(argv, r, timeoutMs);
+        if (problem) throw new Error(problem);
+        const front = parseFrontmost(r.stdout);
+        return { ok: true, ...base, detail: front || "(nothing is frontmost)", data: { front } };
       }
 
       // What is on screen right now, and where. The first half of aiming.
@@ -390,6 +420,7 @@ Windows and apps
   launch <app>                 start an app
   focus <name>                 bring a window to the front
   windows                      list visible windows with their rectangles
+  frontmost                    which window currently has the keyboard
 
 Finding things
   find <template.png>          where that picture is; prints a point to click
@@ -415,6 +446,7 @@ Flags
   --find=<template.png>        aim at whatever matches this picture
   --at=<fx,fy>                 where inside the target, 0..1 (default centre)
   --min-score=<0..1>           how close a match must be (default 0.9)
+  --expect-front=<name>        refuse to type unless that window is in front
   --force                      act even if the session looks locked
   --help, --version
 
@@ -449,10 +481,11 @@ if (import.meta.main) {
   const window = flag("window");
   const find = flag("find");
   const minScore = flag("min-score") !== undefined ? Number(flag("min-score")) : undefined;
+  const expectFront = flag("expect-front");
   const atRaw = flag("at");
   const at = atRaw ? atRaw.split(",").map(Number) as [number, number] : undefined;
   const [action, ...args] = argv.filter((a) => !a.startsWith("--"));
-  const r = await act(action ?? "", args, { force, sameUnder, timeoutMs, window, find, at, minScore });
+  const r = await act(action ?? "", args, { force, sameUnder, timeoutMs, window, find, at, minScore, expectFront });
   console.log(json ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cuse: ${r.error}`);
   if (!json && r.warn) console.warn(`cuse: warning: ${r.warn}`);
   process.exit(exitCodeFor(r));

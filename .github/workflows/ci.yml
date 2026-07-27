@@ -122,13 +122,12 @@ jobs:
           sleep 1
           ./cuse capture control-b.png --json
           ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
-          # Aim without being told a coordinate, then click by name - right
-          # before typing, because focus drifts across intervening captures.
-          bun scenarios/aim-check.ts ./cuse CU_TARGET
+          # Click by name rather than by coordinate, right before typing:
+          # focus drifts across intervening captures.
           ./cuse focus CU_TARGET --json
           ./cuse click --window=CU_TARGET --json
           ./cuse capture before.png --json
-          ./cuse type "cuse input reached this window and this line is long on purpose" --json
+          ./cuse type "cuse input reached this window and this line is long on purpose" --expect-front=CU_TARGET --json
           sleep 1
           ./cuse capture after.png --json
           ./cuse diff before.png after.png --same-under=0 --json | tee diff.json
@@ -163,14 +162,13 @@ jobs:
           sleep 1
           ./cuse capture control-b.png --json
           ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
-          bun scenarios/aim-check.ts ./cuse target
           # Front it again immediately before typing: keystrokes go to whatever
           # is frontmost, and settling takes seconds.
           ./cuse focus TextEdit --json
           # Click by name rather than by coordinate - the whole point of aiming.
           ./cuse click --window=target --json
           ./cuse capture before.png --json
-          ./cuse type "cuse input reached this window and this line is long on purpose" --json
+          ./cuse type "cuse input reached this window and this line is long on purpose" --expect-front=TextEdit --json
           sleep 2
           ./cuse capture after.png --json
           ./cuse diff before.png after.png --same-under=0 --json | tee diff.json
@@ -182,6 +180,9 @@ jobs:
           cat target.txt
           grep -q "cuse input reached this window" target.txt || {
             echo "the keystrokes never reached the document"; exit 1; }
+          # Aim last: the window now holds unique text, which makes a patch of it
+          # findable rather than one blank region among many.
+          bun scenarios/aim-check.ts ./cuse target
 
       # Recon showed the job runs in the interactive session with a real
       # foreground window - what failed before was Notepad, which on Windows
@@ -206,7 +207,6 @@ jobs:
           fi
           ./cuse focus CU_TARGET --json
           ./cuse settle --json
-          bun scenarios/aim-check.ts ./cuse CU_TARGET
           ./cuse capture control-a.png --json
           sleep 1
           ./cuse capture control-b.png --json
@@ -222,6 +222,7 @@ jobs:
           cat "$sink" || true
           grep -q "cuse input reached this window" "$sink" || {
             echo "the window never received the keystrokes"; exit 1; }
+          bun scenarios/aim-check.ts ./cuse CU_TARGET
 
       # The pixel delta is reported, not gated. On a CI desktop it is not a
       # stable measurement: it passed twice on caret noise while input was
