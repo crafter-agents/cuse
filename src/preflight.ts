@@ -11,7 +11,9 @@ export type Probe = {
   has: (tool: string) => boolean;
 };
 
-/** Every action below the screenshot needs the same thing on Linux: an X display. */
+export const INPUT_ACTIONS = ["type", "key", "move", "scroll", "click", "dblclick", "select-all", "copy", "paste"];
+
+/** Everything that draws or reads the screen needs the same thing on Linux. */
 export function displayPreflight(os: OS, probe: Probe): Preflight {
   if (os !== "linux") return { ok: true };
   if (!probe.env.DISPLAY) {
@@ -20,41 +22,41 @@ export function displayPreflight(os: OS, probe: Probe): Preflight {
   return { ok: true };
 }
 
-/** The tool each action shells out to, when it is not guaranteed present. */
+/** The tool each action shells out to, when it is not guaranteed to be present. */
 export function requiredTool(os: OS, action: string): { tool: string; install: string } | null {
-  if (os !== "linux") return null; // screencapture/osascript ship with macOS; powershell with Windows
+  // macOS mouse actions go through CoreGraphics in-process, and osascript,
+  // screencapture and open all ship with the OS - so nothing to install.
+  if (os !== "linux") return null;
   if (action === "capture") return { tool: "import", install: "apt-get install -y imagemagick" };
-  if (["type", "key", "move", "scroll", "click", "select-all", "copy", "paste"].includes(action)) {
-    return { tool: "xdotool", install: "apt-get install -y xdotool" };
-  }
+  if (INPUT_ACTIONS.includes(action)) return { tool: "xdotool", install: "apt-get install -y xdotool" };
   return null;
 }
 
-/**
- * The quiet failure of computer-use: capture succeeds, the frame is blank. A
- * display with nothing drawn on it still yields a correctly sized PNG, and an
- * agent reading only `ok: true` will keep acting against an empty screen.
- *
- * A uniform image compresses to almost nothing, so bytes-per-pixel separates
- * the two cases by orders of magnitude. Observed in CI: a blank Xvfb frame is
- * 0.0002 B/px, real macOS and Windows sessions are 0.10 and 0.34. This is a
- * heuristic, so it warns - it never turns a successful capture into a failure.
- */
-export function blankFrameWarning(bytes: number, width: number, height: number): string | undefined {
-  const pixels = width * height;
-  if (pixels <= 0) return undefined;
-  const bpp = bytes / pixels;
-  if (bpp < 0.005) {
-    return `frame looks blank (${bytes}B for ${width}x${height}): the display is on but nothing is drawn on it`;
-  }
-  return undefined;
-}
-
 export function preflight(os: OS, action: string, probe: Probe): Preflight {
-  if (os === "unknown") return { ok: false, reason: `unsupported platform` };
+  if (os === "unknown") return { ok: false, reason: "unsupported platform" };
   const needed = requiredTool(os, action);
   if (needed && !probe.has(needed.tool)) {
     return { ok: false, reason: `\`${needed.tool}\` not found: ${needed.install}` };
   }
   return displayPreflight(os, probe);
+}
+
+/**
+ * The quiet failure of computer-use: the action succeeds, the screen is empty.
+ * A display with nothing drawn on it still yields a correctly sized PNG, and an
+ * agent reading only `ok: true` will keep acting against a blank screen.
+ *
+ * When the frame decodes, `uniform` is the exact answer. When it does not, fall
+ * back to bytes-per-pixel: a uniform image compresses to almost nothing, and the
+ * two cases sit orders of magnitude apart (observed in CI: 0.0002 B/px on a bare
+ * Xvfb against 0.10 and 0.34 on real macOS and Windows sessions).
+ */
+export function frameWarning(f: { bytes: number; width: number; height: number; uniform?: boolean }): string | undefined {
+  const pixels = f.width * f.height;
+  if (pixels <= 0) return undefined;
+  const blank = f.uniform ?? f.bytes / pixels < 0.005;
+  if (!blank) return undefined;
+  const how = f.uniform === undefined ? ` (${f.bytes}B for ${f.width}x${f.height})` : "";
+  return `frame is blank${how}: the display is on but nothing is drawn on it - ` +
+    `input actions will be delivered to no window`;
 }

@@ -74,3 +74,78 @@ jobs:
         with:
           name: capture-${{ matrix.os }}
           path: out.png
+
+  # Does input actually land in a window? Capture, act, capture again, and let
+  # cu's own differ decide - the only check that cannot pass while the keystroke
+  # goes nowhere. Runs against a throwaway app on the runner, never a real desktop.
+  input:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - name: build
+        run: bun build --compile src/cli.ts --outfile cu
+
+      - name: linux - type into an xterm under Xvfb
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb imagemagick xdotool xterm
+          cat > drive.sh <<'EOF'
+          set -e
+          xterm -geometry 100x30+0+0 &
+          sleep 3
+          ./cu capture before.png --json
+          ./cu type "cu input reached this window" --json
+          sleep 1
+          ./cu capture after.png --json
+          ./cu diff before.png after.png --json | tee diff.json
+          EOF
+          chmod +x drive.sh
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" ./drive.sh
+
+      - name: macos - type into TextEdit
+        if: runner.os == 'macOS'
+        run: |
+          ./cu launch TextEdit --json
+          sleep 5
+          ./cu capture before.png --json
+          ./cu type "cu input reached this window" --json
+          sleep 2
+          ./cu capture after.png --json
+          ./cu diff before.png after.png --json | tee diff.json
+
+      - name: windows - type into notepad
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          ./cu launch notepad --json
+          sleep 5
+          ./cu capture before.png --json
+          ./cu type "cu input reached this window" --json
+          sleep 2
+          ./cu capture after.png --json
+          ./cu diff before.png after.png --json | tee diff.json
+
+      # The screen must differ between the two frames. If the keystroke went
+      # nowhere, the verdict is SAME and this fails - which is the point.
+      - name: assert the screen changed because of the keystroke
+        shell: bash
+        run: |
+          cat diff.json
+          grep -q '"verdict":"CHANGED"' diff.json || {
+            echo "input did not change the screen: the keystroke was delivered to nothing"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: input-${{ matrix.os }}
+          path: |
+            before.png
+            after.png
+            diff.json

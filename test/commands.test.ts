@@ -1,7 +1,12 @@
 import { test, expect, describe } from "bun:test";
 import { detectOS, chordToOS } from "../src/os.ts";
-import { captureCmd, typeCmd, launchCmd, moveCmd, scrollCmd, comboKey } from "../src/commands.ts";
-import { preflight, blankFrameWarning } from "../src/preflight.ts";
+import {
+  captureCmd, typeCmd, launchCmd, comboKey,
+  escapeAppleScript, escapePowerShell, escapeSendKeys,
+} from "../src/commands.ts";
+import { movePlan, clickPlan, scrollPlan } from "../src/plan.ts";
+import { preflight, frameWarning, requiredTool } from "../src/preflight.ts";
+import { parseMacLockState, parseWindowsLockState, isSessionLocked, LOCK_QUERY, LOCKED_REASON } from "../src/session.ts";
 import type { OS } from "../src/os.ts";
 
 const OSES: OS[] = ["macos", "linux", "windows"];
@@ -21,49 +26,125 @@ describe("capture", () => {
   test("macOS screencapture", () => expect(captureCmd("macos", "o.png")).toEqual(["screencapture", "-x", "o.png"]));
   test("linux import", () => expect(captureCmd("linux", "o.png")).toEqual(["import", "-window", "root", "o.png"]));
   test("windows GDI CopyFromScreen + path", () => {
-    const c = captureCmd("windows", "o.png").join(" ");
+    const c = captureCmd("windows", "C:\\tmp\\o.png").join(" ");
     expect(c).toContain("CopyFromScreen");
-    expect(c).toContain("o.png");
+    expect(c).toContain("C:\\tmp\\o.png");
   });
-  test("unknown OS throws (no silent wrong behavior)", () => expect(() => captureCmd("unknown", "o.png")).toThrow("unsupported"));
+  test("windows names the PNG encoder rather than guessing from the extension", () => {
+    expect(captureCmd("windows", "o.png").join(" ")).toContain("ImageFormat]::Png");
+  });
+  test("windows releases the GDI objects", () => {
+    const c = captureCmd("windows", "o.png").join(" ");
+    expect(c).toContain("$g.Dispose()");
+    expect(c).toContain("$b.Dispose()");
+  });
+  test("every supported OS builds a command", () => {
+    for (const os of OSES) expect(captureCmd(os, "o.png").length).toBeGreaterThan(0);
+  });
+});
+
+describe("escaping", () => {
+  test("AppleScript escapes quote and backslash", () => {
+    expect(escapeAppleScript('say "hi"')).toBe('say \\"hi\\"');
+    expect(escapeAppleScript("a\\b")).toBe("a\\\\b");
+  });
+  test("PowerShell doubles a single quote", () => {
+    expect(escapePowerShell("it's")).toBe("it''s");
+  });
+  test("SendKeys braces its syntax characters", () => {
+    // Unbraced, "a+b" would send shift+b instead of the literal text.
+    expect(escapeSendKeys("a+b")).toBe("a{+}b");
+    expect(escapeSendKeys("100%")).toBe("100{%}");
+    expect(escapeSendKeys("f(x)[1]")).toBe("f{(}x{)}{[}1{]}");
+  });
+  test("a quote in typed text does not break out of the AppleScript literal", () => {
+    const c = typeCmd("macos", 'he said "no"').join(" ");
+    expect(c).toContain('\\"no\\"');
+  });
+  test("a quote in typed text does not break out of the PowerShell literal", () => {
+    expect(typeCmd("windows", "it's").join(" ")).toContain("it''s");
+  });
+  test("a modifier character used as a key is escaped too", () => {
+    expect(chordToOS("windows", "ctrl++").cmd.join(" ")).toContain("^{+}");
+  });
 });
 
 describe("type", () => {
-  test.each(OSES)("%s produces a command containing the text", (os) => {
-    expect(typeCmd(os, "hello").join(" ")).toContain("hello");
+  test("linux passes text after -- so a leading dash is not read as a flag", () => {
+    expect(typeCmd("linux", "--help")).toEqual(["xdotool", "type", "--", "--help"]);
+  });
+  test("every supported OS builds a command", () => {
+    for (const os of OSES) expect(typeCmd(os, "hi").length).toBeGreaterThan(0);
   });
 });
 
-describe("chordToOS — cross-platform key mapping", () => {
-  test("cmd+a on macOS uses command down", () => {
-    expect(chordToOS("macos", "cmd+a").cmd.join(" ")).toContain("command down");
+describe("launch", () => {
+  test("macOS uses open -a, which needs no automation permission", () => {
+    expect(launchCmd("macos", "TextEdit")).toEqual(["open", "-a", "TextEdit"]);
   });
-  test("cmd+a on windows maps to ^a (ctrl)", () => {
-    expect(chordToOS("windows", "cmd+a").cmd.join(" ")).toContain("^a");
-  });
-  test("cmd on linux becomes super", () => {
-    expect(chordToOS("linux", "cmd+a").cmd.join(" ")).toContain("super");
-  });
-  test("multi-modifier ctrl+shift+t on macOS", () => {
-    const s = chordToOS("macos", "ctrl+shift+t").cmd.join(" ");
-    expect(s).toContain("control down");
-    expect(s).toContain("shift down");
+  test("windows quotes the app name", () => {
+    expect(launchCmd("windows", "note'pad").join(" ")).toContain("note''pad");
   });
 });
 
-describe("move / scroll / combos", () => {
-  test.each(OSES)("move on %s includes coords", (os) => {
-    expect(moveCmd(os, 100, 200).join(" ")).toMatch(/100.*200|200.*100/);
+describe("chords", () => {
+  test("macOS builds a using clause per modifier", () => {
+    const c = chordToOS("macos", "cmd+shift+a").cmd.join(" ");
+    expect(c).toContain("command down");
+    expect(c).toContain("shift down");
   });
-  test("scroll down 3 on linux -> 3 xdotool clicks", () => {
-    const cmds = scrollCmd("linux", "down", 3);
-    expect(cmds.length).toBe(3);
-    expect(cmds[0]).toEqual(["xdotool", "click", "5"]);
+  test("linux rewrites cmd to super", () => {
+    expect(chordToOS("linux", "cmd+a").cmd).toEqual(["xdotool", "key", "super+a"]);
   });
-  test("select-all combo is cmd+a on mac, ctrl+a elsewhere", () => {
-    expect(comboKey("macos", "select-all")).toBe("cmd+a");
-    expect(comboKey("windows", "select-all")).toBe("ctrl+a");
+  test("windows uses SendKeys modifier prefixes", () => {
+    expect(chordToOS("windows", "ctrl+a").cmd.join(" ")).toContain("^a");
+    expect(chordToOS("windows", "alt+shift+a").cmd.join(" ")).toContain("%+a");
+  });
+  test("combo keys follow the platform convention", () => {
+    expect(comboKey("macos", "copy")).toBe("cmd+c");
     expect(comboKey("linux", "copy")).toBe("ctrl+c");
+    expect(comboKey("windows", "paste")).toBe("ctrl+v");
+    expect(comboKey("macos", "select-all")).toBe("cmd+a");
+  });
+});
+
+describe("mouse plans", () => {
+  test("macOS moves natively, because System Events has no mouse API", () => {
+    expect(movePlan("macos", 10, 20)).toEqual({ kind: "native", op: "warp", x: 10, y: 20 });
+  });
+  test("linux and windows move through a command", () => {
+    expect(movePlan("linux", 10, 20)).toEqual({ kind: "exec", argv: ["xdotool", "mousemove", "10", "20"] });
+    const w = movePlan("windows", 10, 20);
+    expect(w.kind).toBe("exec");
+    if (w.kind === "exec") expect(w.argv.join(" ")).toContain("Point(10,20)");
+  });
+  test("click without coordinates does not invent a position", () => {
+    expect(clickPlan("macos", 1)).toEqual({ kind: "native", op: "click", x: undefined, y: undefined, count: 1 });
+    const l = clickPlan("linux", 1);
+    if (l.kind === "exec-many") expect(l.argvs).toEqual([["xdotool", "click", "--repeat", "1", "1"]]);
+  });
+  test("click with coordinates moves first on linux", () => {
+    const l = clickPlan("linux", 1, 5, 6);
+    if (l.kind === "exec-many") expect(l.argvs[0]).toEqual(["xdotool", "mousemove", "5", "6"]);
+  });
+  test("dblclick is a click count, not two unrelated clicks", () => {
+    expect(clickPlan("macos", 2)).toMatchObject({ op: "click", count: 2 });
+    const l = clickPlan("linux", 2);
+    if (l.kind === "exec-many") expect(l.argvs.at(-1)).toEqual(["xdotool", "click", "--repeat", "2", "1"]);
+  });
+  test("scroll direction maps to sign on macOS and to buttons on linux", () => {
+    expect(scrollPlan("macos", "up", 3)).toEqual({ kind: "native", op: "scroll", lines: 3 });
+    expect(scrollPlan("macos", "down", 3)).toEqual({ kind: "native", op: "scroll", lines: -3 });
+    const up = scrollPlan("linux", "up", 2), down = scrollPlan("linux", "down", 2);
+    if (up.kind === "exec-many") expect(up.argvs).toEqual([["xdotool", "click", "4"], ["xdotool", "click", "4"]]);
+    if (down.kind === "exec-many") expect(down.argvs[0]).toEqual(["xdotool", "click", "5"]);
+  });
+  test("every supported OS has a plan for every mouse action", () => {
+    for (const os of OSES) {
+      expect(movePlan(os, 1, 1)).toBeDefined();
+      expect(clickPlan(os, 1, 1, 1)).toBeDefined();
+      expect(scrollPlan(os, "down", 1)).toBeDefined();
+    }
   });
 });
 
@@ -87,36 +168,73 @@ describe("preflight", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toContain("imagemagick");
   });
-  test("linux input actions need xdotool", () => {
-    const r = preflight("linux", "type", withEnv({ DISPLAY: ":99" }, ["import"]));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toContain("xdotool");
-  });
-  test("macOS and Windows need no display bootstrap", () => {
-    for (const os of ["macos", "windows"] as OS[]) {
-      expect(preflight(os, "capture", withEnv({})).ok).toBe(true);
-      expect(preflight(os, "type", withEnv({})).ok).toBe(true);
+  test("every linux input action needs xdotool, the mouse ones included", () => {
+    for (const a of ["type", "key", "click", "dblclick", "move", "scroll", "copy"]) {
+      const r = preflight("linux", a, withEnv({ DISPLAY: ":99" }, ["import"]));
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toContain("xdotool");
     }
+  });
+  test("macOS needs nothing installed, mouse included", () => {
+    for (const a of ["capture", "type", "click", "move", "scroll"]) {
+      expect(requiredTool("macos", a)).toBeNull();
+      expect(preflight("macos", a, withEnv({})).ok).toBe(true);
+    }
+  });
+  test("windows needs nothing installed", () => {
+    for (const a of ["capture", "type", "click"]) expect(preflight("windows", a, withEnv({})).ok).toBe(true);
   });
   test("unknown platform is refused, not attempted", () => {
     expect(preflight("unknown", "capture", withEnv({}, ALL)).ok).toBe(false);
   });
-  test("DISPLAY alone is not enough on linux — tools are checked first", () => {
-    const r = preflight("linux", "capture", withEnv({ DISPLAY: ":99" }, []));
-    expect(r.ok).toBe(false);
+});
+
+describe("frameWarning", () => {
+  test("an exactly uniform frame is reported as blank", () => {
+    expect(frameWarning({ bytes: 295, width: 1280, height: 1024, uniform: true })).toContain("blank");
+  });
+  test("a decoded frame with content is never warned about, however small", () => {
+    expect(frameWarning({ bytes: 295, width: 1280, height: 1024, uniform: false })).toBeUndefined();
+  });
+  test("without a decode it falls back to bytes per pixel (values observed in CI)", () => {
+    expect(frameWarning({ bytes: 295, width: 1280, height: 1024 })).toContain("blank");
+    expect(frameWarning({ bytes: 80431, width: 1024, height: 768 })).toBeUndefined();   // macos runner
+    expect(frameWarning({ bytes: 267703, width: 1024, height: 768 })).toBeUndefined();  // windows runner
+  });
+  test("the warning says why it matters to an agent", () => {
+    expect(frameWarning({ bytes: 1, width: 10, height: 10, uniform: true })).toContain("no window");
+  });
+  test("no dimensions -> no claim", () => {
+    expect(frameWarning({ bytes: 295, width: 0, height: 0 })).toBeUndefined();
   });
 });
 
-describe("blankFrameWarning", () => {
-  test("flags a blank Xvfb frame (observed in CI: 295B at 1280x1024)", () => {
-    expect(blankFrameWarning(295, 1280, 1024)).toContain("looks blank");
+describe("locked session", () => {
+  const LOCKED = `<key>CGSSessionScreenIsLocked</key>\n<true/>`;
+  const UNLOCKED = `<key>CGSSessionScreenIsLocked</key>\n<false/>`;
+
+  test("reads the macOS lock flag out of the ioreg plist", () => {
+    expect(parseMacLockState(LOCKED)).toBe(true);
+    expect(parseMacLockState(UNLOCKED)).toBe(false);
   });
-  test("stays quiet on real sessions observed in CI", () => {
-    expect(blankFrameWarning(80431, 1024, 768)).toBeUndefined();   // macos runner
-    expect(blankFrameWarning(267703, 1024, 768)).toBeUndefined();  // windows runner
-    expect(blankFrameWarning(1238767, 3024, 1964)).toBeUndefined(); // retina desktop
+  test("an absent key is unknown, not locked - so it never blocks by accident", () => {
+    expect(parseMacLockState("<key>Something</key><true/>")).toBeNull();
   });
-  test("no dimensions -> no claim", () => {
-    expect(blankFrameWarning(295, 0, 0)).toBeUndefined();
+  test("windows is locked while LogonUI is running", () => {
+    expect(parseWindowsLockState("LogonUI.exe   1234 Console")).toBe(true);
+    expect(parseWindowsLockState("INFO: No tasks are running.")).toBe(false);
+  });
+  test("an unreadable probe returns unknown rather than a guess", async () => {
+    expect(await isSessionLocked({ os: "macos", read: async () => null })).toBeNull();
+  });
+  test("locked macOS session is reported as locked", async () => {
+    expect(await isSessionLocked({ os: "macos", read: async () => LOCKED })).toBe(true);
+  });
+  test("linux has no dependable lock query, so it is never blocked", async () => {
+    expect(LOCK_QUERY.linux).toBeUndefined();
+    expect(await isSessionLocked({ os: "linux", read: async () => "anything" })).toBeNull();
+  });
+  test("the refusal tells the user how to override it", () => {
+    expect(LOCKED_REASON).toContain("--force");
   });
 });
