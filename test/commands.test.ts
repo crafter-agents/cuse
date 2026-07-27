@@ -247,11 +247,18 @@ describe("focus", () => {
   test("macOS reuses open -a, which both launches and fronts the app", () => {
     expect(focusCmd("macos", "TextEdit")).toEqual(["open", "-a", "TextEdit"]);
   });
-  test("linux finds the window, then activates and focuses it", () => {
+  test("linux finds the window, then raises, activates and focuses it", () => {
     const c = focusCmd("linux", "xterm").join(" ");
     expect(c).toContain("xdotool search --onlyvisible --name");
-    expect(c).toContain("windowactivate");
+    expect(c).toContain("windowraise");
     expect(c).toContain("windowfocus");
+  });
+  test("linux tolerates a missing window manager", () => {
+    // windowactivate needs _NET_ACTIVE_WINDOW, which a bare Xvfb does not have,
+    // so only windowfocus - which the X server alone can do - may be required.
+    const c = focusCmd("linux", "xterm").join(" ");
+    expect(c).toContain("windowactivate \"$id\" 2>/dev/null");
+    expect(c).toContain("exec xdotool windowfocus");
   });
   test("windows raises a real error when no window matches, rather than typing into the void", () => {
     const c = focusCmd("windows", "Notepad").join(" ");

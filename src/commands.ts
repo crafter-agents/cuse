@@ -82,7 +82,12 @@ export function focusCmd(os: OS, name: string): string[] {
     case "linux": return ["sh", "-c",
       `n=0; while [ $n -lt ${FOCUS_TRIES} ]; do ` +
       `id=$(xdotool search --onlyvisible --name "$1" 2>/dev/null | head -1); ` +
-      `if [ -n "$id" ]; then exec xdotool windowactivate "$id" windowfocus "$id"; fi; ` +
+      // windowactivate needs a window manager (_NET_ACTIVE_WINDOW); a bare Xvfb
+      // has none, so it is best-effort and windowfocus, which only needs the X
+      // server, is what actually has to succeed.
+      `if [ -n "$id" ]; then xdotool windowraise "$id" 2>/dev/null; ` +
+      `xdotool windowactivate "$id" 2>/dev/null; ` +
+      `exec xdotool windowfocus "$id"; fi; ` +
       `n=$((n+1)); sleep ${FOCUS_SLEEP}; done; ` +
       `echo "no window matching '$1'" >&2; exit 1`,
       "sh", name];
