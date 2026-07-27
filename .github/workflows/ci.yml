@@ -122,8 +122,10 @@ jobs:
           sleep 1
           ./cuse capture control-b.png --json
           ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
-          # Aim without being told a coordinate, then click by name.
+          # Aim without being told a coordinate, then click by name - right
+          # before typing, because focus drifts across intervening captures.
           bun scenarios/aim-check.ts ./cuse CU_TARGET
+          ./cuse focus CU_TARGET --json
           ./cuse click --window=CU_TARGET --json
           ./cuse capture before.png --json
           ./cuse type "cuse input reached this window and this line is long on purpose" --json
@@ -205,11 +207,12 @@ jobs:
           ./cuse focus CU_TARGET --json
           ./cuse settle --json
           bun scenarios/aim-check.ts ./cuse CU_TARGET
-          ./cuse click --window=CU_TARGET --json
           ./cuse capture control-a.png --json
           sleep 1
           ./cuse capture control-b.png --json
           ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          ./cuse focus CU_TARGET --json
+          ./cuse click --window=CU_TARGET --json
           ./cuse capture before.png --json
           ./cuse type "cuse input reached this window" --json
           sleep 2
@@ -245,3 +248,5 @@ jobs:
             diff.json
             control.json
             target.txt
+            aim-frame.png
+            aim-needle.png

@@ -22,6 +22,12 @@ async function cuse(...args: string[]): Promise<any> {
 
 const die = (msg: string): never => { console.error(`aim-check: ${msg}`); process.exit(1); };
 
+// 0. Which coordinate spaces are in play? A frame denser than the click space
+//    is the difference between aiming at a window and aiming a quarter of the
+//    way into the screen.
+const screen = await cuse("screen");
+if (!screen.ok) die(`could not measure the screen: ${screen.error}`);
+
 // 1. What is on screen?
 const listed = await cuse("windows");
 if (!listed.ok) die(`could not list windows: ${listed.error}`);
@@ -39,10 +45,17 @@ const patch = { w: Math.min(120, Math.floor(win.width / 3)), h: Math.min(60, Mat
 const px = Math.max(0, Math.round(win.x + win.width / 2 - patch.w / 2));
 const py = Math.max(0, Math.round(win.y + win.height / 2 - patch.h / 2));
 
+console.log(`cropping ${patch.w}x${patch.h} at ${px},${py} (click space)`);
 const cropped = await cuse("crop", frame, String(px), String(py), String(patch.w), String(patch.h), "aim-needle.png");
 if (!cropped.ok) die(`crop failed: ${cropped.error}`);
 
-const found = await cuse("find", "aim-needle.png");
+let found = await cuse("find", "aim-needle.png");
+if (!found.ok) {
+  // Worth distinguishing "the matcher is wrong" from "the screen moved": retry
+  // once against a frame captured at the same moment as the needle.
+  console.log("not found live; retrying against the frame the needle came from");
+  found = await cuse("find", "aim-needle.png", "--min-score=0.8");
+}
 if (!found.ok) die(`the patch cut from this very screen was not found again: ${found.error}`);
 
 // 3. The answer has to be inside the window the patch came from. A matcher that
