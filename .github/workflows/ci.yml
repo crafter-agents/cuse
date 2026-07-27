@@ -192,27 +192,20 @@ jobs:
 
       # The screen must differ between the two frames. If the keystroke went
       # nowhere, the verdict is SAME and this fails - which is the point.
-      # An idle macOS screen is not static: the text caret blinks, which moved
-      # 126 pixels between two frames. So the check is not "idle is identical"
-      # but "typing moves far more than idling does" - self-calibrating, and it
-      # still fails if the keystroke goes nowhere.
-      - name: assert typing moves the screen far more than idling does
+      # The pixel delta is reported, not gated. On a CI desktop it is not a
+      # stable measurement: it passed twice on caret noise while input was
+      # reaching nothing, and failed twice on a window still drawing while input
+      # was landing fine. What gates each job above is the ground truth - a file
+      # written on macOS, a command executed on Linux - which nothing but real
+      # delivered input can produce.
+      - name: report how much the screen moved, idle versus typed
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          cat control.json diff.json
           bun -e '
             const idle = (await Bun.file("control.json").json()).data.changed;
             const typed = (await Bun.file("diff.json").json()).data.changed;
-            // The floor also has an absolute term: a blinking caret is ~126px,
-            // and twice CI passed on caret noise alone while the keystroke was
-            // going nowhere. Beating idle noise is not enough on its own.
-            const floor = Math.max(idle * 5, 300);
-            console.log(`idle ${idle}px, typed ${typed}px, need > ${floor}px`);
-            if (typed <= floor) {
-              throw new Error("typing did not move the screen beyond its own noise: " +
-                "the keystroke was delivered to nothing");
-            }
+            console.log(`idle ${idle}px, typed ${typed}px`);
           '
 
       - uses: actions/upload-artifact@v4
@@ -224,3 +217,4 @@ jobs:
             after.png
             diff.json
             control.json
+            target.txt
