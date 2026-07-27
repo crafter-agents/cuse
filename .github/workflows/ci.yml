@@ -143,6 +143,9 @@ jobs:
           sleep 2
           test -f /tmp/cu-input-ok || { echo "the shell never received the keystrokes"; exit 1; }
           echo "shell executed the typed command"
+          # Aim last: the shell now shows the command it ran, so a patch of the
+          # window is distinctive rather than one blank region among many.
+          bun scenarios/aim-check.ts ./cuse CU_TARGET
           EOF
           chmod +x drive.sh
           timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" ./drive.sh
