@@ -1,5 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { findTemplate, crop, downsample, variance, MIN_VARIANCE } from "../src/match.ts";
+import { decodePNG } from "../src/png.ts";
+import { inflateSync } from "node:zlib";
 import type { Image } from "../src/png.ts";
 
 /** A synthetic screen with a distinctive mark at a known place. */
@@ -160,31 +162,34 @@ describe("what the score does not tell you", () => {
 });
 
 describe("a patch that does not sit on the shrink grid", () => {
-  /** Fine detail, like text: this is what a heavy shrink destroys. */
-  function detailed(w: number, h: number): Image {
-    const data = new Uint8Array(w * h * 3).fill(250);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        // slanted thin lines plus a slow gradient: locally distinctive
-        if ((x * 2 + y * 3) % 23 < 2) {
-          const i = (y * w + x) * 3;
-          data[i] = 30 + (x % 60); data[i + 1] = 40; data[i + 2] = 200 - (y % 50);
-        }
-      }
-    }
-    return { width: w, height: h, channels: 3, data };
-  }
+  // The frame from the macOS runner that exposed this, and the patch cut from
+  // it. Brute force puts the patch at 386,212 with a perfect score; a
+  // single-jump pyramid confidently answered 369,286 at 0.86, because 386 is
+  // not a multiple of 8 and the averaged blocks therefore differ from the
+  // needle's own. Synthetic screens kept failing to reproduce it - either too
+  // periodic or too smooth - so the real frame is the fixture.
+  const load = async (name: string) =>
+    decodePNG(new Uint8Array(await Bun.file(`${import.meta.dir}/fixtures/${name}`).arrayBuffer()),
+      (d) => new Uint8Array(inflateSync(d)));
 
-  test("is still found exactly, at offsets that are not multiples of 8", () => {
-    // 386 is 48*8+2. Shrinking by 8 averages different blocks than the needle's
-    // own, so the true position scored worse than unrelated ones and a
-    // single-jump pyramid returned a confident wrong answer 74px away.
-    const hay = detailed(1024, 768);
-    for (const [x, y] of [[386, 212], [387, 213], [101, 99]]) {
-      const m = findTemplate(hay, crop(hay, x!, y!, 160, 50));
-      expect(m).not.toBeNull();
-      expect([m!.x, m!.y]).toEqual([x, y]);
-      expect(m!.score).toBeGreaterThan(0.999);
-    }
+  test("is found exactly, in the frame that used to defeat the search", async () => {
+    const m = findTemplate(await load("macos-runner-frame.png"), await load("macos-runner-patch.png"));
+    expect(m).not.toBeNull();
+    expect([m!.x, m!.y]).toEqual([386, 212]);
+    expect(m!.score).toBeGreaterThan(0.999);
+  });
+
+  test("and quickly enough to sit in an agent's loop", async () => {
+    const [hay, needle] = [await load("macos-runner-frame.png"), await load("macos-runner-patch.png")];
+    const started = Date.now();
+    findTemplate(hay, needle);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  test("a patch from that frame is not claimed to be in an unrelated one", async () => {
+    const needle = await load("macos-runner-patch.png");
+    const blank: Image = { width: 1024, height: 768, channels: 3,
+      data: new Uint8Array(1024 * 768 * 3).fill(210) };
+    expect(findTemplate(blank, needle)).toBeNull();
   });
 });
