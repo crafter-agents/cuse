@@ -152,8 +152,12 @@ registry sees a GTK app and cuse reads its 17 controls with the right roles and
 names - and every single rectangle comes back as 0,0. Without a window manager
 the toolkit does not know where its own window is. A tree that names controls
 but cannot place them is the confident-wrong-answer trap again, so cuse refuses
-to aim by it and says why. CI keeps the attempt as a job that reports rather
-than gates.
+to aim by it and says why.
+
+CI asserts exactly that, rather than hoping for better: the tree is readable,
+its geometry is not, and the refusal happens. The day a runner reports real
+coordinates that job goes red, which is the signal to promote the Linux route
+from a refusal to a click.
 
 Two caveats worth knowing. WinForms reports its controls to UI Automation as
 plain panes rather than as buttons and text boxes, so on Windows the name is the

@@ -293,14 +293,13 @@ jobs:
             aim-frame.png
             aim-needle.png
 
-  # Can a runner host an accessibility bus at all? This asks about the machine,
-  # not about cuse, so it reports rather than gates: cuse's Linux behaviour
-  # without AT-SPI is already gated above, and naming the missing package is the
-  # right answer there. If this ever goes green the tree route is real on Linux
-  # too, and the gate above can become an assertion instead of a refusal.
+  # What AT-SPI gives a headless runner, asserted rather than hoped for: the
+  # tree is readable, its geometry is not, and cuse refuses to aim by it. A job
+  # that is expected to fail is indistinguishable from a broken one, so this
+  # states today's truth and goes red when that changes - which is the signal to
+  # promote the Linux route from a refusal to a click.
   linux-accessibility:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
