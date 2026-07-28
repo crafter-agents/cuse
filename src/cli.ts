@@ -16,6 +16,8 @@ import { decodeXWD } from "./xwd.ts";
 import { listWindowsCmd, parseWindows, pickWindow, pointIn, frontmostCmd, parseFrontmost,
          frontmostMatches, type Win } from "./window.ts";
 import { findTemplate, crop, variance, MIN_VARIANCE } from "./match.ts";
+import { elementsCmd, parseElements, pickElement, pointInElement, describeMisses,
+         type Element } from "./elements.ts";
 
 export type Options = {
   force?: boolean; sameUnder?: number; timeoutMs?: number;
@@ -28,6 +30,12 @@ export type Options = {
   minScore?: number;
   /** refuse to send input unless this is the frontmost window */
   expectFront?: string;
+  /** aim at a control by its accessibility name */
+  element?: string;
+  /** narrow that to a kind of control: button, text, checkbox, ... */
+  role?: string;
+  /** which application's controls to look at */
+  app?: string;
 };
 
 export type Result = {
@@ -115,6 +123,15 @@ async function readLockState(os: OS): Promise<string | null> {
   return r.code === 0 && !r.timedOut ? r.stdout : null;
 }
 
+/** Ask the platform's accessibility tree for an application's controls. */
+async function listElements(os: OS, app: string, timeoutMs: number): Promise<Element[]> {
+  const argv = elementsCmd(os, app);
+  const r = await runWithTimeout(argv, timeoutMs);
+  const problem = explainFailure(argv, r, timeoutMs);
+  if (problem) throw new Error(problem);
+  return parseElements(r.stdout);
+}
+
 /** Ask the OS what windows exist, and parse whatever shape it answers in. */
 async function listWindows(os: OS, timeoutMs: number): Promise<Win[]> {
   const argv = listWindowsCmd(os);
@@ -134,6 +151,22 @@ async function listWindows(os: OS, timeoutMs: number): Promise<Win[]> {
 async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
                              run: (argv: string[]) => Promise<void>): Promise<{ x: number; y: number; how: string }> {
   const [fx, fy] = opts.at ?? [0.5, 0.5];
+
+  // A name beats a picture: it survives a theme, a font, a window that moved.
+  if (opts.element || opts.role) {
+    const els = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
+    const sel = { name: opts.element, role: opts.role };
+    const hit = pickElement(els, sel);
+    if (!hit) {
+      throw new Error(
+        `no control matching ${opts.element ? `'${opts.element}'` : ""}` +
+        `${opts.role ? ` of role '${opts.role}'` : ""} - ` +
+        `what is there: ${describeMisses(els, sel)}`);
+    }
+    const p = pointInElement(hit, fx, fy);
+    return { ...p, how: `${hit.role} '${hit.name}' (${hit.width}x${hit.height} at ${hit.x},${hit.y})` };
+  }
+
   if (opts.window) {
     const wins = await listWindows(os, timeoutMs);
     const w = pickWindow(wins, opts.window);
@@ -320,6 +353,17 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           data };
       }
 
+      // The desktop's closest thing to a DOM: role, name and rectangle per
+      // control, which is what makes "click the button that says Save" possible.
+      case "elements": {
+        const els = await listElements(os, args[0] ?? "", timeoutMs);
+        const named = els.filter((e) => e.name);
+        return { ok: true, ...base,
+          detail: `${els.length} controls, ${named.length} named` +
+            (named.length ? `: ${named.slice(0, 6).map((e) => `${e.role} '${e.name}'`).join(", ")}` : ""),
+          data: els };
+      }
+
       // Who has the keyboard? A system dialog that steals focus is invisible to
       // an agent reading only exit codes.
       case "frontmost": {
@@ -403,7 +447,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         const count = action === "dblclick" ? 2 : 1;
         // Coordinates if given; otherwise aim at a window or a picture. A bare
         // click with neither still clicks wherever the cursor already is.
-        const aimed = opts.window || opts.find;
+        const aimed = opts.window || opts.find || opts.element || opts.role;
         const t = args[0] !== undefined
           ? { x: Number(args[0]), y: Number(args[1]), how: `${args[0]},${args[1]}` }
           : aimed ? await resolveTarget(os, opts, timeoutMs, run) : null;
@@ -449,6 +493,7 @@ Windows and apps
   focus <name>                 bring a window to the front
   windows                      list visible windows with their rectangles
   frontmost                    which window currently has the keyboard
+  elements [app]               controls in the accessibility tree: role, name, rect
 
 Finding things
   find <template.png> [in.png] where that picture is: on screen, or in a frame
@@ -470,6 +515,9 @@ Flags
   --json                       structured Result on stdout
   --timeout=<ms>               deadline for this action
   --same-under=<pct>           diff tolerance; 0 means "did anything change"
+  --element=<name>             aim at a control by its accessibility name
+  --role=<kind>                narrow it: button, text, checkbox, link, ...
+  --app=<name>                 which application's controls to look at
   --window=<name>              aim at a window instead of a coordinate
   --find=<template.png>        aim at whatever matches this picture
   --at=<fx,fy>                 where inside the target, 0..1 (default centre)
@@ -510,10 +558,13 @@ if (import.meta.main) {
   const find = flag("find");
   const minScore = flag("min-score") !== undefined ? Number(flag("min-score")) : undefined;
   const expectFront = flag("expect-front");
+  const element = flag("element");
+  const role = flag("role");
+  const app = flag("app");
   const atRaw = flag("at");
   const at = atRaw ? atRaw.split(",").map(Number) as [number, number] : undefined;
   const [action, ...args] = argv.filter((a) => !a.startsWith("--"));
-  const r = await act(action ?? "", args, { force, sameUnder, timeoutMs, window, find, at, minScore, expectFront });
+  const r = await act(action ?? "", args, { force, sameUnder, timeoutMs, window, find, at, minScore, expectFront, element, role, app });
   console.log(json ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cuse: ${r.error}`);
   if (!json && r.warn) console.warn(`cuse: warning: ${r.warn}`);
   process.exit(exitCodeFor(r));

@@ -17,16 +17,23 @@ const ps = (script: string) => ["powershell", "-NoProfile", "-Command", script];
 
 // Windows has no cursor-click cmdlet; mouse_event is the documented user32 call.
 const WIN_CLICK = (count: number, x?: number, y?: number) => ps(
-  (x !== undefined ? `[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(${x},${y});` : "") +
-  `Add-Type -AssemblyName System.Windows.Forms;` +
+  // Load the assembly before using a type from it, and stop on error rather
+  // than carrying on. Written the other way round, the cursor move referenced
+  // System.Windows.Forms before Add-Type had loaded it: PowerShell reported a
+  // non-terminating error, exited 0, and mouse_event clicked wherever the
+  // cursor already was. cuse said ok and nothing had been pressed.
+  `$ErrorActionPreference='Stop';` +
+  `Add-Type -AssemblyName System.Windows.Forms,System.Drawing;` +
   `Add-Type 'using System;using System.Runtime.InteropServices;public class M{[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,int e);}';` +
-  Array.from({ length: count }, () => `[M]::mouse_event(2,0,0,0,0);[M]::mouse_event(4,0,0,0,0);`).join(""));
+  (x !== undefined ? `[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(${x},${y});Start-Sleep -Milliseconds 60;` : "") +
+  Array.from({ length: count }, () => `[M]::mouse_event(2,0,0,0,0);Start-Sleep -Milliseconds 40;[M]::mouse_event(4,0,0,0,0);`).join("Start-Sleep -Milliseconds 60;"));
 
 export function movePlan(os: OS, x: number, y: number): Plan {
   switch (os) {
     case "macos": return { kind: "native", op: "warp", x, y };
     case "linux": return { kind: "exec", argv: ["xdotool", "mousemove", String(x), String(y)] };
     case "windows": return { kind: "exec", argv: ps(
+      `$ErrorActionPreference='Stop';` +
       `Add-Type -AssemblyName System.Windows.Forms,System.Drawing;` +
       `[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(${x},${y})`) };
     default: throw new Error(`move unsupported on ${os}`);

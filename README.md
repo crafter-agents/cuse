@@ -9,9 +9,13 @@ on Linux, SendKeys and GDI on Windows).
 ```sh
 cuse capture out.png        # screencapture / xwd / GDI CopyFromScreen
 cuse focus TextEdit         # put a window in front, so input has a target
+cuse windows                # what is open, and where
+cuse elements TextEdit      # the controls in it: role, name, rectangle
 cuse type "hello"           # osascript / xdotool / SendKeys
 cuse key cmd+a              # chord mapped to each OS input plane
-cuse click 400 300          # also dblclick, move, scroll
+cuse click --element=Save   # click the control that says Save
+cuse click --find=btn.png   # or the one that looks like this
+cuse click 400 300          # or a coordinate, if you have one
 cuse select-all | copy | paste
 cuse settle                 # wait until the screen stops changing
 cuse diff a.png b.png       # how much changed, SAME or CHANGED
@@ -96,6 +100,57 @@ on Windows Server it is the Store build and `Start-Process` returns nothing.
 Given a window that does exist, SendKeys lands: 2386 pixels changed and the text
 arrived in the box.
 
+## Aiming without coordinates
+
+An agent has a screenshot and an intention; it does not have coordinates. Two
+routes turn one into the other, and the semantic one should be preferred
+wherever it works.
+
+**By name**, from the accessibility tree every OS already publishes - the same
+one screen readers use. This survives a theme change, a different font, and a
+window that moved, all of which defeat a picture.
+
+```console
+$ cuse elements Ghostty --json
+{"ok":true,"action":"elements","os":"macos","detail":"56 controls, 26 named: tab 'tab bar', button 'Close tab', ...
+
+$ cuse click --element="Close tab" --role=button --app=Ghostty --json
+{"ok":true,"action":"click","os":"macos","detail":"click at button 'Close tab' (18x18 at 84,44)","data":{"x":93,"y":53}}
+```
+
+Roles are normalised to one small vocabulary, because AXButton, Button and
+"push button" are the same thing to someone trying to press it. An exact name
+beats a longer one containing it, and among equal matches the smallest control
+wins: on macOS a button's name is often repeated on the group around it, and
+clicking the group is clicking the wrong thing. A selector that matches nothing
+lists what is there instead of failing blank.
+
+**By picture**, when the tree is unavailable or the thing is not a control:
+
+```console
+$ cuse find button.png --json
+{"ok":true,"action":"find","os":"macos","detail":"found button.png at 1030,460 in the frame (score 1.000) -> click 515,230"}
+```
+
+Searching a 3024x1964 frame takes about 0.4s. `find` refuses a template with no
+structure in it rather than returning a confident wrong point - a blank stretch
+of text box matches a hundred equally blank places, and the score cannot tell
+you the answer is not unique, only that the pixels agree.
+
+Where each route works, measured on the runners:
+
+| | accessibility tree | template match |
+| --- | --- | --- |
+| macOS | AX via System Events, 11 controls for a TextEdit window | yes |
+| Windows | UI Automation | yes |
+| Linux | needs AT-SPI; cuse names the package rather than returning nothing | yes |
+
+Two caveats worth knowing. WinForms reports its controls to UI Automation as
+plain panes rather than as buttons and text boxes, so on Windows the name is the
+selector that means something and the role is not. And on Windows the first
+click on an inactive window activates it and goes no further - CI resolves the
+Save button and presses it with two clicks for exactly that reason.
+
 ## The blank frame
 
 A display with nothing drawn on it still yields a correctly sized PNG. An agent
@@ -143,7 +198,7 @@ it (missing dependency, no display, locked session).
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input
   plans (`src/plan.ts`), capability reasoning (`src/preflight.ts`), lock-state
   parsing (`src/session.ts`) and image comparison (`src/png.ts`) are pure
-  functions. 95 tests, no machine side effects. The CLI only wires execution
+  functions. 158 tests, no machine side effects. The CLI only wires execution
   around them.
 - **Structured output.** Every action returns a typed `Result` ({ok, action, os,
   detail?, error?, warn?, data?}); `--json` emits it. A missing dependency comes
@@ -155,6 +210,9 @@ it (missing dependency, no display, locked session).
   keystrokes and routes them to the password field. Input actions check the
   session first; a definite lock blocks, an unreadable state never does, and
   `--force` overrides.
+- **Names before pixels.** `src/elements.ts` reads the platform's accessibility
+  tree and `src/window.ts` its window list, so an agent can say what it wants
+  instead of where it is. `src/match.ts` is the fallback for what has no name.
 - **No image library.** `src/png.ts` decodes and encodes PNG and `src/xwd.ts`
   reads the dump format `xwd` writes, so `diff`, blank detection and the Linux
   capture path all work with nothing installed. That is what lets Linux take a
@@ -164,7 +222,7 @@ it (missing dependency, no display, locked session).
 ## Develop
 
 ```sh
-bun test          # 95 tests, the agnostic core
+bun test          # 158 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cuse
 ```
 
@@ -185,6 +243,18 @@ bun run build     # compile a standalone binary to dist/cuse
 - The binary name collides with `cuse(1)` from UUCP, which ships with macOS and
   many Linux distributions. Install it under another name or call it by path
   until that is settled.
+
+## Known limits
+
+- The similarity score in `find` is a mean pixel distance, so flat or sparse
+  content scores high anywhere; that is why a template's own structure is
+  checked first. A normalised correlation would judge better.
+- Linux has no accessibility tree out of the box, and an xterm exports nothing
+  to one even when AT-SPI is installed.
+- macOS raises a Screen Recording prompt once a process has taken a few
+  screenshots. It floats above the frontmost app without becoming it, so the
+  `--expect-front` guard cannot see it, and it swallows every keystroke after
+  that. CI proves input before taking any screenshot for this reason.
 
 ## Status
 
