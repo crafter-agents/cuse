@@ -263,13 +263,19 @@ jobs:
           rm -f "$sink.button"
           ./cuse focus CU_TARGET --json
           # WinForms reports its controls to UI Automation as plain panes rather
-          # than buttons, so here the name is the selector that means anything.
+          # WinForms answers Pane to UI Automation for every control; cuse also
+          # asks the legacy interface, which names them properly. Selecting by
+          # role is the assertion that this works.
+          ./cuse elements CU_TARGET --json | tee win-elements.json
+          grep -q '"role":"button"' win-elements.json || {
+            echo "no real button role in the tree; the legacy roles reported:"
+            grep -oE '"rawRole":"[^"]*"' win-elements.json; exit 1; }
           # Twice: on Windows the first click on an inactive window activates
           # it and goes no further, so a single click resolved the button
           # perfectly and still never pressed it.
-          ./cuse click --element=Save --app=CU_TARGET --json
+          ./cuse click --element=Save --role=button --app=CU_TARGET --json
           sleep 1
-          ./cuse click --element=Save --app=CU_TARGET --json
+          ./cuse click --element=Save --role=button --app=CU_TARGET --json
           sleep 2
           cat "$sink.button" 2>/dev/null || true
           grep -q SAVE_CLICKED "$sink.button" || {

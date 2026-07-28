@@ -186,8 +186,9 @@ export function elementsCmd(os: OS, app: string, limit = 300): string[] {
       // WinForms answers Pane for everything through UI Automation; the same
       // control names itself properly through the legacy interface.
       "$legacy=0;" +
-      "try{$lp=$e.GetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern);" +
-      "if($lp){$legacy=[int]$lp.Current.Role}}catch{}" +
+      "try{if($e.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::IsLegacyIAccessiblePatternAvailableProperty)){" +
+      "$lp=$e.GetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern);" +
+      "if($lp){$legacy=[int]$lp.Current.Role}}else{$legacy=-1}}catch{$legacy=-2}" +
       "Write-Output ((@(\"$t|$legacy\",$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height)) -join \"`t\");" +
       "$n++}}");
 
