@@ -173,12 +173,9 @@ jobs:
           ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
           # Front it again immediately before typing: keystrokes go to whatever
           # is frontmost, and settling takes seconds.
-          # macOS 26 raises a Screen Recording prompt after enough captures. It
-          # sits above TextEdit while TextEdit stays the frontmost app, so it is
-          # invisible to a focus check and it eats every keystroke. Dismiss it.
-          osascript -e 'tell application "System Events" to repeat with p in (every process whose background only is false)' \
-                    -e 'try' -e 'click (first button of front window of p whose name is "Allow")' -e 'end try' \
-                    -e 'end repeat' 2>/dev/null || true
+          # The prompt can arrive during any of the captures above, and once it
+          # is up every keystroke goes into it instead of the document.
+          sh scenarios/mac-dismiss-prompts.sh
           ./cuse focus TextEdit --json
           ./cuse capture before.png --json
           ./cuse type "cuse input reached this window and this line is long on purpose" --expect-front=TextEdit --json
@@ -251,7 +248,9 @@ jobs:
           ./cuse elements CU_TARGET --json | tee elements.json
           rm -f "$sink.button"
           ./cuse focus CU_TARGET --json
-          ./cuse click --element=Save --role=button --app=CU_TARGET --json
+          # WinForms reports its controls to UI Automation as plain panes rather
+          # than buttons, so here the name is the selector that means anything.
+          ./cuse click --element=Save --app=CU_TARGET --json
           sleep 2
           cat "$sink.button" 2>/dev/null || true
           grep -q SAVE_CLICKED "$sink.button" || {
