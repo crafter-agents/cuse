@@ -157,10 +157,13 @@ the toolkit does not know where its own window is. A tree that names controls
 but cannot place them is the confident-wrong-answer trap again, so cuse refuses
 to aim by it and says why.
 
-CI asserts exactly that, rather than hoping for better: the tree is readable,
-its geometry is not, and the refusal happens. The day a runner reports real
-coordinates that job goes red, which is the signal to promote the Linux route
-from a refusal to a click.
+Bringing that bus up on a runner is itself unreliable - one run saw the app
+register, the next saw nothing - so CI asserts cuse's behaviour in both cases and
+reports which happened: with a tree, the refusal must name the unusable
+geometry; without one, an empty tree must still refuse rather than produce a
+coordinate. The day a runner reports real coordinates the job goes red on the
+first branch, which is the signal to promote the route from a refusal to a
+click.
 
 One caveat worth knowing: on Windows the first click on an inactive window
 activates it and goes no further, so CI resolves the Save button and presses it
