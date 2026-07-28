@@ -145,6 +145,13 @@ jobs:
           # Aim last: the shell now shows the command it ran, so a patch of the
           # window is distinctive rather than one blank region among many.
           bun scenarios/aim-check.ts ./cuse CU_TARGET
+          # There is no accessibility tree here: AT-SPI is not installed and an
+          # xterm exports nothing to it anyway. What matters is that cuse says
+          # which package is missing rather than returning an empty list.
+          out=$(./cuse elements xterm --json || true)
+          echo "$out"
+          echo "$out" | grep -q 'pyatspi' || {
+            echo "expected the missing AT-SPI dependency to be named"; exit 1; }
           EOF
           chmod +x drive.sh
           timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" ./drive.sh
@@ -189,6 +196,17 @@ jobs:
           # Aim last: the window now holds unique text, which makes a patch of it
           # findable rather than one blank region among many.
           bun scenarios/aim-check.ts ./cuse target
+          # And the semantic route: the accessibility tree should describe this
+          # window without anyone taking a screenshot.
+          ./cuse elements TextEdit --json | tee elements.json
+          bun -e '
+            const els = (await Bun.file("elements.json").json()).data;
+            const text = els.filter((e) => e.role === "text");
+            console.log(`${els.length} controls, ${text.length} text areas`);
+            if (!text.length) throw new Error("no text area in TextEdit's accessibility tree");
+            if (!els.some((e) => e.width > 100 && e.height > 100))
+              throw new Error("no control with a plausible rectangle");
+          ' 
 
       # Recon showed the job runs in the interactive session with a real
       # foreground window - what failed before was Notepad, which on Windows
@@ -228,6 +246,16 @@ jobs:
           grep -q "cuse input reached this window" "$sink" || {
             echo "the window never received the keystrokes"; exit 1; }
           bun scenarios/aim-check.ts ./cuse CU_TARGET
+          # The semantic route, end to end: name a button, click it, and let the
+          # button say it was pressed. No coordinates anywhere in this.
+          ./cuse elements CU_TARGET --json | tee elements.json
+          rm -f "$sink.button"
+          ./cuse focus CU_TARGET --json
+          ./cuse click --element=Save --role=button --app=CU_TARGET --json
+          sleep 2
+          cat "$sink.button" 2>/dev/null || true
+          grep -q SAVE_CLICKED "$sink.button" || {
+            echo "clicking the control named Save did not press it"; exit 1; }
 
       # The pixel delta is reported, not gated. On a CI desktop it is not a
       # stable measurement: it passed twice on caret noise while input was

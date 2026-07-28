@@ -21,7 +21,20 @@ $box.Multiline = $true
 $box.Dock = 'Fill'
 $box.Font = New-Object System.Drawing.Font('Consolas', 18)
 $box.Add_TextChanged({ Set-Content -Path $Sink -Value $box.Text -NoNewline })
+$box.Dock = 'Top'
+$box.Height = 180
 $form.Controls.Add($box)
+
+# A real button with a real name, so a selector has something to select. It
+# records the press the same way the text box records typing: on disk.
+$save = New-Object System.Windows.Forms.Button
+$save.Text = 'Save'
+$save.Name = 'Save'
+$save.Dock = 'Bottom'
+$save.Height = 60
+$save.Font = New-Object System.Drawing.Font('Segoe UI', 16)
+$save.Add_Click({ Add-Content -Path "$Sink.button" -Value 'SAVE_CLICKED' })
+$form.Controls.Add($save)
 
 $form.Add_Shown({
   $form.Activate()
