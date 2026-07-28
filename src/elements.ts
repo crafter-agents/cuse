@@ -214,6 +214,11 @@ export function parseElements(text: string): Element[] {
  * button's own name is often repeated on the group around it, and clicking the
  * group is clicking the wrong thing.
  */
+/** Roles that do something when clicked, as opposed to merely being read. */
+export const ACTIONABLE = new Set([
+  "button", "link", "menuitem", "checkbox", "radio", "tab", "text", "combobox", "slider",
+]);
+
 export function pickElement(els: Element[], sel: Selector): Element | null {
   const wantName = sel.name?.toLowerCase();
   const wantRole = sel.role ? normalizeRole(sel.role) : undefined;
@@ -230,6 +235,12 @@ export function pickElement(els: Element[], sel: Selector): Element | null {
     if (wantName) {
       const exact = (e: Element) => (e.name.toLowerCase() === wantName ? 0 : 1);
       if (exact(a) !== exact(b)) return exact(a) - exact(b);
+    }
+    // A control you can press beats one you cannot. GTK exposes a button's own
+    // text as a label with the same name, and clicking that label - which came
+    // back with a 0,0 rectangle - pressed the top-left corner of the screen.
+    if (!wantRole && ACTIONABLE.has(a.role) !== ACTIONABLE.has(b.role)) {
+      return ACTIONABLE.has(a.role) ? -1 : 1;
     }
     return area(a) - area(b);
   });

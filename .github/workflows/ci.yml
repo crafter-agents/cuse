@@ -152,6 +152,9 @@ jobs:
           echo "$out"
           echo "$out" | grep -q 'pyatspi' || {
             echo "expected the missing AT-SPI dependency to be named"; exit 1; }
+          EOF
+          chmod +x drive.sh
+          timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" ./drive.sh
 
       - name: macos - type into TextEdit
         if: runner.os == 'macOS'

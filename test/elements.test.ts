@@ -131,3 +131,29 @@ describe("when nothing matches", () => {
     expect(describeMisses([el({ name: "" })], { name: "x" })).toContain("no named controls");
   });
 });
+
+describe("a label is not a button", () => {
+  // GTK exposes a button's own text as a separate label with the same name, and
+  // AT-SPI gave that label a 0,0 rectangle - so picking it clicked the corner
+  // of the screen instead of the control.
+  const tree = [
+    el({ role: "label", rawRole: "label", name: "Cancel", x: 0, y: 0, width: 123, height: 24 }),
+    el({ role: "button", rawRole: "push button", name: "Cancel", x: 520, y: 400, width: 90, height: 34 }),
+  ];
+
+  test("the pressable one wins when the name is ambiguous", () => {
+    const hit = pickElement(tree, { name: "Cancel" })!;
+    expect(hit.role).toBe("button");
+    expect([hit.x, hit.y]).toEqual([520, 400]);
+  });
+  test("asking for the label explicitly still gives the label", () => {
+    expect(pickElement(tree, { name: "Cancel", role: "label" })!.role).toBe("label");
+  });
+  test("among two pressable controls, the smaller still wins", () => {
+    const two = [
+      el({ role: "button", name: "Save", width: 400, height: 300 }),
+      el({ role: "button", name: "Save", width: 90, height: 30, x: 5 }),
+    ];
+    expect(pickElement(two, { name: "Save" })!.width).toBe(90);
+  });
+});
