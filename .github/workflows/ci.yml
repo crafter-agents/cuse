@@ -7,6 +7,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -27,6 +29,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -84,6 +88,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -316,6 +322,7 @@ jobs:
   # promote the Linux route from a refusal to a click.
   linux-accessibility:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -330,14 +337,19 @@ jobs:
           timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" \
             dbus-run-session -- ./scenarios/linux-atspi.sh
 
-  # A real defect in shipped software, reproduced with cuse as the instrument,
-  # and its documented workaround verified in the same run. `notepad` on the PATH
-  # is an App Execution Alias whose Store package is not provisioned on Server
-  # SKUs: the process starts, every API reports success, and no window appears.
-  # That is the exact failure this tool exists to catch, so it is worth having as
-  # a gate rather than an anecdote.
-  repro-notepad:
+  # A real defect in shipped software, reproduced with cuse as the instrument.
+  # `notepad` on the PATH is an App Execution Alias whose Store package Server
+  # SKUs do not provision: the process starts, every API reports success, and no
+  # window appears. That is the exact failure this tool exists to catch, so it is
+  # worth a gate rather than an anecdote.
+  #
+  # Two jobs, not one: the chooser this leaves behind cannot be closed - alt+F4
+  # and Escape both left it exactly where it was - so verifying the workaround
+  # needs a runner where nothing else holds the keyboard. Learning that cost 45
+  # minutes of a hung runner, which is why every job here now has a deadline.
+  repro-alias:
     runs-on: windows-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -345,13 +357,25 @@ jobs:
       - run: bun build --compile src/cli.ts --outfile cuse
       - name: why the alias starts nothing
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scenarios/win-notepad-evidence.ps1
-      - name: reproduce it, then verify the workaround
+      - name: reproduce it
         shell: bash
-        run: ./scenarios/repro-notepad.sh ./cuse
+        run: ./scenarios/repro-alias.sh ./cuse
+
+  verify-workaround:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun build --compile src/cli.ts --outfile cuse
+      - name: the documented workaround, proved on disk
+        shell: bash
+        run: ./scenarios/verify-workaround.sh ./cuse
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: repro-notepad
+          name: verify-workaround
           path: |
             notepad-target.txt
             notepad-elements.json
