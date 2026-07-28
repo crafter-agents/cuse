@@ -164,7 +164,18 @@ jobs:
           # changes plenty of pixels while reaching no document at all.
           echo "initial line" > target.txt
           open -a TextEdit "$PWD/target.txt"
-          sleep 5
+
+          # Wait for the document window to exist rather than sleeping and
+          # hoping. TextEdit sometimes comes up showing the document picker
+          # instead, and typing into that reaches no document at all - which is
+          # why this job passed and failed on the same commit.
+          for i in $(seq 1 20); do
+            ./cuse windows --json | grep -q "target" && break
+            sleep 1
+          done
+          ./cuse windows --json
+          ./cuse windows --json | grep -q "target" || {
+            echo "TextEdit never opened a window for the document"; exit 1; }
 
           # Type before capturing anything. macOS 26 raises a Screen Recording
           # prompt once a process has taken a few screenshots, it floats above
@@ -179,7 +190,10 @@ jobs:
           sleep 3
           cat target.txt
           grep -q "cuse input reached this window" target.txt || {
-            echo "the keystrokes never reached the document"; exit 1; }
+            echo "the keystrokes never reached the document; who had the keyboard:"
+            ./cuse frontmost --json || true
+            ./cuse windows --json || true
+            exit 1; }
 
           # Now the pixel work, which is allowed to summon whatever it summons.
           sh scenarios/mac-dismiss-prompts.sh
@@ -292,3 +306,24 @@ jobs:
             target.txt
             aim-frame.png
             aim-needle.png
+
+  # What AT-SPI gives a headless runner, asserted rather than hoped for: the
+  # tree is readable, its geometry is not, and cuse refuses to aim by it. A job
+  # that is expected to fail is indistinguishable from a broken one, so this
+  # states today's truth and goes red when that changes - which is the signal to
+  # promote the Linux route from a refusal to a click.
+  linux-accessibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun build --compile src/cli.ts --outfile cuse
+      - name: bring up AT-SPI and select a GTK control by name
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            xvfb xdotool x11-apps at-spi2-core python3-pyatspi zenity dbus-x11 \
+            libgtk-3-0 gsettings-desktop-schemas
+          timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            dbus-run-session -- ./scenarios/linux-atspi.sh

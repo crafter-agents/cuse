@@ -17,7 +17,8 @@ import { listWindowsCmd, parseWindows, pickWindow, pointIn, frontmostCmd, parseF
          frontmostMatches, type Win } from "./window.ts";
 import { findTemplate, crop, variance, MIN_VARIANCE } from "./match.ts";
 import { elementsCmd, parseElements, pickElement, pointInElement, describeMisses,
-         type Element } from "./elements.ts";
+         geometryLooksUsable, type Element } from "./elements.ts";
+import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
 
 export type Options = {
   force?: boolean; sameUnder?: number; timeoutMs?: number;
@@ -156,6 +157,12 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
   if (opts.element || opts.role) {
     const els = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
     const sel = { name: opts.element, role: opts.role };
+    if (!geometryLooksUsable(els)) {
+      throw new Error(
+        `the accessibility tree reports ${els.length} controls but places them all at 0,0 - ` +
+        `its coordinates cannot be aimed at (on Linux this means the toolkit has no window ` +
+        `manager telling it where its window is)`);
+    }
     const hit = pickElement(els, sel);
     if (!hit) {
       throw new Error(
@@ -475,7 +482,50 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
   }
 }
 
-export const VERSION = "2.1.0";
+export const VERSION = "2.2.0";
+
+/**
+ * One process, many commands.
+ *
+ * An agent doing twenty things paid for twenty process starts and re-enumerated
+ * the desktop each time. Here it sends one line per action and reads one JSON
+ * Result per line, and the session remembers `--app` and `--window` so they do
+ * not have to be repeated. A line that fails is a failed Result, not the end of
+ * the loop: an agent recovers from a missing button, and killing its tool over
+ * one is not help.
+ */
+async function serve(initial: Session): Promise<void> {
+  let session = { ...initial };
+  const emit = (r: unknown) => console.log(JSON.stringify(r));
+
+  for await (const chunk of console) {
+    const line = chunk.trim();
+    if (!line || line.startsWith("#")) continue;
+    if (line === "quit" || line === "exit") break;
+
+    const argv = tokenize(line);
+    // `use` sets what later lines can leave out.
+    if (argv[0] === "use") {
+      const { opts } = parseArgs(argv);
+      session = {
+        app: opts.app ?? session.app,
+        window: opts.window ?? session.window,
+        timeoutMs: opts.timeoutMs ?? session.timeoutMs,
+        force: opts.force || session.force,
+      };
+      emit({ ok: true, action: "use", os: detectOS(), detail: JSON.stringify(session), data: session });
+      continue;
+    }
+
+    try {
+      const { action, args, opts } = parseArgs(argv);
+      emit(await act(action, args, withSession(opts, session)));
+    } catch (e) {
+      emit({ ok: false, action: argv[0] ?? "", os: detectOS(),
+             error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+}
 
 const HELP = `cuse ${VERSION} - cross-platform computer-use CLI
 
@@ -509,6 +559,7 @@ Input
 
 Other
   os                           which platform this is
+  serve                        read one command per line, answer one JSON per line
   screen                       frame size, point size, and the ratio between
 
 Flags
@@ -541,8 +592,6 @@ export function exitCodeFor(r: Result): number {
 
 if (import.meta.main) {
   const argv = process.argv.slice(2);
-  const json = argv.includes("--json");
-  const force = argv.includes("--force");
   if (argv.includes("--help") || argv.includes("-h") || argv.length === 0) {
     console.log(HELP);
     process.exit(0);
@@ -551,22 +600,14 @@ if (import.meta.main) {
     console.log(VERSION);
     process.exit(0);
   }
-  const flag = (name: string) => argv.find((a) => a.startsWith(`--${name}=`))?.split("=")[1];
-  const sameUnder = flag("same-under") !== undefined ? Number(flag("same-under")) : 1;
-  const timeoutMs = flag("timeout") !== undefined ? Number(flag("timeout")) : undefined;
-  const window = flag("window");
-  const find = flag("find");
-  const minScore = flag("min-score") !== undefined ? Number(flag("min-score")) : undefined;
-  const expectFront = flag("expect-front");
-  const element = flag("element");
-  const role = flag("role");
-  const app = flag("app");
-  const atRaw = flag("at");
-  const at = atRaw ? atRaw.split(",").map(Number) as [number, number] : undefined;
-  const [action, ...args] = argv.filter((a) => !a.startsWith("--"));
-  const r = await act(action ?? "", args, { force, sameUnder, timeoutMs, window, find, at, minScore, expectFront, element, role, app });
-  console.log(json ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cuse: ${r.error}`);
-  if (!json && r.warn) console.warn(`cuse: warning: ${r.warn}`);
+  const { action, args, opts, json: wantJson } = parseArgs(argv);
+  if (action === "serve") {
+    await serve({ app: opts.app, window: opts.window, timeoutMs: opts.timeoutMs, force: opts.force });
+    process.exit(0);
+  }
+  const r = await act(action, args, opts);
+  console.log(wantJson ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cuse: ${r.error}`);
+  if (!wantJson && r.warn) console.warn(`cuse: warning: ${r.warn}`);
   process.exit(exitCodeFor(r));
 }
 

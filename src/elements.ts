@@ -214,6 +214,11 @@ export function parseElements(text: string): Element[] {
  * button's own name is often repeated on the group around it, and clicking the
  * group is clicking the wrong thing.
  */
+/** Roles that do something when clicked, as opposed to merely being read. */
+export const ACTIONABLE = new Set([
+  "button", "link", "menuitem", "checkbox", "radio", "tab", "text", "combobox", "slider",
+]);
+
 export function pickElement(els: Element[], sel: Selector): Element | null {
   const wantName = sel.name?.toLowerCase();
   const wantRole = sel.role ? normalizeRole(sel.role) : undefined;
@@ -231,9 +236,29 @@ export function pickElement(els: Element[], sel: Selector): Element | null {
       const exact = (e: Element) => (e.name.toLowerCase() === wantName ? 0 : 1);
       if (exact(a) !== exact(b)) return exact(a) - exact(b);
     }
+    // A control you can press beats one you cannot. GTK exposes a button's own
+    // text as a label with the same name, and clicking that label - which came
+    // back with a 0,0 rectangle - pressed the top-left corner of the screen.
+    if (!wantRole && ACTIONABLE.has(a.role) !== ACTIONABLE.has(b.role)) {
+      return ACTIONABLE.has(a.role) ? -1 : 1;
+    }
     return area(a) - area(b);
   });
   return matches[0]!;
+}
+
+/**
+ * Does this tree know where anything is?
+ *
+ * Observed on a bare Xvfb: AT-SPI happily reported zenity's 17 controls, roles
+ * and names included, and gave every one of them the rectangle 0,0. Aiming at
+ * that clicks the corner of the screen with full confidence, which is worse
+ * than not reading the tree at all. Several controls stacked at the origin is
+ * not a layout, it is a toolkit that does not know where its window is.
+ */
+export function geometryLooksUsable(els: Element[]): boolean {
+  const positioned = els.filter((e) => e.x !== 0 || e.y !== 0);
+  return els.length <= 1 || positioned.length > 0;
 }
 
 /** The point to click: the middle of the control, or a fraction of it. */

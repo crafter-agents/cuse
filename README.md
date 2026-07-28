@@ -21,6 +21,7 @@ cuse settle                 # wait until the screen stops changing
 cuse diff a.png b.png       # how much changed, SAME or CHANGED
 cuse record 5 500           # 5 frames, 500ms apart
 cuse launch TextEdit
+cuse serve                  # one process, a command per line, JSON per line
 cuse os                     # which platform
 cuse <action> --json        # structured Result for agents
 ```
@@ -143,13 +144,46 @@ Where each route works, measured on the runners:
 | --- | --- | --- |
 | macOS | AX via System Events, 11 controls for a TextEdit window | yes |
 | Windows | UI Automation | yes |
-| Linux | needs AT-SPI; cuse names the package rather than returning nothing | yes |
+| Linux | implemented against AT-SPI, but see below | yes |
+
+On Linux the tree can be read but not aimed at, on a runner. With `at-spi2-core`
+installed, `toolkit-accessibility` switched on and the bus started by hand, the
+registry sees a GTK app and cuse reads its 17 controls with the right roles and
+names - and every single rectangle comes back as 0,0. Without a window manager
+the toolkit does not know where its own window is. A tree that names controls
+but cannot place them is the confident-wrong-answer trap again, so cuse refuses
+to aim by it and says why.
+
+CI asserts exactly that, rather than hoping for better: the tree is readable,
+its geometry is not, and the refusal happens. The day a runner reports real
+coordinates that job goes red, which is the signal to promote the Linux route
+from a refusal to a click.
 
 Two caveats worth knowing. WinForms reports its controls to UI Automation as
 plain panes rather than as buttons and text boxes, so on Windows the name is the
 selector that means something and the role is not. And on Windows the first
 click on an inactive window activates it and goes no further - CI resolves the
 Save button and presses it with two clicks for exactly that reason.
+
+## One process, many commands
+
+An agent doing twenty things paid for twenty process starts and re-enumerated
+the desktop each time. `serve` reads one command per line and answers with one
+JSON Result per line, in a single process that remembers what it was told.
+
+```console
+$ cuse serve
+use --app=TextEdit
+{"ok":true,"action":"use","detail":"{\"app\":\"TextEdit\"}"}
+click --element=Save
+{"ok":true,"action":"click","detail":"click at button 'Save' (74x22 at 612,410)"}
+type "done"
+{"ok":true,"action":"type","detail":"typed"}
+```
+
+Twenty actions cost 298ms as separate processes and 21ms here. A line that fails
+comes back as a failed Result and the loop continues, because an agent recovers
+from a missing button and killing its tool over one is not help.
 
 ## The blank frame
 
@@ -198,7 +232,7 @@ it (missing dependency, no display, locked session).
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input
   plans (`src/plan.ts`), capability reasoning (`src/preflight.ts`), lock-state
   parsing (`src/session.ts`) and image comparison (`src/png.ts`) are pure
-  functions. 158 tests, no machine side effects. The CLI only wires execution
+  functions. 185 tests, no machine side effects. The CLI only wires execution
   around them.
 - **Structured output.** Every action returns a typed `Result` ({ok, action, os,
   detail?, error?, warn?, data?}); `--json` emits it. A missing dependency comes
@@ -222,7 +256,7 @@ it (missing dependency, no display, locked session).
 ## Develop
 
 ```sh
-bun test          # 158 tests, the agnostic core
+bun test          # 185 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cuse
 ```
 
@@ -249,8 +283,9 @@ bun run build     # compile a standalone binary to dist/cuse
 - The similarity score in `find` is a mean pixel distance, so flat or sparse
   content scores high anywhere; that is why a template's own structure is
   checked first. A normalised correlation would judge better.
-- Linux has no accessibility tree out of the box, and an xterm exports nothing
-  to one even when AT-SPI is installed.
+- Linux has no accessibility tree out of the box: AT-SPI has to be installed,
+  and the toolkit has to export one. A GTK app does and CI proves it; an xterm
+  never will.
 - macOS raises a Screen Recording prompt once a process has taken a few
   screenshots. It floats above the frontmost app without becoming it, so the
   `--expect-front` guard cannot see it, and it swallows every keystroke after
