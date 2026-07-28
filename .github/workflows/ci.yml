@@ -204,7 +204,7 @@ jobs:
             const els = (await Bun.file("elements.json").json()).data;
             const text = els.filter((e) => e.role === "text");
             console.log(`${els.length} controls, ${text.length} text areas`);
-            if (!text.length) throw new Error("no text area in TextEdit's accessibility tree");
+            if (!text.length) throw new Error("no text area in the TextEdit accessibility tree");
             if (!els.some((e) => e.width > 100 && e.height > 100))
               throw new Error("no control with a plausible rectangle");
           ' 
@@ -254,6 +254,11 @@ jobs:
           ./cuse focus CU_TARGET --json
           # WinForms reports its controls to UI Automation as plain panes rather
           # than buttons, so here the name is the selector that means anything.
+          # Twice: on Windows the first click on an inactive window activates
+          # it and goes no further, so a single click resolved the button
+          # perfectly and still never pressed it.
+          ./cuse click --element=Save --app=CU_TARGET --json
+          sleep 1
           ./cuse click --element=Save --app=CU_TARGET --json
           sleep 2
           cat "$sink.button" 2>/dev/null || true
