@@ -38,16 +38,17 @@ echo "  reproduced: launch reported success and no window ever existed"
 # holds the keyboard and the next keystroke lands in it. cuse noticed exactly
 # that on the first run of this scenario, through --expect-front.
 say "what appeared instead"
-wins=$("$CUSE" windows --json)
-echo "  $wins"
-if echo "$wins" | grep -qi "Select an app"; then
+# The chooser does not appear immediately - on the first attempt it was absent
+# when checked once and present by the time a key was sent, which is how it came
+# to eat the keystroke. So wait for it rather than sampling.
+if "$CUSE" wait --window="Select an app" --timeout=15000 --json; then
   echo "  the alias produced an app chooser, not a text editor"
   "$CUSE" key Escape --json || true
   "$CUSE" wait --gone --window="Select an app" --timeout=10000 --json || {
     echo "the chooser would not go away; the rest of this run cannot be trusted"; exit 1; }
-  echo "  dismissed it, so it cannot swallow what comes next"
+  echo "  dismissed it"
 else
-  echo "  no chooser this time; nothing to dismiss"
+  echo "  no chooser appeared within 15s"
 fi
 
 say "the workaround: the classic binary, by full path"
@@ -61,7 +62,19 @@ powershell -NoProfile -Command "Start-Process \"\$env:SystemRoot\System32\notepa
 "$CUSE" focus notepad-target --json
 "$CUSE" elements notepad-target --json | tee notepad-elements.json
 
-say "type into it, and prove it on disk"
+# Whatever else the alias attempt left behind, the target has to hold the
+# keyboard before typing. This is the loop an agent has to run anyway, written
+# out of cuse's own verbs.
+say "clear the way, then type"
+for i in 1 2 3 4 5; do
+  front=$("$CUSE" frontmost --json)
+  case "$front" in *notepad-target*) break ;; esac
+  echo "  in front: $front"
+  "$CUSE" key Escape --json || true
+  "$CUSE" focus notepad-target --json || true
+  sleep 1
+done
+
 "$CUSE" type "cuse typed into the classic notepad" --expect-front=notepad-target --json
 "$CUSE" key ctrl+s --json
 sleep 3
