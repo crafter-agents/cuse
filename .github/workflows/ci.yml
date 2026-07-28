@@ -165,31 +165,35 @@ jobs:
           echo "initial line" > target.txt
           open -a TextEdit "$PWD/target.txt"
           sleep 5
-          ./cuse focus TextEdit --json
-          ./cuse settle --json   # a caret is not motion; see --same-under
-          ./cuse capture control-a.png --json
-          sleep 1
-          ./cuse capture control-b.png --json
-          ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
-          # Front it again immediately before typing: keystrokes go to whatever
-          # is frontmost, and settling takes seconds.
-          # The prompt can arrive during any of the captures above, and once it
-          # is up every keystroke goes into it instead of the document.
+
+          # Type before capturing anything. macOS 26 raises a Screen Recording
+          # prompt once a process has taken a few screenshots, it floats above
+          # TextEdit without becoming the frontmost app - so no focus check can
+          # see it - and it swallows every keystroke after that. Five captures
+          # were enough to summon it. Proving input first means the proof never
+          # races the prompt.
           sh scenarios/mac-dismiss-prompts.sh
           ./cuse focus TextEdit --json
-          ./cuse capture before.png --json
           ./cuse type "cuse input reached this window and this line is long on purpose" --expect-front=TextEdit --json
-          sleep 2
-          ./cuse capture after.png --json
-          ./cuse diff before.png after.png --same-under=0 --json | tee diff.json
-          # Ground truth, not pixels: save with cmd+s and read the file back off
-          # disk. A blinking caret can fake a pixel change; it cannot write text
-          # into a file. This exercises capture, focus, type and key at once.
           ./cuse key cmd+s --json
           sleep 3
           cat target.txt
           grep -q "cuse input reached this window" target.txt || {
             echo "the keystrokes never reached the document"; exit 1; }
+
+          # Now the pixel work, which is allowed to summon whatever it summons.
+          sh scenarios/mac-dismiss-prompts.sh
+          ./cuse settle --json   # a caret is not motion; see --same-under
+          ./cuse capture control-a.png --json
+          sleep 1
+          ./cuse capture control-b.png --json
+          ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          ./cuse capture before.png --json
+          ./cuse type " and again" --expect-front=TextEdit --json
+          sleep 2
+          ./cuse capture after.png --json
+          ./cuse diff before.png after.png --same-under=0 --json | tee diff.json
+
           # Aim last: the window now holds unique text, which makes a patch of it
           # findable rather than one blank region among many.
           bun scenarios/aim-check.ts ./cuse target
