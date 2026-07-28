@@ -24,7 +24,11 @@ echo "  $launch"
 echo "$launch" | grep -q '"ok":true' || {
   echo "expected the alias launch to report success (that is the defect)"; exit 1; }
 
-waited=$("$CUSE" wait --window=Notepad --timeout=8000 --json || true)
+# Name the editor window precisely. Matching on "Notepad" alone also matches the
+# chooser's own title - "Select an app to open 'notepad'" - now that wait also
+# consults what has the keyboard. Substring matching is convenient and
+# occasionally too generous, and a reproduction has to be exact.
+waited=$("$CUSE" wait --window="Untitled - Notepad" --timeout=8000 --json || true)
 echo "  $waited"
 echo "$waited" | grep -q '"ok":false' || {
   echo "a Notepad window appeared: this runner does provision the package, so the"
