@@ -18,8 +18,12 @@ for d in /usr/libexec /usr/lib/at-spi2-core /usr/lib/x86_64-linux-gnu/at-spi2-co
   [ -x "$d/at-spi2-registryd" ] && REGISTRYD="$d/at-spi2-registryd"
 done
 echo "launcher=${LAUNCHER:-none} registryd=${REGISTRYD:-none}"
+# GTK also consults this before it bothers exporting anything.
+gsettings set org.gnome.desktop.interface toolkit-accessibility true 2>/dev/null || \
+  echo "(gsettings unavailable; relying on GTK_MODULES)"
 if [ -n "$LAUNCHER" ]; then "$LAUNCHER" --launch-immediately & sleep 2; fi
 if [ -n "$REGISTRYD" ]; then "$REGISTRYD" & sleep 2; fi
+echo "a11y bus: ${AT_SPI_BUS:-(not exported)} session: ${DBUS_SESSION_BUS_ADDRESS:-none}"
 
 zenity --entry --title=CU_TARGET --text="cuse is going to press Cancel" > zenity-out.txt 2>/dev/null &
 zpid=$!

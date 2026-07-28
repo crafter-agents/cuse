@@ -144,7 +144,15 @@ Where each route works, measured on the runners:
 | --- | --- | --- |
 | macOS | AX via System Events, 11 controls for a TextEdit window | yes |
 | Windows | UI Automation | yes |
-| Linux | with `at-spi2-core`, for a toolkit that exports one; without it, cuse names the package | yes |
+| Linux | implemented against AT-SPI, but see below | yes |
+
+On Linux the tree is implemented and refuses cleanly when it cannot be read, but
+it is not yet proven on a runner: with `at-spi2-core` installed, the bus
+launcher and registry daemon started by hand, and a GTK app running, the
+registry still reported no applications. A bare Xvfb has no session to bring
+accessibility up the way a desktop does. CI keeps that attempt as a job that
+reports rather than gates, so the day it goes green the route can be promoted
+from a refusal to an assertion.
 
 Two caveats worth knowing. WinForms reports its controls to UI Automation as
 plain panes rather than as buttons and text boxes, so on Windows the name is the
