@@ -298,3 +298,22 @@ describe("focus does not hang", () => {
     expect(focusCmd("windows", "CU_TARGET").join(" ")).toContain("no window matching");
   });
 });
+
+describe("PowerShell that actually runs", () => {
+  const script = (p: ReturnType<typeof clickPlan>) => (p.kind === "exec" ? p.argv.join(" ") : "");
+
+  test("a type is used only after its assembly is loaded", () => {
+    const s = script(clickPlan("windows", 1, 10, 20));
+    expect(s.indexOf("Add-Type -AssemblyName")).toBeLessThan(s.indexOf("[System.Windows.Forms.Cursor]"));
+  });
+  test("errors stop the script instead of being walked past", () => {
+    // Without this the cursor move failed, PowerShell carried on, exited 0, and
+    // the click landed wherever the pointer happened to be - reported as ok.
+    expect(script(clickPlan("windows", 1, 10, 20))).toContain("$ErrorActionPreference='Stop'");
+    const m = movePlan("windows", 1, 2);
+    if (m.kind === "exec") expect(m.argv.join(" ")).toContain("$ErrorActionPreference='Stop'");
+  });
+  test("the press is not instantaneous, so the control sees a real click", () => {
+    expect(script(clickPlan("windows", 1, 10, 20))).toContain("Start-Sleep");
+  });
+});
