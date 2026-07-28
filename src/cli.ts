@@ -405,7 +405,19 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
             } else {
               const wins = await listWindows(os, timeoutMs);
               found = pickWindow(wins, target.window!) !== null;
-              sample = wins.map((w) => w.title).filter(Boolean).slice(0, 5).join(", ");
+              // A dialog can hold the keyboard without being enumerable: on
+              // Windows the "Select an app" chooser is frontmost and absent from
+              // the window list, so waiting for it never ended. What has focus
+              // is part of what is on screen.
+              if (!found) {
+                const fr = await runWithTimeout(frontmostCmd(os), 5000);
+                const front = fr.code === 0 && !fr.timedOut ? parseFrontmost(fr.stdout) : "";
+                found = front !== "" && frontmostMatches(front, target.window!);
+                sample = [wins.map((w) => w.title).filter(Boolean).slice(0, 4).join(", "),
+                          front && `frontmost: ${front}`].filter(Boolean).join(" | ");
+              } else {
+                sample = wins.map((w) => w.title).filter(Boolean).slice(0, 5).join(", ");
+              }
             }
           } catch (e) {
             // A tree that cannot be read yet is a reason to keep waiting, not to
@@ -445,10 +457,18 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         const wins = await listWindows(os, timeoutMs);
         const named = wins.filter((w) => w.title);
         const blind = blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), wins.length === 0);
+        // What has the keyboard is not always in the list. A system dialog can be
+        // frontmost and unenumerable, and an agent that trusts the list alone
+        // will aim past it - so the discrepancy is reported, not hidden.
+        const fr = await runWithTimeout(frontmostCmd(os), 5000);
+        const front = fr.code === 0 && !fr.timedOut ? parseFrontmost(fr.stdout) : "";
+        const hidden = front && !pickWindow(wins, front.split(" ")[0] ?? front) &&
+          !wins.some((w) => w.title && frontmostMatches(front, w.title));
         return { ok: true, ...base,
           detail: named.length ? named.map((w) => `${w.title} ${w.width}x${w.height}+${w.x}+${w.y}`).join("; ")
                                : "no titled windows",
-          ...(blind ? { warn: blind } : {}),
+          ...(blind ? { warn: blind }
+                    : hidden ? { warn: `'${front}' has the keyboard but is not in this list` } : {}),
           data: wins };
       }
 

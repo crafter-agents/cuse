@@ -43,8 +43,10 @@ say "what appeared instead"
 # to eat the keystroke. So wait for it rather than sampling.
 if "$CUSE" wait --window="Select an app" --timeout=15000 --json; then
   echo "  the alias produced an app chooser, not a text editor"
-  "$CUSE" key Escape --json || true
-  "$CUSE" wait --gone --window="Select an app" --timeout=10000 --json || {
+  # Escape does not close this one - five attempts on the first run left it
+  # exactly where it was. alt+F4 does what a user would do.
+  "$CUSE" key alt+F4 --json || true
+  "$CUSE" wait --gone --window="Select an app" --timeout=15000 --json || {
     echo "the chooser would not go away; the rest of this run cannot be trusted"; exit 1; }
   echo "  dismissed it"
 else
@@ -70,7 +72,7 @@ for i in 1 2 3 4 5; do
   front=$("$CUSE" frontmost --json)
   case "$front" in *notepad-target*) break ;; esac
   echo "  in front: $front"
-  "$CUSE" key Escape --json || true
+  "$CUSE" key alt+F4 --json || true
   "$CUSE" focus notepad-target --json || true
   sleep 1
 done

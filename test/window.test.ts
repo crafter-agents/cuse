@@ -94,3 +94,24 @@ describe("who has the keyboard", () => {
     expect(frontmostMatches("", "TextEdit")).toBe(true);
   });
 });
+
+describe("a window that holds the keyboard without being in the list", () => {
+  // Observed on Windows: the "Select an app to open 'notepad'" chooser is
+  // frontmost and absent from the UI Automation window list, so waiting for it
+  // by name never ended and anything typed went into it.
+  const enumerated = [
+    { title: "notepad-target.txt - Notepad", x: 0, y: 0, width: 800, height: 600 },
+  ];
+  const front = "Select an app to open 'notepad'";
+
+  test("the list alone cannot find it", () => {
+    expect(pickWindow(enumerated, "Select an app")).toBeNull();
+  });
+  test("what has focus can", () => {
+    expect(frontmostMatches(front, "Select an app")).toBe(true);
+  });
+  test("and the two together do not confuse the real target", () => {
+    expect(pickWindow(enumerated, "notepad-target")).not.toBeNull();
+    expect(frontmostMatches(front, "notepad-target")).toBe(false);
+  });
+});
