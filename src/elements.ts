@@ -247,6 +247,20 @@ export function pickElement(els: Element[], sel: Selector): Element | null {
   return matches[0]!;
 }
 
+/**
+ * Does this tree know where anything is?
+ *
+ * Observed on a bare Xvfb: AT-SPI happily reported zenity's 17 controls, roles
+ * and names included, and gave every one of them the rectangle 0,0. Aiming at
+ * that clicks the corner of the screen with full confidence, which is worse
+ * than not reading the tree at all. Several controls stacked at the origin is
+ * not a layout, it is a toolkit that does not know where its window is.
+ */
+export function geometryLooksUsable(els: Element[]): boolean {
+  const positioned = els.filter((e) => e.x !== 0 || e.y !== 0);
+  return els.length <= 1 || positioned.length > 0;
+}
+
 /** The point to click: the middle of the control, or a fraction of it. */
 export function pointInElement(e: Element, fx = 0.5, fy = 0.5): { x: number; y: number } {
   return { x: Math.round(e.x + e.width * fx), y: Math.round(e.y + e.height * fy) };

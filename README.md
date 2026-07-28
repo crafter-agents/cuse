@@ -146,13 +146,14 @@ Where each route works, measured on the runners:
 | Windows | UI Automation | yes |
 | Linux | implemented against AT-SPI, but see below | yes |
 
-On Linux the tree is implemented and refuses cleanly when it cannot be read, but
-it is not yet proven on a runner: with `at-spi2-core` installed, the bus
-launcher and registry daemon started by hand, and a GTK app running, the
-registry still reported no applications. A bare Xvfb has no session to bring
-accessibility up the way a desktop does. CI keeps that attempt as a job that
-reports rather than gates, so the day it goes green the route can be promoted
-from a refusal to an assertion.
+On Linux the tree can be read but not aimed at, on a runner. With `at-spi2-core`
+installed, `toolkit-accessibility` switched on and the bus started by hand, the
+registry sees a GTK app and cuse reads its 17 controls with the right roles and
+names - and every single rectangle comes back as 0,0. Without a window manager
+the toolkit does not know where its own window is. A tree that names controls
+but cannot place them is the confident-wrong-answer trap again, so cuse refuses
+to aim by it and says why. CI keeps the attempt as a job that reports rather
+than gates.
 
 Two caveats worth knowing. WinForms reports its controls to UI Automation as
 plain panes rather than as buttons and text boxes, so on Windows the name is the
@@ -227,7 +228,7 @@ it (missing dependency, no display, locked session).
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input
   plans (`src/plan.ts`), capability reasoning (`src/preflight.ts`), lock-state
   parsing (`src/session.ts`) and image comparison (`src/png.ts`) are pure
-  functions. 179 tests, no machine side effects. The CLI only wires execution
+  functions. 185 tests, no machine side effects. The CLI only wires execution
   around them.
 - **Structured output.** Every action returns a typed `Result` ({ok, action, os,
   detail?, error?, warn?, data?}); `--json` emits it. A missing dependency comes
@@ -251,7 +252,7 @@ it (missing dependency, no display, locked session).
 ## Develop
 
 ```sh
-bun test          # 179 tests, the agnostic core
+bun test          # 185 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cuse
 ```
 

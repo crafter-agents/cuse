@@ -17,7 +17,7 @@ import { listWindowsCmd, parseWindows, pickWindow, pointIn, frontmostCmd, parseF
          frontmostMatches, type Win } from "./window.ts";
 import { findTemplate, crop, variance, MIN_VARIANCE } from "./match.ts";
 import { elementsCmd, parseElements, pickElement, pointInElement, describeMisses,
-         type Element } from "./elements.ts";
+         geometryLooksUsable, type Element } from "./elements.ts";
 import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
 
 export type Options = {
@@ -157,6 +157,12 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
   if (opts.element || opts.role) {
     const els = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
     const sel = { name: opts.element, role: opts.role };
+    if (!geometryLooksUsable(els)) {
+      throw new Error(
+        `the accessibility tree reports ${els.length} controls but places them all at 0,0 - ` +
+        `its coordinates cannot be aimed at (on Linux this means the toolkit has no window ` +
+        `manager telling it where its window is)`);
+    }
     const hit = pickElement(els, sel);
     if (!hit) {
       throw new Error(

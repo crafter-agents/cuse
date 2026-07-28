@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import {
   elementsCmd, parseElements, pickElement, pointInElement,
-  normalizeRole, describeMisses, type Element,
+  normalizeRole, describeMisses, geometryLooksUsable, type Element,
 } from "../src/elements.ts";
 import type { OS } from "../src/os.ts";
 
@@ -155,5 +155,20 @@ describe("a label is not a button", () => {
       el({ role: "button", name: "Save", width: 90, height: 30, x: 5 }),
     ];
     expect(pickElement(two, { name: "Save" })!.width).toBe(90);
+  });
+});
+
+describe("a tree that does not know where anything is", () => {
+  test("everything stacked at the origin is not a layout", () => {
+    // zenity under a bare Xvfb: 17 controls, correct roles and names, and every
+    // rectangle at 0,0. Aiming at that clicks the corner of the screen.
+    const piled = [el({ x: 0, y: 0 }), el({ name: "Cancel", x: 0, y: 0 }), el({ name: "OK", x: 0, y: 0 })];
+    expect(geometryLooksUsable(piled)).toBe(false);
+  });
+  test("one positioned control is enough to trust the rest", () => {
+    expect(geometryLooksUsable([el({ x: 0, y: 0 }), el({ x: 520, y: 400 })])).toBe(true);
+  });
+  test("a single control at the origin is plausible, not a symptom", () => {
+    expect(geometryLooksUsable([el({ x: 0, y: 0 })])).toBe(true);
   });
 });
