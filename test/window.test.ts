@@ -115,3 +115,24 @@ describe("a window that holds the keyboard without being in the list", () => {
     expect(frontmostMatches(front, "notepad-target")).toBe(false);
   });
 });
+
+describe("frontmost reports a window, not a document's first line", () => {
+  // On Windows the focused element is usually a control, and a control's name is
+  // its content: a text box containing "initial line" reported exactly that, so
+  // --expect-front compared a window title against a line of the document and
+  // refused to type into the right window.
+  test("both are reported, window first", () => {
+    expect(parseFrontmost("notepad-target.txt - Notepad\tinitial line\n"))
+      .toBe("notepad-target.txt - Notepad initial line");
+  });
+  test("matching the window title works again", () => {
+    const front = parseFrontmost("notepad-target.txt - Notepad\tinitial line\n");
+    expect(frontmostMatches(front, "notepad-target")).toBe(true);
+  });
+  test("and the control's content is still visible for diagnosis", () => {
+    expect(parseFrontmost("Untitled - Notepad\thello world\n")).toContain("hello world");
+  });
+  test("a focused element with no window ancestor still says something", () => {
+    expect(parseFrontmost("\tSelect an app to open 'notepad'\n")).toBe("Select an app to open 'notepad'");
+  });
+});
