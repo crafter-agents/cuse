@@ -101,10 +101,21 @@ export function frontmostCmd(os: OS): string[] {
       'end tell'];
     case "linux": return ["sh", "-c",
       'id=$(xdotool getactivewindow 2>/dev/null) || exit 0; xdotool getwindowname "$id" 2>/dev/null'];
+    // The focused element is often a control, and a control's name is its
+    // content: a text box with "initial line" in it reported exactly that, so
+    // the guard was comparing a window title against a document's first line.
+    // Walk up to the window and report both.
     case "windows": return ps(
       "Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes;" +
       "$e=[System.Windows.Automation.AutomationElement]::FocusedElement;" +
-      "if($e){Write-Output $e.Current.Name}");
+      "if($e){" +
+      "$w=$e;$walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker;" +
+      "$guard=0;" +
+      "while($w -and $guard -lt 20 -and " +
+      "$w.Current.ControlType.ProgrammaticName -ne 'ControlType.Window'){" +
+      "$w=$walker.GetParent($w);$guard++};" +
+      "$title=if($w){$w.Current.Name}else{''};" +
+      "Write-Output (@($title,$e.Current.Name) -join \"`t\")}");
     default: throw new Error(`frontmost unsupported on ${os}`);
   }
 }

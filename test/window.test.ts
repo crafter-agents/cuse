@@ -94,3 +94,45 @@ describe("who has the keyboard", () => {
     expect(frontmostMatches("", "TextEdit")).toBe(true);
   });
 });
+
+describe("a window that holds the keyboard without being in the list", () => {
+  // Observed on Windows: the "Select an app to open 'notepad'" chooser is
+  // frontmost and absent from the UI Automation window list, so waiting for it
+  // by name never ended and anything typed went into it.
+  const enumerated = [
+    { title: "notepad-target.txt - Notepad", x: 0, y: 0, width: 800, height: 600 },
+  ];
+  const front = "Select an app to open 'notepad'";
+
+  test("the list alone cannot find it", () => {
+    expect(pickWindow(enumerated, "Select an app")).toBeNull();
+  });
+  test("what has focus can", () => {
+    expect(frontmostMatches(front, "Select an app")).toBe(true);
+  });
+  test("and the two together do not confuse the real target", () => {
+    expect(pickWindow(enumerated, "notepad-target")).not.toBeNull();
+    expect(frontmostMatches(front, "notepad-target")).toBe(false);
+  });
+});
+
+describe("frontmost reports a window, not a document's first line", () => {
+  // On Windows the focused element is usually a control, and a control's name is
+  // its content: a text box containing "initial line" reported exactly that, so
+  // --expect-front compared a window title against a line of the document and
+  // refused to type into the right window.
+  test("both are reported, window first", () => {
+    expect(parseFrontmost("notepad-target.txt - Notepad\tinitial line\n"))
+      .toBe("notepad-target.txt - Notepad initial line");
+  });
+  test("matching the window title works again", () => {
+    const front = parseFrontmost("notepad-target.txt - Notepad\tinitial line\n");
+    expect(frontmostMatches(front, "notepad-target")).toBe(true);
+  });
+  test("and the control's content is still visible for diagnosis", () => {
+    expect(parseFrontmost("Untitled - Notepad\thello world\n")).toContain("hello world");
+  });
+  test("a focused element with no window ancestor still says something", () => {
+    expect(parseFrontmost("\tSelect an app to open 'notepad'\n")).toBe("Select an app to open 'notepad'");
+  });
+});

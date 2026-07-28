@@ -263,7 +263,7 @@ it (missing dependency, no display, locked session).
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input
   plans (`src/plan.ts`), capability reasoning (`src/preflight.ts`), lock-state
   parsing (`src/session.ts`) and image comparison (`src/png.ts`) are pure
-  functions. 214 tests, no machine side effects. The CLI only wires execution
+  functions. 234 tests, no machine side effects. The CLI only wires execution
   around them.
 - **Structured output.** Every action returns a typed `Result` ({ok, action, os,
   detail?, error?, warn?, data?}); `--json` emits it. A missing dependency comes
@@ -287,7 +287,7 @@ it (missing dependency, no display, locked session).
 ## Develop
 
 ```sh
-bun test          # 214 tests, the agnostic core
+bun test          # 234 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cuse
 ```
 
@@ -321,6 +321,43 @@ bun run build     # compile a standalone binary to dist/cuse
   screenshots. It floats above the frontmost app without becoming it, so the
   `--expect-front` guard cannot see it, and it swallows every keystroke after
   that. CI proves input before taking any screenshot for this reason.
+
+## A real defect, reproduced
+
+Everything else here is gated against a target built for the purpose, which is
+the bias this project keeps finding elsewhere. This one is not.
+
+On Windows Server, `notepad` on the PATH is an [App Execution
+Alias](https://trainsec.net/library/windows-internals/how-windows-app-execution-aliases-work-and-how-to-read-them-in-c/):
+a zero-byte file with reparse tag `0x8000001B` naming a Store package that Server
+SKUs do not provision. Starting it succeeds - a process is created, every API
+agrees - and no editor window ever appears. What the user gets instead is an app
+chooser that holds the keyboard, so anything driving the desktop types into that.
+
+CI reproduces it and asserts each half on its own runner: the alias launch
+reports success while no editor window appears, and the [documented
+workaround](https://learn.microsoft.com/en-us/answers/questions/2109069/createprocess-on-notepad-exe-fails-due-to-a-crash)
+- the classic binary in System32, by full path - lands a keystroke that is read
+back off disk.
+
+Chasing it found four bugs in cuse, which is the argument for doing it at all:
+
+- **Named keys were broken on every platform.** `alt+F4` was sent to SendKeys as
+  `%F4`, which types the letters f and 4, so an app chooser sat through five
+  attempts to close it. Lowercasing a chord is right for letters and wrong for
+  everything with a name: System Events needs a key code for Escape, and xdotool
+  keysyms are case-sensitive. Every chord CI had sent until then was a letter.
+- **A dialog can hold the keyboard without being in the window list.** UI
+  Automation does not enumerate that chooser, so `wait --window` never ended
+  while `frontmost` reported it plainly. `wait` now consults both, and `windows`
+  warns when something it cannot see has focus.
+- **`frontmost` reported a document's first line.** The focused element is
+  usually a control, and a control's name is its content, so `--expect-front`
+  refused to type into the window it had just focused.
+- **The workflow was invalid and the local check could not see it.** PyYAML
+  accepts duplicate keys; Actions rejects them, producing a run with zero jobs
+  and a bare "failure". A strict checker now runs before pushing, and every job
+  has a deadline - learning that cost 45 minutes of a hung runner.
 
 ## Status
 
