@@ -25,7 +25,47 @@ const ps = (script: string) => ["powershell", "-NoProfile", "-Command", script];
  * One vocabulary across three platforms. AXButton, Button and push button are
  * the same thing to someone trying to press it.
  */
+/**
+ * The legacy MSAA roles, which Windows still answers with when UI Automation
+ * does not know what a control is.
+ *
+ * WinForms reports every control as a generic Pane to UI Automation, so
+ * `--role=button` matched nothing on Windows even though the tree was otherwise
+ * correct. The same controls describe themselves properly through the older
+ * IAccessible interface, which UIA exposes as a pattern - so cuse asks both and
+ * prefers whichever actually says something.
+ */
+const LEGACY_ROLES: Record<number, string> = {
+  9: "window", 10: "group", 16: "group", 20: "text", 21: "text",
+  30: "link", 41: "label", 42: "text", 43: "button", 44: "checkbox",
+  45: "radio", 46: "combobox", 33: "list", 34: "listitem", 37: "tab",
+  56: "slider", 12: "menuitem", 11: "menu", 24: "toolbar", 51: "image",
+};
+
+/** Roles UI Automation hands back when it has nothing specific to say. */
+const VAGUE = new Set(["pane", "custom", "group", "client", "unknown"]);
+
+/**
+ * Resolve a Windows role from what both interfaces reported.
+ *
+ * The wire format is `UiaType|legacyCode`. The UIA name wins when it is
+ * specific, because it is the more modern and more accurate of the two; the
+ * legacy code is the fallback for exactly the case that motivated this.
+ */
+export function resolveWindowsRole(raw: string): string {
+  const [uia, code] = raw.split("|");
+  const fromUia = plainRole(uia ?? "");
+  if (!VAGUE.has(fromUia)) return fromUia;
+  const legacy = LEGACY_ROLES[Number(code)];
+  return legacy ?? fromUia;
+}
+
 export function normalizeRole(raw: string): string {
+  if (raw.includes("|")) return resolveWindowsRole(raw);
+  return plainRole(raw);
+}
+
+function plainRole(raw: string): string {
   const r = raw.trim().toLowerCase().replace(/^ax/, "").replace(/[\s_-]+/g, "");
   const map: Record<string, string> = {
     button: "button", pushbutton: "button", splitbutton: "button",
@@ -143,7 +183,12 @@ export function elementsCmd(os: OS, app: string, limit = 300): string[] {
       "$r=$e.Current.BoundingRectangle;" +
       "if($r.Width -le 0){continue}" +
       "$t=($e.Current.ControlType.ProgrammaticName -split '\\.')[-1];" +
-      "Write-Output ((@($t,$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height)) -join \"`t\");" +
+      // WinForms answers Pane for everything through UI Automation; the same
+      // control names itself properly through the legacy interface.
+      "$legacy=0;" +
+      "try{$lp=$e.GetCurrentPattern([System.Windows.Automation.LegacyIAccessiblePattern]::Pattern);" +
+      "if($lp){$legacy=[int]$lp.Current.Role}}catch{}" +
+      "Write-Output ((@(\"$t|$legacy\",$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height)) -join \"`t\");" +
       "$n++}}");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not

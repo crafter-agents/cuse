@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import {
   elementsCmd, parseElements, pickElement, pointInElement,
-  normalizeRole, describeMisses, geometryLooksUsable, type Element,
+  normalizeRole, resolveWindowsRole, describeMisses, geometryLooksUsable, type Element,
 } from "../src/elements.ts";
 import type { OS } from "../src/os.ts";
 
@@ -170,5 +170,39 @@ describe("a tree that does not know where anything is", () => {
   });
   test("a single control at the origin is plausible, not a symptom", () => {
     expect(geometryLooksUsable([el({ x: 0, y: 0 })])).toBe(true);
+  });
+});
+
+describe("Windows roles when UI Automation shrugs", () => {
+  test("a specific UIA type wins, because it is the better source", () => {
+    expect(resolveWindowsRole("Button|43")).toBe("button");
+    expect(resolveWindowsRole("Edit|42")).toBe("text");
+  });
+  test("a vague UIA type falls back to what the legacy interface says", () => {
+    // The case that motivated this: WinForms answers Pane for a real button.
+    expect(resolveWindowsRole("Pane|43")).toBe("button");
+    expect(resolveWindowsRole("Pane|42")).toBe("text");
+    expect(resolveWindowsRole("Custom|44")).toBe("checkbox");
+  });
+  test("when neither knows, the vague answer stands rather than a guess", () => {
+    expect(resolveWindowsRole("Pane|0")).toBe("group");
+    expect(resolveWindowsRole("Pane|")).toBe("group");
+  });
+  test("parsing a Windows row resolves the role and keeps what was reported", () => {
+    const [e] = parseElements("Pane|43\tSave\t112\t336\t684\t60\n");
+    expect(e!.role).toBe("button");
+    expect(e!.rawRole).toBe("Pane|43");
+  });
+  test("the other platforms are untouched by the composite form", () => {
+    expect(normalizeRole("AXButton")).toBe("button");
+    expect(normalizeRole("push button")).toBe("button");
+  });
+  test("with real roles, --role=button finds the button WinForms called a pane", () => {
+    const tree = parseElements(
+      "Pane|42\tcuse input reached this window\t86\t109\t684\t180\n" +
+      "Pane|43\tSave\t86\t310\t684\t60\n");
+    const hit = pickElement(tree, { name: "Save", role: "button" })!;
+    expect(hit).not.toBeNull();
+    expect([hit.x, hit.y]).toEqual([86, 310]);
   });
 });

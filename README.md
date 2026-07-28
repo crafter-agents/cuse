@@ -134,10 +134,12 @@ $ cuse find button.png --json
 {"ok":true,"action":"find","os":"macos","detail":"found button.png at 1030,460 in the frame (score 1.000) -> click 515,230"}
 ```
 
-Searching a 3024x1964 frame takes about 0.4s. `find` refuses a template with no
-structure in it rather than returning a confident wrong point - a blank stretch
-of text box matches a hundred equally blank places, and the score cannot tell
-you the answer is not unique, only that the pixels agree.
+Searching a 3024x1964 frame takes about 0.4s. The score is a normalised
+correlation, which matters for two reasons: the same control found on a dimmer
+screen or under a different theme scores the same, so a threshold means one
+thing everywhere; and a template with no structure has nothing to correlate, so
+it is declined rather than located confidently in the wrong place - a blank
+stretch of text box matches a hundred equally blank places.
 
 Where each route works, measured on the runners:
 
@@ -160,11 +162,14 @@ its geometry is not, and the refusal happens. The day a runner reports real
 coordinates that job goes red, which is the signal to promote the Linux route
 from a refusal to a click.
 
-Two caveats worth knowing. WinForms reports its controls to UI Automation as
-plain panes rather than as buttons and text boxes, so on Windows the name is the
-selector that means something and the role is not. And on Windows the first
-click on an inactive window activates it and goes no further - CI resolves the
-Save button and presses it with two clicks for exactly that reason.
+One caveat worth knowing: on Windows the first click on an inactive window
+activates it and goes no further, so CI resolves the Save button and presses it
+with two clicks for exactly that reason.
+
+WinForms answers `Pane` for every control through UI Automation, which used to
+make `--role` useless there. The same controls describe themselves properly
+through the older IAccessible interface, so cuse asks both and prefers whichever
+says something - `Pane|43` becomes `button`.
 
 ## Waiting for a thing, not for a duration
 
@@ -255,7 +260,7 @@ it (missing dependency, no display, locked session).
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input
   plans (`src/plan.ts`), capability reasoning (`src/preflight.ts`), lock-state
   parsing (`src/session.ts`) and image comparison (`src/png.ts`) are pure
-  functions. 202 tests, no machine side effects. The CLI only wires execution
+  functions. 214 tests, no machine side effects. The CLI only wires execution
   around them.
 - **Structured output.** Every action returns a typed `Result` ({ok, action, os,
   detail?, error?, warn?, data?}); `--json` emits it. A missing dependency comes
@@ -279,7 +284,7 @@ it (missing dependency, no display, locked session).
 ## Develop
 
 ```sh
-bun test          # 202 tests, the agnostic core
+bun test          # 214 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cuse
 ```
 
@@ -303,9 +308,6 @@ bun run build     # compile a standalone binary to dist/cuse
 
 ## Known limits
 
-- The similarity score in `find` is a mean pixel distance, so flat or sparse
-  content scores high anywhere; that is why a template's own structure is
-  checked first. A normalised correlation would judge better.
 - Linux has no accessibility tree out of the box: AT-SPI has to be installed,
   and the toolkit has to export one. A GTK app does and CI proves it; an xterm
   never will.
