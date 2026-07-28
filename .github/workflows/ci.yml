@@ -329,3 +329,29 @@ jobs:
             libgtk-3-0 gsettings-desktop-schemas
           timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" \
             dbus-run-session -- ./scenarios/linux-atspi.sh
+
+  # A real defect in shipped software, reproduced with cuse as the instrument,
+  # and its documented workaround verified in the same run. `notepad` on the PATH
+  # is an App Execution Alias whose Store package is not provisioned on Server
+  # SKUs: the process starts, every API reports success, and no window appears.
+  # That is the exact failure this tool exists to catch, so it is worth having as
+  # a gate rather than an anecdote.
+  repro-notepad:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun build --compile src/cli.ts --outfile cuse
+      - name: why the alias starts nothing
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scenarios/win-notepad-evidence.ps1
+      - name: reproduce it, then verify the workaround
+        shell: bash
+        run: ./scenarios/repro-notepad.sh ./cuse
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: repro-notepad
+          path: |
+            notepad-target.txt
+            notepad-elements.json
