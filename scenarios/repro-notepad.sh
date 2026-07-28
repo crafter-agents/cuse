@@ -33,6 +33,23 @@ echo "$waited" | grep -q 'never appeared' || {
   echo "expected the wait to say the window never appeared, got: $waited"; exit 1; }
 echo "  reproduced: launch reported success and no window ever existed"
 
+# What the user does get is a chooser dialog - the visible symptom of an alias
+# with nothing behind it. Worth asserting, and worth dismissing: left up, it
+# holds the keyboard and the next keystroke lands in it. cuse noticed exactly
+# that on the first run of this scenario, through --expect-front.
+say "what appeared instead"
+wins=$("$CUSE" windows --json)
+echo "  $wins"
+if echo "$wins" | grep -qi "Select an app"; then
+  echo "  the alias produced an app chooser, not a text editor"
+  "$CUSE" key Escape --json || true
+  "$CUSE" wait --gone --window="Select an app" --timeout=10000 --json || {
+    echo "the chooser would not go away; the rest of this run cannot be trusted"; exit 1; }
+  echo "  dismissed it, so it cannot swallow what comes next"
+else
+  echo "  no chooser this time; nothing to dismiss"
+fi
+
 say "the workaround: the classic binary, by full path"
 target="$(pwd -W 2>/dev/null || pwd)/notepad-target.txt"
 printf 'initial line\r\n' > notepad-target.txt
