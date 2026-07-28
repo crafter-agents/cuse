@@ -51,6 +51,7 @@ export function parseArgs(argv: string[]): Parsed {
 
   const opts: Options = {
     force: argv.includes("--force"),
+    gone: argv.includes("--gone"),
     sameUnder: flag("same-under") !== undefined ? Number(flag("same-under")) : 1,
     timeoutMs: num(flag("timeout")),
     window: flag("window"),

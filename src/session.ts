@@ -48,6 +48,20 @@ export async function isSessionLocked(probe: SessionProbe): Promise<boolean | nu
   return null;
 }
 
+/**
+ * An empty list of windows means one of two very different things.
+ *
+ * With the screen locked, nothing can be enumerated - System Events sees no
+ * application windows at all - and "no titled windows" then reads as "the
+ * desktop is empty" when the truth is "I cannot see". Anything that reports a
+ * view of the screen has to say which of the two it is.
+ */
+export function blindNote(locked: boolean | null, sawNothing: boolean): string | undefined {
+  if (!sawNothing) return undefined;
+  if (locked === true) return "nothing could be seen because the screen is locked, not because nothing is there";
+  return undefined;
+}
+
 export const LOCKED_REASON =
   "the session is locked: input would go to the login window, not to your app " +
   "(unlock the machine, or pass --force if you really mean it)";
