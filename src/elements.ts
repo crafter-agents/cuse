@@ -25,7 +25,48 @@ const ps = (script: string) => ["powershell", "-NoProfile", "-Command", script];
  * One vocabulary across three platforms. AXButton, Button and push button are
  * the same thing to someone trying to press it.
  */
+/**
+ * Win32 window classes, which say what a control is when UI Automation will not.
+ *
+ * WinForms reports every control as a generic Pane to UI Automation, so
+ * `--role=button` matched nothing on Windows even though the tree was otherwise
+ * correct. The managed UIA API has no way to ask the older accessibility
+ * interface - trying it throws - but every one of these controls is a real Win32
+ * window underneath, and its class name is exactly the missing answer.
+ */
+const WIN32_CLASSES: Record<string, string> = {
+  button: "button", edit: "text", static: "label", combobox: "combobox",
+  listbox: "list", syslistview32: "list", systreeview32: "tree",
+  sysheader32: "table", msctls_progress32: "progressbar",
+  msctls_trackbar32: "slider", scrollbar: "scrollbar",
+  richedit20w: "text", richedit50w: "text",
+  "#32770": "dialog", tabcontrol: "tab", syslink: "link",
+};
+
+/** Roles UI Automation hands back when it has nothing specific to say. */
+const VAGUE = new Set(["pane", "custom", "group", "client", "unknown"]);
+
+/**
+ * Resolve a Windows role from what both sources reported.
+ *
+ * The wire format is `UiaType|Win32Class`. The UIA name wins when it is
+ * specific, because it describes intent rather than implementation; the window
+ * class is the fallback for exactly the case that motivated this.
+ */
+export function resolveWindowsRole(raw: string): string {
+  const [uia, cls] = raw.split("|");
+  const fromUia = plainRole(uia ?? "");
+  if (!VAGUE.has(fromUia)) return fromUia;
+  const key = (cls ?? "").trim().toLowerCase().replace(/^windowsforms10\./, "").split(".")[0] ?? "";
+  return WIN32_CLASSES[key] ?? fromUia;
+}
+
 export function normalizeRole(raw: string): string {
+  if (raw.includes("|")) return resolveWindowsRole(raw);
+  return plainRole(raw);
+}
+
+function plainRole(raw: string): string {
   const r = raw.trim().toLowerCase().replace(/^ax/, "").replace(/[\s_-]+/g, "");
   const map: Record<string, string> = {
     button: "button", pushbutton: "button", splitbutton: "button",
@@ -132,6 +173,12 @@ export function elementsCmd(os: OS, app: string, limit = 300): string[] {
     // arrives as "ControlType.Button", so only the tail is useful.
     case "windows": return ps(
       "Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes;" +
+      // The class name of the window behind each control: the managed UIA API
+      // cannot reach the older accessibility interface, but this is underneath
+      // every WinForms control and answers the same question.
+      "if(-not ('CuseWin' -as [type])){Add-Type -Name CuseWin -Namespace '' -MemberDefinition " +
+      "'[DllImport(\"user32.dll\", CharSet=CharSet.Unicode)] public static extern int " +
+      "GetClassName(System.IntPtr h, System.Text.StringBuilder s, int max);'};" +
       "$root=[System.Windows.Automation.AutomationElement]::RootElement;" +
       "$all=$root.FindAll('Children',[System.Windows.Automation.Condition]::TrueCondition);" +
       `$app='${app.replace(/'/g, "''")}';` +
@@ -143,7 +190,13 @@ export function elementsCmd(os: OS, app: string, limit = 300): string[] {
       "$r=$e.Current.BoundingRectangle;" +
       "if($r.Width -le 0){continue}" +
       "$t=($e.Current.ControlType.ProgrammaticName -split '\\.')[-1];" +
-      "Write-Output ((@($t,$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height)) -join \"`t\");" +
+      // WinForms answers Pane for everything through UI Automation; the same
+      // control names itself properly through the legacy interface.
+      "$cls='';" +
+      "try{$h=$e.Current.NativeWindowHandle;" +
+      "if($h -ne 0){$sb=New-Object System.Text.StringBuilder 256;" +
+      "[void][CuseWin]::GetClassName([IntPtr]$h,$sb,256);$cls=$sb.ToString()}}catch{}" +
+      "Write-Output ((@(\"$t|$cls\",$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height)) -join \"`t\");" +
       "$n++}}");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not

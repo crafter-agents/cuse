@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import {
   elementsCmd, parseElements, pickElement, pointInElement,
-  normalizeRole, describeMisses, geometryLooksUsable, type Element,
+  normalizeRole, resolveWindowsRole, describeMisses, geometryLooksUsable, type Element,
 } from "../src/elements.ts";
 import type { OS } from "../src/os.ts";
 
@@ -170,5 +170,44 @@ describe("a tree that does not know where anything is", () => {
   });
   test("a single control at the origin is plausible, not a symptom", () => {
     expect(geometryLooksUsable([el({ x: 0, y: 0 })])).toBe(true);
+  });
+});
+
+describe("Windows roles when UI Automation shrugs", () => {
+  test("a specific UIA type wins, because it describes intent", () => {
+    expect(resolveWindowsRole("Button|Button")).toBe("button");
+    expect(resolveWindowsRole("Edit|Edit")).toBe("text");
+  });
+  test("a vague UIA type falls back to the class of the window underneath", () => {
+    // The case that motivated this: WinForms answers Pane for a real button.
+    expect(resolveWindowsRole("Pane|Button")).toBe("button");
+    expect(resolveWindowsRole("Pane|Edit")).toBe("text");
+    expect(resolveWindowsRole("Pane|Static")).toBe("label");
+  });
+  test("WinForms decorates its class names, and that is stripped", () => {
+    // Real WinForms classes look like WindowsForms10.BUTTON.app.0.141b42a_r6_ad1
+    expect(resolveWindowsRole("Pane|WindowsForms10.BUTTON.app.0.141b42a")).toBe("button");
+    expect(resolveWindowsRole("Pane|WindowsForms10.EDIT.app.0.141b42a")).toBe("text");
+  });
+  test("when neither knows, the vague answer stands rather than a guess", () => {
+    expect(resolveWindowsRole("Pane|")).toBe("group");
+    expect(resolveWindowsRole("Pane|SomethingUnheardOf")).toBe("group");
+  });
+  test("parsing a Windows row resolves the role and keeps what was reported", () => {
+    const [e] = parseElements("Pane|Button\tSave\t112\t336\t684\t60\n");
+    expect(e!.role).toBe("button");
+    expect(e!.rawRole).toBe("Pane|Button");
+  });
+  test("the other platforms are untouched by the composite form", () => {
+    expect(normalizeRole("AXButton")).toBe("button");
+    expect(normalizeRole("push button")).toBe("button");
+  });
+  test("with real roles, --role=button finds the button WinForms called a pane", () => {
+    const tree = parseElements(
+      "Pane|Edit\tcuse input reached this window\t86\t109\t684\t180\n" +
+      "Pane|Button\tSave\t86\t310\t684\t60\n");
+    const hit = pickElement(tree, { name: "Save", role: "button" })!;
+    expect(hit).not.toBeNull();
+    expect([hit.x, hit.y]).toEqual([86, 310]);
   });
 });

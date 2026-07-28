@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { findTemplate, crop, downsample, variance, MIN_VARIANCE } from "../src/match.ts";
+import { findTemplate, crop, downsample, variance, correlation, MIN_VARIANCE } from "../src/match.ts";
 import { decodePNG } from "../src/png.ts";
 import { inflateSync } from "node:zlib";
 import type { Image } from "../src/png.ts";
@@ -51,19 +51,22 @@ describe("downsample", () => {
 
 describe("findTemplate", () => {
   test("finds a mark and reports its centre, which is where a click goes", () => {
+    // The patch includes the mark's edge. A patch of solid colour has nothing
+    // to correlate and is declined now - see the scoring tests below.
     const hay = screen(240, 180, { x: 100, y: 60, size: 20 });
-    const needle = crop(hay, 100, 60, 20, 20);
+    const needle = crop(hay, 90, 50, 40, 40);
     const m = findTemplate(hay, needle)!;
     expect(m).not.toBeNull();
-    expect([m.x, m.y]).toEqual([100, 60]);
+    expect([m.x, m.y]).toEqual([90, 50]);
     expect([m.centerX, m.centerY]).toEqual([110, 70]);
     expect(m.score).toBeGreaterThan(0.99);
   });
   test("finds it at the edges too, not only comfortably inside", () => {
-    for (const [x, y] of [[0, 0], [220, 160]]) {
-      const hay = screen(240, 180, { x: x!, y: y!, size: 20 });
-      const m = findTemplate(hay, crop(hay, x!, y!, 20, 20))!;
-      expect([m.x, m.y]).toEqual([x, y]);
+    for (const [mx, my, cx, cy] of [[0, 0, 0, 0], [220, 160, 210, 150]]) {
+      const hay = screen(240, 180, { x: mx!, y: my!, size: 20 });
+      const m = findTemplate(hay, crop(hay, cx!, cy!, 30, 30))!;
+      expect(m).not.toBeNull();
+      expect([m.x, m.y]).toEqual([cx, cy]);
     }
   });
   test("says no rather than guessing when the thing is absent", () => {
@@ -72,13 +75,15 @@ describe("findTemplate", () => {
     expect(findTemplate(hay, needle)).toBeNull();
   });
   test("tolerates small noise, because a real screen is never identical", () => {
+    // The patch straddles the mark's edge: a solid block has nothing to
+    // correlate, which the matcher now declines rather than guessing about.
     const hay = screen(240, 180, { x: 90, y: 50, size: 24 });
-    const needle = crop(hay, 90, 50, 24, 24);
+    const needle = crop(hay, 80, 40, 40, 40);
     for (let i = 0; i < needle.data.length; i += 7) {
       needle.data[i] = Math.min(255, needle.data[i]! + 4);
     }
     const m = findTemplate(hay, needle, 0.95)!;
-    expect([m.x, m.y]).toEqual([90, 50]);
+    expect([m.x, m.y]).toEqual([80, 40]);
   });
   test("a needle bigger than the frame is an error, not a null", () => {
     expect(() => findTemplate(screen(20, 20), screen(40, 40))).toThrow("larger than the frame");
@@ -86,8 +91,8 @@ describe("findTemplate", () => {
   test("the coarse-to-fine path lands on the exact pixel, not near it", () => {
     // Large frame: this is the path that actually runs on a real screenshot.
     const hay = screen(1280, 1024, { x: 803, y: 611, size: 40 });
-    const m = findTemplate(hay, crop(hay, 803, 611, 40, 40))!;
-    expect([m.x, m.y]).toEqual([803, 611]);
+    const m = findTemplate(hay, crop(hay, 793, 601, 60, 60))!;
+    expect([m.x, m.y]).toEqual([793, 601]);
   });
 });
 
@@ -147,17 +152,27 @@ describe("the coarse pass keeps more than one candidate", () => {
   });
 });
 
-describe("what the score does not tell you", () => {
-  test("the score is a pixel distance, so flat content scores high anywhere", () => {
-    // Documented rather than fixed: on sparse or low-contrast content the score
-    // overstates confidence, which is why `find` also refuses templates whose
-    // own variance is too low. A normalised correlation would judge better.
+describe("what the score now means", () => {
+  test("flat content is declined rather than scored highly everywhere", () => {
+    // This was the documented limitation: the score was a mean pixel distance,
+    // so a blank patch matched every other blank patch perfectly and the winner
+    // among them was arbitrary. Correlation has nothing to correlate there, and
+    // saying so is the honest answer.
     const pale: Image = { width: 300, height: 200, channels: 3,
       data: new Uint8Array(300 * 200 * 3).fill(250) };
     const patch = crop(pale, 10, 10, 60, 30);
-    const m = findTemplate(pale, patch);
-    expect(m!.score).toBeGreaterThan(0.99);   // a perfect score...
-    expect(variance(patch)).toBeLessThan(MIN_VARIANCE); // ...on nothing at all
+    expect(findTemplate(pale, patch)).toBeNull();
+    expect(variance(patch)).toBeLessThan(MIN_VARIANCE);
+  });
+  test("a score is comparable between frames, which a pixel distance was not", () => {
+    // The same control at two exposures scores the same, so a threshold means
+    // one thing everywhere instead of depending on the screen's brightness.
+    const hay = screen(400, 300, { x: 120, y: 90, size: 40 });
+    const needle = crop(hay, 110, 80, 60, 60);
+    const dim = { ...needle, data: Uint8Array.from(needle.data, (v) => Math.round(v * 0.6)) };
+    const a = findTemplate(hay, needle)!.score;
+    const b = findTemplate(hay, dim)!.score;
+    expect(Math.abs(a - b)).toBeLessThan(0.01);
   });
 });
 
@@ -191,5 +206,50 @@ describe("a patch that does not sit on the shrink grid", () => {
     const blank: Image = { width: 1024, height: 768, channels: 3,
       data: new Uint8Array(1024 * 768 * 3).fill(210) };
     expect(findTemplate(blank, needle)).toBeNull();
+  });
+});
+
+describe("what correlation buys over pixel distance", () => {
+  const hay = screen(400, 300, { x: 120, y: 90, size: 40 });
+  const needle = crop(hay, 110, 80, 60, 60);
+
+  /**
+   * The same patch under a different exposure: scaled and offset, which is what
+   * a dimmed display, a theme change or a window losing focus does to it.
+   * Affine on purpose - clipping at 255 is not a brightness change, it destroys
+   * the pattern, and no correlation should survive that.
+   */
+  const exposure = (img: typeof needle, gain: number, offset: number) => ({
+    ...img,
+    data: Uint8Array.from(img.data, (v) => Math.max(0, Math.min(255, Math.round(v * gain + offset)))),
+  });
+
+  test("a darker copy of the same control still scores as a match", () => {
+    const m = findTemplate(hay, exposure(needle, 0.7, 0), 0.9);
+    expect(m).not.toBeNull();
+    expect([m!.x, m!.y]).toEqual([110, 80]);
+    // Mean pixel distance would have called this a poor match: every pixel is
+    // off by up to 30%, which is what used to push the score under any
+    // reasonable threshold.
+    expect(m!.score).toBeGreaterThan(0.99);
+  });
+  test("a washed-out copy too: less contrast, same control", () => {
+    const m = findTemplate(hay, exposure(needle, 0.5, 60), 0.9)!;
+    expect([m.x, m.y]).toEqual([110, 80]);
+    expect(m.score).toBeGreaterThan(0.99);
+  });
+  test("an unrelated patch still scores badly, so the tolerance is not blindness", () => {
+    const other = crop(screen(400, 300, { x: 300, y: 40, size: 40 }), 290, 30, 60, 60);
+    const m = findTemplate(hay, other, 0.9);
+    expect(m).toBeNull();
+  });
+  test("correlation is 1 for an exact patch and low for a shifted one", () => {
+    expect(correlation(hay, needle, 110, 80)).toBeCloseTo(1, 5);
+    expect(correlation(hay, needle, 10, 10)).toBeLessThan(0.5);
+  });
+  test("a template with no variation cannot be correlated, and is declined", () => {
+    // Which is why `find` refuses such templates before searching at all.
+    const flat = { width: 20, height: 20, channels: 3, data: new Uint8Array(20 * 20 * 3).fill(200) };
+    expect(findTemplate(hay, flat, 0.9)).toBeNull();
   });
 });
