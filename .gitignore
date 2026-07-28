@@ -1,3 +1,7 @@
 node_modules/
 dist/
+
+# Screenshots are output, not source - except the ones a test needs to prove a
+# regression that no synthetic screen reproduced.
 *.png
+!test/fixtures/*.png

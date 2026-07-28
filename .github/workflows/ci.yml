@@ -14,9 +14,245 @@ jobs:
       - name: test (pure core, runs everywhere)
         run: bun test
       - name: build standalone binary
-        run: bun build --compile src/cli.ts --outfile cu-${{ matrix.os }}
-      - name: smoke — os + capture work on this platform
+        run: bun build --compile src/cli.ts --outfile cuse-${{ matrix.os }}
+      - name: os detection
+        run: ./cuse-${{ matrix.os }} os --json
+
+  # capture is the action that actually depends on the machine having a screen.
+  # Hard gate on all three platforms: no `|| true`, and the PNG is decoded to
+  # prove it is a real frame rather than a 0-byte file.
+  capture:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - name: build
+        run: bun build --compile src/cli.ts --outfile cuse
+
+      # Linux runners are headless: no display, no imagemagick. cuse reports both
+      # as structured errors instead of failing opaquely - assert that it does.
+      - name: linux - preflight refuses headless, with a reason
+        if: runner.os == 'Linux'
+        run: |
+          out=$(./cuse capture out.png --json || true)
+          echo "$out"
+          echo "$out" | grep -q '"ok":false' || { echo "expected a refusal on a headless runner"; exit 1; }
+      - name: linux - provide the display cuse asks for, then capture for real
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends x11-apps
+          out=$(xvfb-run -a --server-args="-screen 0 1280x1024x24" ./cuse capture out.png --json)
+          echo "$out"
+          # A bare Xvfb has nothing drawn on it, so the frame is blank. cuse must
+          # say so rather than hand an agent an empty screen as a success.
+          echo "$out" | grep -q '"warn"' || { echo "expected a blank-frame warning on a bare Xvfb"; exit 1; }
+
+      - name: macos/windows - capture on the runner's own session
+        if: runner.os != 'Linux'
+        run: ./cuse capture out.png --json
+
+      # A PNG magic number is not proof of a frame; read the IHDR dimensions.
+      - name: assert the capture is a real frame
         shell: bash
         run: |
-          ./cu-${{ matrix.os }} os --json
-          ./cu-${{ matrix.os }} capture smoke.png --json || echo "capture needs a display on this runner"
+          bun -e '
+            const b = new Uint8Array(await Bun.file("out.png").arrayBuffer());
+            if (![0x89, 0x50, 0x4e, 0x47].every((v, i) => b[i] === v))
+              throw new Error("not a PNG: " + b.length + " bytes");
+            const dv = new DataView(b.buffer);
+            const [w, h] = [dv.getUint32(16), dv.getUint32(20)];
+            if (w < 100 || h < 100) throw new Error(`implausible frame ${w}x${h}`);
+            console.log(`ok: ${w}x${h}, ${b.length} bytes`);
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capture-${{ matrix.os }}
+          path: out.png
+
+  # Does input actually land in a window? Capture, act, capture again, and let
+  # cuse's own differ decide - the only check that cannot pass while the keystroke
+  # goes nowhere. Runs against a throwaway app on the runner, never a real desktop.
+  input:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - name: build
+        run: bun build --compile src/cli.ts --outfile cuse
+
+      - name: linux - type into an xterm under Xvfb
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends x11-apps xdotool xterm xfonts-base
+          cat > drive.sh <<'EOF'
+          set -e
+          # -T names the window: without it xterm titles itself after the
+          # command it runs, so the window was called "sleep" and focus could
+          # not find it. Same trick as the Windows target.
+          # A shell, not `-e sleep`: the shell echoes what is typed, so the
+          # pixels that change are the keystroke itself and nothing else.
+          # `sh -i` rather than bash, and allowTitleOps off, because Ubuntu's
+          # bash prompt renames the window and focus would stop finding it.
+          xterm -T CU_TARGET -xrm 'XTerm*allowTitleOps: false' \
+                -geometry 100x30+0+0 -e sh -i 2>xterm.log &
+          sleep 4
+          echo "--- xterm stderr ---"; cat xterm.log 2>/dev/null || true
+          echo "--- windows on :99 ---"
+          xdotool search --onlyvisible --name . getwindowname %@ 2>/dev/null || echo "(none)"
+          # No window manager here, so X focuses nothing until we ask it to.
+          ./cuse focus CU_TARGET --json
+          # Let the window finish drawing; otherwise the control below measures
+          # the animation rather than the absence of input.
+          ./cuse settle --json   # a caret is not motion; see --same-under
+          # Control: two frames with nothing typed between them must be SAME.
+          # Without it, a blinking cursor would look exactly like a keystroke.
+          ./cuse capture control-a.png --json
+          sleep 1
+          ./cuse capture control-b.png --json
+          ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          # Click by name rather than by coordinate, right before typing:
+          # focus drifts across intervening captures.
+          ./cuse focus CU_TARGET --json
+          ./cuse capture before.png --json
+          ./cuse type "cuse input reached this window and this line is long on purpose" --expect-front=CU_TARGET --json
+          sleep 1
+          ./cuse capture after.png --json
+          ./cuse diff before.png after.png --same-under=0 --json | tee diff.json
+          # Ground truth: make the keystrokes do something the filesystem can
+          # confirm. Pixels can be faked by a cursor; a created file cannot.
+          rm -f /tmp/cu-input-ok
+          # The line typed above is still sitting at the prompt unsubmitted, so
+          # send it first - otherwise the next command concatenates onto it.
+          ./cuse key Return --json
+          sleep 1
+          ./cuse type "touch /tmp/cu-input-ok" --json
+          ./cuse key Return --json
+          sleep 2
+          test -f /tmp/cu-input-ok || { echo "the shell never received the keystrokes"; exit 1; }
+          echo "shell executed the typed command"
+          # Aim last: the shell now shows the command it ran, so a patch of the
+          # window is distinctive rather than one blank region among many.
+          bun scenarios/aim-check.ts ./cuse CU_TARGET
+          EOF
+          chmod +x drive.sh
+          timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" ./drive.sh
+
+      - name: macos - type into TextEdit
+        if: runner.os == 'macOS'
+        run: |
+          # Open a real file rather than bare TextEdit: on a fresh runner the
+          # app can come up showing the document picker, and typing into that
+          # changes plenty of pixels while reaching no document at all.
+          echo "initial line" > target.txt
+          open -a TextEdit "$PWD/target.txt"
+          sleep 5
+          ./cuse focus TextEdit --json
+          ./cuse settle --json   # a caret is not motion; see --same-under
+          ./cuse capture control-a.png --json
+          sleep 1
+          ./cuse capture control-b.png --json
+          ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          # Front it again immediately before typing: keystrokes go to whatever
+          # is frontmost, and settling takes seconds.
+          # macOS 26 raises a Screen Recording prompt after enough captures. It
+          # sits above TextEdit while TextEdit stays the frontmost app, so it is
+          # invisible to a focus check and it eats every keystroke. Dismiss it.
+          osascript -e 'tell application "System Events" to repeat with p in (every process whose background only is false)' \
+                    -e 'try' -e 'click (first button of front window of p whose name is "Allow")' -e 'end try' \
+                    -e 'end repeat' 2>/dev/null || true
+          ./cuse focus TextEdit --json
+          ./cuse capture before.png --json
+          ./cuse type "cuse input reached this window and this line is long on purpose" --expect-front=TextEdit --json
+          sleep 2
+          ./cuse capture after.png --json
+          ./cuse diff before.png after.png --same-under=0 --json | tee diff.json
+          # Ground truth, not pixels: save with cmd+s and read the file back off
+          # disk. A blinking caret can fake a pixel change; it cannot write text
+          # into a file. This exercises capture, focus, type and key at once.
+          ./cuse key cmd+s --json
+          sleep 3
+          cat target.txt
+          grep -q "cuse input reached this window" target.txt || {
+            echo "the keystrokes never reached the document"; exit 1; }
+          # Aim last: the window now holds unique text, which makes a patch of it
+          # findable rather than one blank region among many.
+          bun scenarios/aim-check.ts ./cuse target
+
+      # Recon showed the job runs in the interactive session with a real
+      # foreground window - what failed before was Notepad, which on Windows
+      # Server is the Store build and does not start at all. So cuse gets a window
+      # made for the purpose, whose text box writes every change to disk: the
+      # same ground truth the macOS and Linux checks use.
+      - name: windows - type into a window that records what it receives
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          sink="$PWD/sink.txt"
+          rm -f "$sink" "$sink.ready"
+          script="$(pwd -W 2>/dev/null || pwd)/scenarios/win-form.ps1"
+          sinkw="$(pwd -W 2>/dev/null || pwd)/sink.txt"
+          powershell -NoProfile -ExecutionPolicy Bypass -Command \
+            "Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','$script','-Sink','$sinkw' -RedirectStandardError form-err.txt -RedirectStandardOutput form-out.txt"
+          for i in $(seq 1 20); do [ -f "$sink.ready" ] && break; sleep 1; done
+          if [ ! -f "$sink.ready" ]; then
+            echo "the target window never appeared; what the form said:"
+            cat form-err.txt form-out.txt 2>/dev/null
+            exit 1
+          fi
+          ./cuse focus CU_TARGET --json
+          ./cuse settle --json   # a caret is not motion; see --same-under
+          ./cuse capture control-a.png --json
+          sleep 1
+          ./cuse capture control-b.png --json
+          ./cuse diff control-a.png control-b.png --same-under=0 --json | tee control.json
+          ./cuse focus CU_TARGET --json
+          ./cuse capture before.png --json
+          ./cuse type "cuse input reached this window" --expect-front=CU_TARGET --json
+          sleep 2
+          ./cuse capture after.png --json
+          ./cuse diff before.png after.png --same-under=0 --json | tee diff.json
+          echo "--- what the window received ---"
+          cat "$sink" || true
+          grep -q "cuse input reached this window" "$sink" || {
+            echo "the window never received the keystrokes"; exit 1; }
+          bun scenarios/aim-check.ts ./cuse CU_TARGET
+
+      # The pixel delta is reported, not gated. On a CI desktop it is not a
+      # stable measurement: it passed twice on caret noise while input was
+      # reaching nothing, and failed twice on a window still drawing while input
+      # was landing fine. What gates each job above is the ground truth - a file
+      # written on macOS, a command executed on Linux - which nothing but real
+      # delivered input can produce.
+      - name: report how much the screen moved, idle versus typed
+        shell: bash
+        run: |
+          bun -e '
+            const idle = (await Bun.file("control.json").json()).data.changed;
+            const typed = (await Bun.file("diff.json").json()).data.changed;
+            console.log(`idle ${idle}px, typed ${typed}px`);
+          '
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: input-${{ matrix.os }}
+          path: |
+            before.png
+            after.png
+            diff.json
+            control.json
+            target.txt
+            aim-frame.png
+            aim-needle.png

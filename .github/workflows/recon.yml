@@ -1,0 +1,87 @@
+name: recon
+# What do these machines actually give us? Every capability cuse depends on is
+# probed here and printed, so decisions about defaults and dependencies are
+# made against the runners rather than against folklore.
+# Runs on demand, and whenever this file itself changes - so the probe can be
+# re-asked without touching the rest of CI.
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/recon.yml']
+
+jobs:
+  recon:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+
+      - name: machine
+        shell: bash
+        run: |
+          echo "runner.os=${{ runner.os }} arch=$(uname -m 2>/dev/null || echo ?)"
+          echo "cpus=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo ?)"
+          uname -a 2>/dev/null || true
+
+      - name: which tools are already here
+        shell: bash
+        run: |
+          for t in xdotool import convert xwd scrot ffmpeg python3 xvfb-run Xvfb \
+                   xdpyinfo wmctrl openbox fluxbox cliclick screencapture osascript \
+                   ioreg powershell pwsh magick; do
+            p=$(command -v "$t" 2>/dev/null) && echo "HAVE $t -> $p" || echo "MISS $t"
+          done
+
+      # --- Linux: what does a capture cost, and can we avoid imagemagick? ---
+      - name: linux - cost of each capture dependency
+        if: runner.os == 'Linux'
+        run: |
+          echo "### install sizes (dry run, no downloads)"
+          for p in imagemagick x11-apps xdotool xvfb openbox scrot; do
+            size=$(apt-get install -s --no-install-recommends $p 2>/dev/null |
+                   grep -oP 'After this operation, \K[0-9.]+ [kMG]B' | head -1)
+            echo "$p: ${size:-unknown}"
+          done
+          echo "### timing the minimal set"
+          /usr/bin/time -f "apt install took %e s" sudo apt-get install -y -qq \
+            --no-install-recommends xvfb x11-apps xdotool 2>&1 | tail -2
+          echo "### is xwd enough on its own?"
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" sh -c '
+            xdpyinfo | head -5
+            xwd -root -silent > root.xwd && ls -l root.xwd
+            head -c 100 root.xwd | od -A d -t x1 | head -4
+          '
+
+      # --- macOS: which input planes are actually permitted? ---
+      - name: macos - permissions and input planes
+        if: runner.os == 'macOS'
+        run: |
+          sw_vers
+          echo "### displays"
+          system_profiler SPDisplaysDataType 2>/dev/null | grep -iE "resolution|display type" | head -6
+          echo "### can we post CoreGraphics events (no Accessibility prompt should block this)"
+          bun -e '
+            const { dlopen, FFIType: T } = await import("bun:ffi");
+            const cg = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", {
+              CGWarpMouseCursorPosition: { args: [T.double, T.double], returns: T.i32 },
+              CGEventCreate: { args: [T.ptr], returns: T.ptr },
+              CGEventPost: { args: [T.u32, T.ptr], returns: T.void },
+            }).symbols;
+            console.log("warp ->", cg.CGWarpMouseCursorPosition(50, 50));
+            console.log("event ->", cg.CGEventCreate(null) ? "created" : "refused");
+          '
+          echo "### does System Events keystroke need approval here"
+          osascript -e 'tell application "System Events" to keystroke ""' 2>&1 | head -2 || echo "(refused)"
+          echo "### screen recording: does a capture contain windows"
+          screencapture -x shot.png && ls -l shot.png
+
+      # --- Windows: why is there no window, and is there a way around it? ---
+      - name: windows - sessions, windows, and what SendKeys can reach
+        if: runner.os == 'Windows'
+        shell: bash
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scenarios/win-recon.ps1

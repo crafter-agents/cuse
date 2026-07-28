@@ -1,63 +1,113 @@
 // Pure command builders: each action -> the exact argv per OS. No side effects,
 // so every mapping is unit-testable without touching the machine.
+//
+// Mouse actions live in plan.ts, because macOS cannot express them as a command.
 import type { OS } from "./os.ts";
 
 const ps = (script: string) => ["powershell", "-NoProfile", "-Command", script];
 
-export function captureCmd(os: OS, out: string): string[] {
+/** How long focus waits for a window to show up: 20 tries, half a second apart. */
+const FOCUS_TRIES = 20, FOCUS_SLEEP = 0.5;
+
+/** AppleScript string literal: backslash and double quote are the only escapes. */
+export function escapeAppleScript(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/** PowerShell single-quoted string: a quote is doubled. */
+export function escapePowerShell(s: string): string {
+  return s.replace(/'/g, "''");
+}
+
+/**
+ * SendKeys reads +^%~(){}[] as syntax, so a literal one has to be braced or it
+ * silently becomes a modifier - typing "a+b" would send a shift chord.
+ */
+export function escapeSendKeys(s: string): string {
+  return escapePowerShell(s.replace(/[+^%~(){}\[\]]/g, (c) => `{${c}}`));
+}
+
+/**
+ * How a screenshot is taken, and crucially where the bytes end up.
+ *
+ * macOS and Windows write the file themselves; xwd streams a dump to stdout for
+ * cuse to convert. That difference is in the type rather than in a comment, so a
+ * caller cannot forget it - forgetting it once left `settle` running xwd and
+ * then looking for a file nobody had written.
+ */
+export type CapturePlan =
+  | { argv: string[]; output: "file" }
+  | { argv: string[]; output: "stdout" };
+
+export function captureCmd(os: OS, out: string): CapturePlan {
   switch (os) {
-    case "macos": return ["screencapture", "-x", out];
-    case "linux": return ["import", "-window", "root", out];
-    case "windows": return ps(
+    case "macos": return { argv: ["screencapture", "-x", out], output: "file" };
+    // xwd, not import: the runners ship neither, and x11-apps (which carries
+    // xwd) is a fraction of imagemagick's size. cuse converts the dump itself,
+    // which also fixes what import did on a low-colour display - emit a 1-bit
+    // PNG that could not be compared against the other platforms'.
+    case "linux": return { argv: ["xwd", "-root", "-silent"], output: "stdout" };
+    // Bitmap.Save resolves a relative path against the .NET working directory,
+    // which is not PowerShell's location - so cuse passes an absolute path here.
+    case "windows": return { argv: ps(
       `Add-Type -AssemblyName System.Windows.Forms,System.Drawing;` +
       `$v=[System.Windows.Forms.SystemInformation]::VirtualScreen;` +
       `$b=New-Object System.Drawing.Bitmap($v.Width,$v.Height);` +
-      `[System.Drawing.Graphics]::FromImage($b).CopyFromScreen($v.Left,$v.Top,0,0,$b.Size);` +
-      `$b.Save('${out}')`);
+      `$g=[System.Drawing.Graphics]::FromImage($b);` +
+      `$g.CopyFromScreen($v.Left,$v.Top,0,0,$b.Size);` +
+      `$b.Save('${escapePowerShell(out)}',[System.Drawing.Imaging.ImageFormat]::Png);` +
+      `$g.Dispose();$b.Dispose()`), output: "file" };
     default: throw new Error(`capture unsupported on ${os}`);
   }
 }
 
 export function typeCmd(os: OS, text: string): string[] {
   switch (os) {
-    case "macos": return ["osascript", "-e", `tell application "System Events" to keystroke "${text}"`];
+    case "macos": return ["osascript", "-e", `tell application "System Events" to keystroke "${escapeAppleScript(text)}"`];
     case "linux": return ["xdotool", "type", "--", text];
-    case "windows": return ps(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${text}')`);
+    case "windows": return ps(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escapeSendKeys(text)}')`);
     default: throw new Error(`type unsupported on ${os}`);
   }
 }
 
 export function launchCmd(os: OS, app: string): string[] {
   switch (os) {
-    case "macos": return ["osascript", "-e", `tell application "${app}" to activate`];
+    case "macos": return ["open", "-a", app];
     case "linux": return ["sh", "-c", `("${app}" >/dev/null 2>&1 &)`];
-    case "windows": return ps(`Start-Process '${app}'`);
+    case "windows": return ps(`Start-Process '${escapePowerShell(app)}'`);
     default: throw new Error(`launch unsupported on ${os}`);
   }
 }
 
-export function moveCmd(os: OS, x: number, y: number): string[] {
+/**
+ * Bring a window to the front so that input has somewhere to land.
+ *
+ * Without this, `type` is a silent no-op whenever nothing happens to be
+ * focused - SendKeys posts to the active window of the caller's input queue,
+ * and an X session with no window manager focuses nothing by default.
+ */
+export function focusCmd(os: OS, name: string): string[] {
   switch (os) {
-    case "macos": return ["osascript", "-e", `tell application "System Events" to set the position of the mouse to {${x}, ${y}}`];
-    case "linux": return ["xdotool", "mousemove", String(x), String(y)];
-    case "windows": return ps(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(${x},${y})`);
-    default: throw new Error(`move unsupported on ${os}`);
-  }
-}
-
-export function scrollCmd(os: OS, dir: "up" | "down", amount: number): string[][] {
-  switch (os) {
-    case "macos": {
-      const code = dir === "up" ? 116 : 121; // PgUp / PgDn
-      return Array.from({ length: amount }, () => ["osascript", "-e", `tell application "System Events" to key code ${code}`]);
-    }
-    case "linux": {
-      const b = dir === "up" ? "4" : "5";
-      return Array.from({ length: amount }, () => ["xdotool", "click", b]);
-    }
-    case "windows":
-      return Array.from({ length: amount }, () => ps(`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{${dir === "up" ? "PGUP" : "PGDN"}}')`));
-    default: throw new Error(`scroll unsupported on ${os}`);
+    case "macos": return ["open", "-a", name];
+    // `xdotool search --sync` waits for a matching window forever, which turns
+    // a missing app into a hung agent. Poll for a bounded time instead, then
+    // fail the same way Windows does: by naming what was not found.
+    case "linux": return ["sh", "-c",
+      `n=0; while [ $n -lt ${FOCUS_TRIES} ]; do ` +
+      `id=$(xdotool search --onlyvisible --name "$1" 2>/dev/null | head -1); ` +
+      // windowactivate needs a window manager (_NET_ACTIVE_WINDOW); a bare Xvfb
+      // has none, so it is best-effort and windowfocus, which only needs the X
+      // server, is what actually has to succeed.
+      `if [ -n "$id" ]; then xdotool windowraise "$id" 2>/dev/null; ` +
+      `xdotool windowactivate "$id" 2>/dev/null; ` +
+      `exec xdotool windowfocus "$id"; fi; ` +
+      `n=$((n+1)); sleep ${FOCUS_SLEEP}; done; ` +
+      `echo "no window matching '$1'" >&2; exit 1`,
+      "sh", name];
+    case "windows": return ps(
+      `$s=New-Object -ComObject WScript.Shell;` +
+      `if(-not $s.AppActivate('${escapePowerShell(name)}')){throw "no window matching '${escapePowerShell(name)}'"}`);
+    default: throw new Error(`focus unsupported on ${os}`);
   }
 }
 
