@@ -107,7 +107,7 @@ jobs:
           # bash prompt renames the window and focus would stop finding it.
           xterm -T CU_TARGET -xrm 'XTerm*allowTitleOps: false' \
                 -geometry 100x30+0+0 -e sh -i 2>xterm.log &
-          sleep 4
+          ./cuse wait --window=CU_TARGET --timeout=25000 --json
           echo "--- xterm stderr ---"; cat xterm.log 2>/dev/null || true
           echo "--- windows on :99 ---"
           xdotool search --onlyvisible --name . getwindowname %@ 2>/dev/null || echo "(none)"
@@ -165,17 +165,12 @@ jobs:
           echo "initial line" > target.txt
           open -a TextEdit "$PWD/target.txt"
 
-          # Wait for the document window to exist rather than sleeping and
-          # hoping. TextEdit sometimes comes up showing the document picker
-          # instead, and typing into that reaches no document at all - which is
-          # why this job passed and failed on the same commit.
-          for i in $(seq 1 20); do
-            ./cuse windows --json | grep -q "target" && break
-            sleep 1
-          done
-          ./cuse windows --json
-          ./cuse windows --json | grep -q "target" || {
-            echo "TextEdit never opened a window for the document"; exit 1; }
+          # Wait for the document window rather than sleeping and hoping.
+          # TextEdit sometimes comes up showing the document picker instead, and
+          # typing into that reaches no document - which is why this job once
+          # passed and failed on the same commit. This used to be a hand-rolled
+          # polling loop here, which is what asked `wait` into existence.
+          ./cuse wait --window=target --timeout=25000 --json
 
           # Type before capturing anything. macOS 26 raises a Screen Recording
           # prompt once a process has taken a few screenshots, it floats above
@@ -244,6 +239,7 @@ jobs:
             cat form-err.txt form-out.txt 2>/dev/null
             exit 1
           fi
+          ./cuse wait --window=CU_TARGET --timeout=25000 --json
           ./cuse focus CU_TARGET --json
           ./cuse settle --json   # a caret is not motion; see --same-under
           ./cuse capture control-a.png --json

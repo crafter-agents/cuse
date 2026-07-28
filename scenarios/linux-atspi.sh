@@ -61,3 +61,13 @@ fi
 echo "$out" | grep -q 'places them all at 0,0' || {
   echo "expected the refusal to name the unusable geometry, got: $out"; exit 1; }
 echo "refused correctly: a tree that cannot place its controls is not aimed at"
+
+# 4. And the other half of waiting: noticing that something is gone. zenity is
+#    still up, so this has to be false first and true after it is closed.
+echo "--- --gone, before and after ---"
+./cuse wait --gone --window=CU_TARGET --timeout=3000 --json && {
+  echo "the window was reported gone while it was still on screen"; exit 1; }
+kill "$zpid" 2>/dev/null || true
+./cuse wait --gone --window=CU_TARGET --timeout=15000 --json || {
+  echo "the window closed and cuse never noticed"; exit 1; }
+echo "noticed the window closing"

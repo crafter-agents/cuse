@@ -8,7 +8,7 @@ import { detectOS, chordToOS, type OS } from "./os.ts";
 import { captureCmd, typeCmd, launchCmd, focusCmd, comboKey } from "./commands.ts";
 import { movePlan, clickPlan, scrollPlan, type Plan } from "./plan.ts";
 import { preflight, frameWarning, INPUT_ACTIONS, type Probe } from "./preflight.ts";
-import { isSessionLocked, LOCK_QUERY, LOCKED_REASON } from "./session.ts";
+import { isSessionLocked, blindNote, LOCK_QUERY, LOCKED_REASON } from "./session.ts";
 import { decodePNG, diffImages, isUniform, readHeader, type Image } from "./png.ts";
 import { runWithTimeout, runBytes, explainFailure, timeoutFor } from "./exec.ts";
 import { encodePNG } from "./png.ts";
@@ -19,6 +19,8 @@ import { findTemplate, crop, variance, MIN_VARIANCE } from "./match.ts";
 import { elementsCmd, parseElements, pickElement, pointInElement, describeMisses,
          geometryLooksUsable, type Element } from "./elements.ts";
 import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
+import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
+         successDetail, type WaitTarget } from "./wait.ts";
 
 export type Options = {
   force?: boolean; sameUnder?: number; timeoutMs?: number;
@@ -37,6 +39,8 @@ export type Options = {
   role?: string;
   /** which application's controls to look at */
   app?: string;
+  /** wait for the target to disappear rather than to appear */
+  gone?: boolean;
 };
 
 export type Result = {
@@ -365,10 +369,64 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       case "elements": {
         const els = await listElements(os, args[0] ?? "", timeoutMs);
         const named = els.filter((e) => e.name);
+        const blind = blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), els.length === 0);
         return { ok: true, ...base,
+          ...(blind ? { warn: blind } : {}),
           detail: `${els.length} controls, ${named.length} named` +
             (named.length ? `: ${named.slice(0, 6).map((e) => `${e.role} '${e.name}'`).join(", ")}` : ""),
           data: els };
+      }
+
+      // Wait for a thing, rather than sleeping and hoping. A fixed sleep is
+      // either too short on a slow machine or wasted time on a fast one, and
+      // this repo's own CI had a hand-rolled version of this loop - which is
+      // the usual sign of a missing verb.
+      case "wait": {
+        const target: WaitTarget = { element: opts.element, role: opts.role, window: opts.window };
+        if (!targetIsUsable(target)) {
+          return { ok: false, ...base, error: "wait needs --element=<name>, --role=<kind> or --window=<name>" };
+        }
+        const budget = opts.timeoutMs ?? 30_000;
+        const gapMs = Number(args[0] ?? 400);
+        const started = Date.now();
+        const deadline = started + budget;
+        const gone = opts.gone ?? false;
+        let looks = 0;
+        let sample = "";
+
+        for (;;) {
+          looks++;
+          let found = false;
+          try {
+            if (target.element || target.role) {
+              const els = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
+              found = pickElement(els, { name: target.element, role: target.role }) !== null;
+              sample = describeMisses(els, { name: target.element, role: target.role }, 5);
+            } else {
+              const wins = await listWindows(os, timeoutMs);
+              found = pickWindow(wins, target.window!) !== null;
+              sample = wins.map((w) => w.title).filter(Boolean).slice(0, 5).join(", ");
+            }
+          } catch (e) {
+            // A tree that cannot be read yet is a reason to keep waiting, not to
+            // give up: the app may not have registered on the bus.
+            sample = e instanceof Error ? e.message : String(e);
+          }
+
+          const elapsed = Date.now() - started;
+          if (isSatisfied(found, gone)) {
+            return { ok: true, ...base, detail: successDetail(target, gone, elapsed, looks),
+              data: { waitedMs: elapsed, looks } };
+          }
+          const gap = nextGap(deadline, Date.now(), gapMs);
+          if (gap === 0) {
+            const blind = blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), !sample);
+            return { ok: false, ...base,
+              error: timeoutReason(target, gone, elapsed, blind ?? sample),
+              data: { waitedMs: elapsed, looks } };
+          }
+          await Bun.sleep(gap);
+        }
       }
 
       // Who has the keyboard? A system dialog that steals focus is invisible to
@@ -386,9 +444,11 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       case "windows": {
         const wins = await listWindows(os, timeoutMs);
         const named = wins.filter((w) => w.title);
+        const blind = blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), wins.length === 0);
         return { ok: true, ...base,
           detail: named.length ? named.map((w) => `${w.title} ${w.width}x${w.height}+${w.x}+${w.y}`).join("; ")
                                : "no titled windows",
+          ...(blind ? { warn: blind } : {}),
           data: wins };
       }
 
@@ -543,6 +603,7 @@ Windows and apps
   focus <name>                 bring a window to the front
   windows                      list visible windows with their rectangles
   frontmost                    which window currently has the keyboard
+  wait [gapMs]                 until --element / --window shows up (or --gone)
   elements [app]               controls in the accessibility tree: role, name, rect
 
 Finding things
@@ -573,6 +634,7 @@ Flags
   --find=<template.png>        aim at whatever matches this picture
   --at=<fx,fy>                 where inside the target, 0..1 (default centre)
   --min-score=<0..1>           how close a match must be (default 0.9)
+  --gone                       wait for the target to disappear instead
   --expect-front=<name>        refuse to type unless that window is in front
   --force                      act even if the session looks locked
   --help, --version

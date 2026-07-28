@@ -17,6 +17,7 @@ cuse click --element=Save   # click the control that says Save
 cuse click --find=btn.png   # or the one that looks like this
 cuse click 400 300          # or a coordinate, if you have one
 cuse select-all | copy | paste
+cuse wait --element=Save    # until that control exists (or --gone)
 cuse settle                 # wait until the screen stops changing
 cuse diff a.png b.png       # how much changed, SAME or CHANGED
 cuse record 5 500           # 5 frames, 500ms apart
@@ -165,6 +166,28 @@ selector that means something and the role is not. And on Windows the first
 click on an inactive window activates it and goes no further - CI resolves the
 Save button and presses it with two clicks for exactly that reason.
 
+## Waiting for a thing, not for a duration
+
+Every desktop script is full of sleeps, and each one is a guess: too short on a
+slow machine, wasted time on a fast one. `wait` polls for the thing itself.
+
+```console
+$ cuse wait --window=target.txt --json
+{"ok":true,"action":"wait","detail":"a window matching 'target.txt' appeared after 1200ms (3 looks)"}
+
+$ cuse wait --element=Save --role=button --app=TextEdit --timeout=5000 --json
+{"ok":false,"action":"wait",
+ "error":"a control role 'button' named 'Save' never appeared after 5000ms - what is there: button 'Cancel', label 'Done'"}
+```
+
+`--gone` inverts it, for closing a dialog and knowing it closed. A timeout says
+what it was waiting for and what was there instead, because an agent that is
+told only "timed out" has to go and look, which is the call it just made.
+
+This verb exists because CI had a hand-rolled version of it - poll the window
+list until the document shows up - and a loop like that in a caller is usually a
+tool missing a verb.
+
 ## One process, many commands
 
 An agent doing twenty things paid for twenty process starts and re-enumerated
@@ -232,7 +255,7 @@ it (missing dependency, no display, locked session).
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input
   plans (`src/plan.ts`), capability reasoning (`src/preflight.ts`), lock-state
   parsing (`src/session.ts`) and image comparison (`src/png.ts`) are pure
-  functions. 185 tests, no machine side effects. The CLI only wires execution
+  functions. 202 tests, no machine side effects. The CLI only wires execution
   around them.
 - **Structured output.** Every action returns a typed `Result` ({ok, action, os,
   detail?, error?, warn?, data?}); `--json` emits it. A missing dependency comes
@@ -256,7 +279,7 @@ it (missing dependency, no display, locked session).
 ## Develop
 
 ```sh
-bun test          # 185 tests, the agnostic core
+bun test          # 202 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cuse
 ```
 
@@ -286,6 +309,9 @@ bun run build     # compile a standalone binary to dist/cuse
 - Linux has no accessibility tree out of the box: AT-SPI has to be installed,
   and the toolkit has to export one. A GTK app does and CI proves it; an xterm
   never will.
+- An empty view and a view of nothing are different: with the screen locked
+  nothing can be enumerated at all, so `windows` and `elements` say which of the
+  two it is rather than reporting an empty desktop.
 - macOS raises a Screen Recording prompt once a process has taken a few
   screenshots. It floats above the frontmost app without becoming it, so the
   `--expect-front` guard cannot see it, and it swallows every keystroke after
