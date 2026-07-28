@@ -152,6 +152,17 @@ jobs:
           echo "$out"
           echo "$out" | grep -q 'pyatspi' || {
             echo "expected the missing AT-SPI dependency to be named"; exit 1; }
+
+      # And with AT-SPI installed and an app that speaks it, the semantic route
+      # works here too - proven the same way as the other two: the app itself
+      # reports that the named control was pressed.
+      - name: linux - the accessibility tree, once something exports one
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y -qq --no-install-recommends \
+            at-spi2-core python3-pyatspi zenity dbus-x11
+          timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            dbus-run-session -- ./scenarios/linux-atspi.sh
           EOF
           chmod +x drive.sh
           timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" ./drive.sh
