@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { detectOS, chordToOS } from "../src/os.ts";
 import {
-  captureCmd, typeCmd, launchCmd, focusCmd, comboKey,
+  captureCmd, typeCmd, launchCmd, focusCmd, comboKey, videoCmd,
   escapeAppleScript, escapePowerShell, escapeSendKeys,
 } from "../src/commands.ts";
 import { movePlan, clickPlan, scrollPlan } from "../src/plan.ts";
@@ -285,6 +285,12 @@ describe("focus", () => {
   });
   test("linux focus needs xdotool like the other input actions", () => {
     expect(requiredTool("linux", "focus")).toMatchObject({ tool: "xdotool" });
+    // Video is not an action; it is `record --video`. Asking for it names the
+    // package, while plain `record` takes stills and must not be blocked by a
+    // recorder it never uses.
+    expect(requiredTool("linux", "video")).toMatchObject({ tool: "ffmpeg" });
+    expect(requiredTool("linux", "record")).toBeNull();
+    expect(requiredTool("macos", "video")).toBeNull();
   });
   test("linux capture needs only x11-apps, not imagemagick", () => {
     expect(requiredTool("linux", "capture")).toMatchObject({ tool: "xwd" });
@@ -326,5 +332,29 @@ describe("PowerShell that actually runs", () => {
   });
   test("the press is not instantaneous, so the control sees a real click", () => {
     expect(script(clickPlan("windows", 1, 10, 20))).toContain("Start-Sleep");
+  });
+});
+
+describe("recording, where the platform can", () => {
+  // Stills cannot show a state that only exists between two of them: a menu
+  // that flashes, a drag that snaps back.
+  test("macOS records with screencapture itself, and bounds it", () => {
+    const c = videoCmd("macos", "clip.mov", 5);
+    expect(c).toEqual(["screencapture", "-v", "-V", "5", "clip.mov"]);
+  });
+  test("without a length it would record until interrupted, which is a hang", () => {
+    expect(videoCmd("macos", "clip.mov", 3)).toContain("-V");
+    expect(videoCmd("linux", "clip.mp4", 3)).toContain("-t");
+  });
+  test("Linux grabs X11, letting ffmpeg read the display's own geometry", () => {
+    const c = videoCmd("linux", "clip.mp4", 2).join(" ");
+    expect(c).toContain("x11grab");
+    expect(c).not.toContain("-video_size");
+  });
+  // Refusing is the honest answer: pulling in a recorder would be a bigger
+  // promise than this tool makes.
+  test("Windows says there is nothing to record with, and what to do instead", () => {
+    expect(() => videoCmd("windows", "clip.mp4", 2)).toThrow(/no built-in screen recorder/);
+    expect(() => videoCmd("windows", "clip.mp4", 2)).toThrow(/stills/);
   });
 });

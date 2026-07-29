@@ -58,6 +58,8 @@ export function parseArgs(argv: string[]): Parsed {
     find: flag("find"),
     minScore: num(flag("min-score")),
     display: num(flag("display")),
+    video: argv.includes("--video"),
+    out: flag("out"),
     expectFront: flag("expect-front"),
     element: flag("element"),
     role: flag("role"),

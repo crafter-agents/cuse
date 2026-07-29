@@ -21,6 +21,7 @@ cuse wait --element=Save    # until that control exists (or --gone)
 cuse settle                 # wait until the screen stops changing
 cuse diff a.png b.png       # how much changed, SAME or CHANGED
 cuse record 5 500           # 5 frames, 500ms apart
+cuse record 5 --video       # actual video, where the OS can
 cuse launch TextEdit
 cuse serve                  # one process, a command per line, JSON per line
 cuse os                     # which platform
@@ -288,7 +289,7 @@ it (missing dependency, no display, locked session).
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input
   plans (`src/plan.ts`), capability reasoning (`src/preflight.ts`), lock-state
   parsing (`src/session.ts`) and image comparison (`src/png.ts`) are pure
-  functions. 271 tests, no machine side effects. The CLI only wires execution
+  functions. 275 tests, no machine side effects. The CLI only wires execution
   around them.
 - **Structured output.** Every action returns a typed `Result` ({ok, action, os,
   detail?, error?, warn?, data?}); `--json` emits it. A missing dependency comes
@@ -312,7 +313,7 @@ it (missing dependency, no display, locked session).
 ## Develop
 
 ```sh
-bun test          # 271 tests, the agnostic core
+bun test          # 275 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cuse
 ```
 

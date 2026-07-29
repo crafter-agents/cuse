@@ -71,6 +71,35 @@ export function captureCmd(os: OS, out: string, display?: number): CapturePlan {
   }
 }
 
+/**
+ * Record the screen for a few seconds, where the platform can.
+ *
+ * `record` takes stills, which is enough for "did this change" and useless for
+ * a bug that only exists mid-animation - a menu that flashes, a drag that snaps
+ * back, a frame that tears while a window resizes. Between two stills that
+ * simply did not happen.
+ *
+ * Only where the platform provides it, and said plainly where it does not:
+ * macOS has recording in `screencapture` itself, Linux has ffmpeg's x11grab if
+ * ffmpeg is installed, and Windows ships nothing that records a screen from the
+ * command line. Pulling in a recorder to hide that would be a bigger promise
+ * than this tool makes.
+ */
+export function videoCmd(os: OS, out: string, seconds: number): string[] {
+  switch (os) {
+    // -v records, -V bounds it. Without -V it records until interrupted, which
+    // is a hang wearing a different hat.
+    case "macos": return ["screencapture", "-v", "-V", String(seconds), out];
+    // x11grab reads the display's own geometry, so no size has to be guessed.
+    case "linux": return ["ffmpeg", "-y", "-loglevel", "error", "-f", "x11grab",
+                          "-i", process.env.DISPLAY ?? ":0", "-t", String(seconds), out];
+    case "windows": throw new Error(
+      "Windows has no built-in screen recorder to drive from a command line - " +
+      "use `record` for stills, or capture on a schedule and assemble them yourself");
+    default: throw new Error(`video unsupported on ${os}`);
+  }
+}
+
 export function typeCmd(os: OS, text: string): string[] {
   switch (os) {
     case "macos": return ["osascript", "-e", `tell application "System Events" to keystroke "${escapeAppleScript(text)}"`];

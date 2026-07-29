@@ -5,7 +5,7 @@
 import { resolve } from "node:path";
 import { inflateSync, deflateSync } from "node:zlib";
 import { detectOS, chordToOS, type OS } from "./os.ts";
-import { captureCmd, typeCmd, launchCmd, focusCmd, comboKey } from "./commands.ts";
+import { captureCmd, typeCmd, launchCmd, focusCmd, comboKey, videoCmd } from "./commands.ts";
 import { movePlan, clickPlan, scrollPlan, type Plan } from "./plan.ts";
 import { preflight, frameWarning, INPUT_ACTIONS, type Probe } from "./preflight.ts";
 import { isSessionLocked, blindNote, LOCK_QUERY, LOCKED_REASON } from "./session.ts";
@@ -46,6 +46,10 @@ export type Options = {
   gone?: boolean;
   /** which screen to capture, 1-based, where the platform can pick one */
   display?: number;
+  /** record actual video rather than a series of stills */
+  video?: boolean;
+  /** where to write it */
+  out?: string;
 };
 
 export type Result = {
@@ -397,6 +401,25 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       }
 
       case "record": {
+        // Actual video, where the OS has a recorder. Stills cannot show a
+        // state that exists only between two of them.
+        if (opts.video) {
+          const seconds = Number(args[0] ?? 5);
+          if (!Number.isFinite(seconds) || seconds <= 0) {
+            return { ok: false, ...base, error: "record --video needs a length in seconds" };
+          }
+          const gap = preflight(os, "video", probe);
+          if (!gap.ok) return { ok: false, ...base, error: gap.reason };
+          const out = resolve(opts.out ?? (os === "macos" ? "record.mov" : "record.mp4"));
+          const argv = videoCmd(os, out, seconds);
+          // The deadline has to outlast the recording, or cuse kills its own
+          // camera: a 30s clip under a 15s timeout is a file that never closes.
+          await runner(action, Math.max(timeoutMs, seconds * 1000 + 15_000))(argv);
+          const size = (await Bun.file(out).exists()) ? Bun.file(out).size : 0;
+          if (size === 0) return { ok: false, ...base, error: `${argv[0]} produced no file` };
+          return { ok: true, ...base, detail: `${seconds}s of video, ${size}B -> ${out}`,
+                   data: { path: out, bytes: size, seconds } };
+        }
         // N captures in a row, for state that only misbehaves while it changes.
         const count = Number(args[0] ?? 3);
         const gapMs = Number(args[1] ?? 500);
@@ -741,6 +764,7 @@ const HELP = `cuse ${VERSION} - cross-platform computer-use CLI
 Screen
   capture [out.png]            screenshot; warns when the frame is blank
   record [n] [gapMs]           n captures in a row
+  record <seconds> --video     actual video, where the OS can (not Windows)
   settle [tries] [gapMs] [n]   wait until the screen stops changing
                                (--same-under sets how much noise counts as still)
   diff <a.png> <b.png>         how much changed: SAME or CHANGED
@@ -782,6 +806,8 @@ Flags
   --at=<fx,fy>                 where inside the target, 0..1 (default centre)
   --min-score=<0..1>           how close a match must be (default 0.9)
   --display=<n>                which screen to capture, 1-based (macOS)
+  --video                      record video instead of stills
+  --out=<path>                 where to write it
   --gone                       wait for the target to disappear instead
   --expect-front=<name>        refuse to type unless that window is in front
   --force                      act even if the session looks locked

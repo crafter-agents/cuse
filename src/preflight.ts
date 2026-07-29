@@ -25,8 +25,20 @@ export function displayPreflight(os: OS, probe: Probe): Preflight {
   return { ok: true };
 }
 
-/** The tool each action shells out to, when it is not guaranteed to be present. */
+/**
+ * The tool each action shells out to, when it is not guaranteed to be present.
+ *
+ * `video` is not an action the CLI takes; it is `record --video`, which needs a
+ * recorder rather than a screenshot tool. It is passed here under its own name
+ * so that asking for video without ffmpeg names the package, while plain
+ * `record` - which takes stills and needs no such thing - is not blocked by it.
+ */
 export function requiredTool(os: OS, action: string): { tool: string; install: string } | null {
+  // macOS records with screencapture itself, and Windows has no recorder to
+  // require - `videoCmd` refuses there before anything gets this far.
+  if (action === "video") {
+    return os === "linux" ? { tool: "ffmpeg", install: "apt-get install -y ffmpeg" } : null;
+  }
   // macOS mouse actions go through CoreGraphics in-process, and osascript,
   // screencapture and open all ship with the OS - so nothing to install.
   if (os !== "linux") return null;
