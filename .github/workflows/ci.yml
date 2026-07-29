@@ -361,6 +361,76 @@ jobs:
             windows.json
             zenity-out.txt
 
+  # Does a click land on macOS? Nothing else here asks.
+  #
+  # This is the one path with a history of lying: `set the position of the mouse`
+  # was never a System Events command, it failed with -2753 on every call, and
+  # the unit tests passed because they asserted the argv rather than its effect.
+  # It is CoreGraphics now, and until this job existed no check pressed anything
+  # on macOS at all - the fixed code was as unproven as the broken code had been.
+  #
+  # The oracle is a dialog that reports which button was pressed, with the
+  # *wrong* answer as the default. A stray Return presses Deny, a timeout writes
+  # `gave up:true`, and only a click inside Allow's rectangle can produce
+  # `button returned:Allow`. Both routes to a coordinate are exercised: a control
+  # resolved by name, and a raw pair of numbers.
+  macos-click:
+    runs-on: macos-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun build --compile src/cli.ts --outfile cuse
+
+      - name: click a control found by name
+        run: |
+          rm -f named.txt
+          # `giving up after` matters: if the click misses, the dialog would
+          # otherwise hold this runner until the job deadline.
+          osascript -e 'display dialog "cuse click gate" buttons {"Deny","Allow"} default button "Deny" giving up after 100' \
+            > named.txt 2>&1 &
+          ./cuse wait --element=Allow --role=button --app=osascript --timeout=30000 --json
+          ./cuse elements osascript --json | tee dialog.json
+          ./cuse click --element=Allow --role=button --app=osascript --json
+          sleep 3
+          echo "--- what the dialog reported ---"; cat named.txt
+          grep -q "button returned:Allow" named.txt || {
+            echo "the button was resolved and never pressed"; exit 1; }
+          echo "pressed a control found by name"
+
+      - name: click a bare coordinate
+        run: |
+          rm -f xy.txt
+          osascript -e 'display dialog "cuse click gate" buttons {"Deny","Allow"} default button "Deny" giving up after 100' \
+            > xy.txt 2>&1 &
+          ./cuse wait --element=Allow --role=button --app=osascript --timeout=30000 --json
+          ./cuse elements osascript --json > again.json
+          # The rectangle comes from the tree; the click is given two numbers,
+          # which is the CoreGraphics path with nothing semantic in front of it.
+          read -r X Y < <(bun -e '
+            const els = (await Bun.file("again.json").json()).data;
+            const b = els.find((e) => e.name === "Allow" && e.role === "button");
+            if (!b) throw new Error("no Allow button in the tree");
+            console.log(`${Math.round(b.x + b.width / 2)} ${Math.round(b.y + b.height / 2)}`);
+          ')
+          echo "clicking $X,$Y"
+          ./cuse click "$X" "$Y" --json
+          sleep 3
+          echo "--- what the dialog reported ---"; cat xy.txt
+          grep -q "button returned:Allow" xy.txt || {
+            echo "a bare coordinate click did not land"; exit 1; }
+          echo "pressed a bare coordinate"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-click
+          path: |
+            dialog.json
+            named.txt
+            xy.txt
+
   # Every other Windows proof drives a window this repo builds for the purpose,
   # which is the bias the rest of this file exists to remove: a target you wrote
   # answers the way you expected. Character Map is shipped by Microsoft, is a
