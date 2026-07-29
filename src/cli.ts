@@ -17,7 +17,8 @@ import { listWindowsCmd, parseWindows, pickWindow, pointIn, frontmostCmd, parseF
          frontmostMatches, type Win } from "./window.ts";
 import { findTemplate, crop, variance, MIN_VARIANCE } from "./match.ts";
 import { elementsCmd, parseElements, pickElement, pointInElement, describeMisses,
-         geometryLooksUsable, type Element } from "./elements.ts";
+         geometryLooksUsable, normalizeRole, type Element } from "./elements.ts";
+import { runningAppsCmd, parseApps, pickApp, describeApps, type App } from "./apps.ts";
 import { displaysCmd, parseDisplays, frameOrigin, coverageWarning, toScreenPoint,
          desktopBounds, type Display } from "./display.ts";
 import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
@@ -150,11 +151,72 @@ async function captureCoverage(os: OS, path: string, timeoutMs: number,
 
 /** Ask the platform's accessibility tree for an application's controls. */
 async function listElements(os: OS, app: string, timeoutMs: number): Promise<Element[]> {
+  if (os === "macos") return macElements(app, timeoutMs);
   const argv = elementsCmd(os, app);
   const r = await runWithTimeout(argv, timeoutMs);
   const problem = explainFailure(argv, r, timeoutMs);
   if (problem) throw new Error(problem);
   return parseElements(r.stdout, os);
+}
+
+/**
+ * The macOS tree, read through the C API rather than System Events.
+ *
+ * Every attribute asked for through AppleScript is a message to another
+ * process: Finder took longer than the deadline and came back as a timeout, so
+ * the most ordinary app on the machine had no readable tree at all. The same
+ * data through the accessibility API takes about a third of a second.
+ *
+ * Loaded lazily, like the mouse code, so that importing the CLI on Linux or
+ * Windows never touches bun:ffi or a framework that is not there.
+ */
+async function macElements(app: string, timeoutMs: number): Promise<Element[]> {
+  const ax = await import("./macax.ts");
+  // Trust is per process, and cuse's is not System Events'. A machine can have
+  // AppleScript reading trees perfectly while this binary is refused, so the
+  // slow route stays reachable rather than turning that into "no controls".
+  if (!ax.trusted()) return systemEventsElements(app, timeoutMs);
+
+  const argv = runningAppsCmd();
+  const r = await runWithTimeout(argv, Math.min(timeoutMs, 10_000));
+  const problem = explainFailure(argv, r, timeoutMs);
+  if (problem) throw new Error(problem);
+  const apps = parseApps(r.stdout);
+
+  // No name means whatever is in front, which is what the AppleScript version
+  // fell back to and what an agent driving one window expects.
+  const target = app ? pickApp(apps, app) : await frontmostApp(apps);
+  if (!target) {
+    throw new Error(`no running application matching '${app}' - what is running: ${describeApps(apps)}`);
+  }
+  const raw = ax.elementsOfPid(target.pid, 300, 12, Date.now() + timeoutMs);
+  return raw.map((e) => ({
+    rawRole: e.role,
+    role: normalizeRole(e.role, "macos"),
+    name: e.name,
+    x: Math.round(e.x), y: Math.round(e.y),
+    width: Math.round(e.width), height: Math.round(e.height),
+  }));
+}
+
+/** The fallback route, through System Events, for an untrusted process. */
+async function systemEventsElements(app: string, timeoutMs: number): Promise<Element[]> {
+  const argv = elementsCmd("macos", app);
+  const r = await runWithTimeout(argv, timeoutMs);
+  const problem = explainFailure(argv, r, timeoutMs);
+  if (problem) throw new Error(`${problem} (and ${UNTRUSTED_SHORT})`);
+  return parseElements(r.stdout, "macos");
+}
+
+const UNTRUSTED_SHORT =
+  "cuse itself is not trusted for accessibility, so this went the slow way through " +
+  "System Events - grant Accessibility to the terminal running cuse to read trees directly";
+
+/** The app in front, matched back to a pid. */
+async function frontmostApp(apps: App[]) {
+  const r = await runWithTimeout(frontmostCmd("macos"), 5000);
+  const front = r.code === 0 && !r.timedOut ? parseFrontmost(r.stdout).split(" ")[0] : "";
+  return front ? pickApp(apps, front) : null;
 }
 
 /**

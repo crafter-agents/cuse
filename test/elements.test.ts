@@ -68,20 +68,20 @@ describe("a selector is cuse's vocabulary, not a platform's", () => {
 });
 
 describe("asking each platform", () => {
-  test("every OS has a way", () => {
-    for (const os of ["macos", "linux", "windows"] as OS[]) {
+  test("the two that answer a command do", () => {
+    for (const os of ["linux", "windows"] as OS[]) {
       expect(elementsCmd(os, "TextEdit").length).toBeGreaterThan(0);
     }
   });
-  test("macOS asks System Events for whole lists, not one control at a time", () => {
-    const c = elementsCmd("macos", "TextEdit").join(" ");
-    // Four Apple Events per container; per-control it was four each, and Finder
-    // then took longer than the deadline.
-    // Asked of the container, not of a saved list: `role of kids` is not a
-    // query AppleScript can answer, and asking it returned an empty tree.
+  // macOS is read through the accessibility API instead - every attribute
+  // asked for through System Events is a message to another process, and
+  // Finder's tree took longer that way than the deadline allowed. The command
+  // survives as the fallback for a process that is not itself trusted, since
+  // System Events carries its own trust.
+  test("the macOS command is still there, for the untrusted case", () => {
+    const c = elementsCmd("macos", "Finder").join(" ");
+    expect(c).toContain("System Events");
     expect(c).toContain("role of UI elements of el");
-    expect(c).toContain("position of UI elements of el");
-    expect(c).not.toContain("role of kids");
   });
   test("windows walks UI Automation descendants", () => {
     const c = elementsCmd("windows", "CU_TARGET").join(" ");

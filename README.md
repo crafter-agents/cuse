@@ -161,7 +161,7 @@ Where each route works, measured on the runners:
 
 | | accessibility tree | template match |
 | --- | --- | --- |
-| macOS | AX via System Events, 11 controls for a TextEdit window | yes |
+| macOS | AX through the accessibility API, 300 controls of Finder in ~0.35s | yes |
 | Windows | UI Automation | yes |
 | Linux | AT-SPI, composed against X - 17 controls for a GTK dialog | yes |
 
@@ -288,7 +288,7 @@ it (missing dependency, no display, locked session).
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input
   plans (`src/plan.ts`), capability reasoning (`src/preflight.ts`), lock-state
   parsing (`src/session.ts`) and image comparison (`src/png.ts`) are pure
-  functions. 261 tests, no machine side effects. The CLI only wires execution
+  functions. 271 tests, no machine side effects. The CLI only wires execution
   around them.
 - **Structured output.** Every action returns a typed `Result` ({ok, action, os,
   detail?, error?, warn?, data?}); `--json` emits it. A missing dependency comes
@@ -312,7 +312,7 @@ it (missing dependency, no display, locked session).
 ## Develop
 
 ```sh
-bun test          # 261 tests, the agnostic core
+bun test          # 271 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cuse
 ```
 

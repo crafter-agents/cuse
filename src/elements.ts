@@ -130,14 +130,16 @@ function plainRole(raw: string): string {
  */
 export function elementsCmd(os: OS, app: string, limit = 300): string[] {
   switch (os) {
-    // Attributes in bulk, asked of the container rather than of a saved list:
-    // `role of kids` is not a query AppleScript can answer once the children
-    // are in a variable, while `role of UI elements of el` is one Apple Event
-    // for the whole row. That distinction is the difference between this
-    // returning the tree and returning nothing at all. `entire contents` took over fifteen seconds on Finder and was
-    // killed by cuse's own deadline; so did a per-element walk, because every
-    // `role of el` is its own round trip. Asking `role of UI elements of el`
-    // returns the whole list at once, which is what makes this affordable.
+    // Not here: the macOS tree is read through the accessibility API in
+    // `macax.ts`, not through System Events. Every attribute asked for through
+    // AppleScript is a message to another process, and Finder's tree took
+    // longer that way than cuse's own deadline allowed - the app came back as
+    // a timeout rather than as controls.
+    // The slow path, kept for one case: a process that is not itself trusted
+    // for accessibility. System Events carries its own trust, so AppleScript
+    // can still read a tree where the direct API refuses outright. It is what
+    // `macax.ts` replaced - four Apple Events per container, and Finder over
+    // the deadline - so it is a fallback and not the route.
     case "macos": return ["osascript", "-e",
       'property seen : 0\n' +
       'on run argv\n' +
