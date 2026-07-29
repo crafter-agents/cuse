@@ -29,6 +29,10 @@ export const TIMEOUTS: Record<string, number> = {
   launch: 30_000,    // cold app start, and `open -a` waits for the app
   focus: 15_000,     // the Linux path polls for ten seconds by design
   type: 20_000,      // long strings are typed character by character
+  // A browser window with a native panel over it is a big tree, and the walk is
+  // depth-first: too little time here returns a partial tree rather than a slow
+  // one, which reads as an app missing controls it has.
+  elements: 30_000,
 };
 
 export function timeoutFor(action: string, override?: number): number {

@@ -82,8 +82,11 @@ echo "--- 1. did a native panel appear ---"
 # The panel's buttons nest deeper than the default twelve levels inside
 # Chrome's tree, and Chrome's own chrome uses up the default node budget,
 # so the panel was identified while its Cancel was never in the dump.
-"$CUSE" elements "Google Chrome" --depth=30 --limit=1200 --json > panel.json \
+"$CUSE" elements "Google Chrome" --depth=30 --limit=1200 --timeout=60000 --json > panel.json \
   || fail "cuse could not read Chrome's tree"
+# If the walk stopped early it says so, and a missing button then means the
+# clock rather than the app.
+grep -o '"warn":"[^"]*"' panel.json || echo "(the walk was not truncated)"
 echo "--- windows on screen ---"
 "$CUSE" windows --json > windows-after-click.json || true
 head -c 500 windows-after-click.json; echo
@@ -123,16 +126,30 @@ echo "agent-browser's snapshot does not contain the panel, as expected"
 #    own rectangle - Chrome has controls of that name elsewhere, and a generous
 #    containment test let one 96 pixels above the panel win.
 echo "--- 3. press the panel's own Cancel ---"
-grep -q "^BUTTON " panel-summary.txt || {
-  echo "candidates considered:"; cat panel-candidates.txt
-  fail "no Cancel button inside the panel's rectangle"
-}
+if ! grep -q "^BUTTON " panel-summary.txt; then
+  echo "candidates considered from Chrome's tree:"; cat panel-candidates.txt
+  # Second hypothesis, tested in the same run rather than costing another: the
+  # panel is a separate process, and although its dialog shows up in Chrome's
+  # tree, its controls may only be enumerable from the process that owns them.
+  # That process has no .app bundle, which is why it is reachable at all.
+  echo "--- trying the panel's own process ---"
+  "$CUSE" elements openAndSavePanelService --depth=30 --limit=1200 --timeout=60000 --json > panel-svc.json 2>&1 || true
+  head -c 300 panel-svc.json; echo
+  bun rig/find-panel.ts panel-svc.json Cancel > svc-summary.txt 2> svc-candidates.txt || true
+  cat svc-summary.txt; cat svc-candidates.txt || true
+  if grep -q "^BUTTON " svc-summary.txt; then
+    echo "the panel's controls live in its own process, not in Chrome's tree"
+    cp svc-summary.txt panel-summary.txt
+  else
+    fail "no Cancel button inside the panel, in either process"
+  fi
+fi
 read -r _ CX CY < <(grep "^BUTTON " panel-summary.txt)
 echo "clicking $CX,$CY"
 "$CUSE" click "$CX" "$CY" --json || fail "cuse could not click"
 sleep 3
 
-"$CUSE" elements "Google Chrome" --depth=30 --limit=1200 --json > after.json || true
+"$CUSE" elements "Google Chrome" --depth=30 --limit=1200 --timeout=60000 --json > after.json || true
 bun rig/find-panel.ts after.json Cancel > after-summary.txt 2>/dev/null || true
 cat after-summary.txt
 grep -q "^NO-PANEL" after-summary.txt || {
