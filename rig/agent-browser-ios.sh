@@ -36,6 +36,13 @@ cap() {
   return "$rc"
 }
 
+# The daemon writes its stderr to <socket dir>/<session>.log, but only with this
+# set. Three attempts failed with the CLI abandoning its own daemon read, and
+# without the daemon's own account of that the report stops at the symptom.
+export AGENT_BROWSER_DEBUG=1
+export AGENT_BROWSER_SOCKET_DIR="$PWD/ab-sockets"
+mkdir -p "$AGENT_BROWSER_SOCKET_DIR"
+
 cleanup() {
   cap 30 "$AB" close --all >/dev/null 2>&1 || true
   [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null
@@ -180,6 +187,15 @@ fi
 # one, and a silent one proves nothing.
 echo "no request carried an iPhone User-Agent. Requests seen:"
 awk -F'\t' '{ printf "  %-42s %s\n", $1, substr($2, 1, 80) }' requests.tsv 2>/dev/null
+
+echo "--- what the daemon itself said ---"
+ls -la "$AGENT_BROWSER_SOCKET_DIR" 2>/dev/null | head
+for f in "$AGENT_BROWSER_SOCKET_DIR"/*.log; do
+  [ -f "$f" ] || continue
+  echo "=== $f ==="
+  tail -60 "$f"
+done
+cp "$AGENT_BROWSER_SOCKET_DIR"/*.log . 2>/dev/null || true
 
 echo "--- what is being reproduced ---"
 cat open.log open-warm.log 2>/dev/null | tail -30
