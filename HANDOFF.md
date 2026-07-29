@@ -191,13 +191,18 @@ Bun installed, so publishing that is a different promise from the binaries.
   bottom-left of the main screen, clicks measure down from its top-left) and the
   Windows virtual-screen origin, which is negative with a monitor to the left.
 - **Wayland** is unsupported and will stay so until someone needs it.
-- **`record` is stills, not video.** For a bug that only appears mid-animation, an
-  actual capture would be better.
+- **`record --video` records for real** where the platform can: `screencapture
+  -v` on macOS, ffmpeg's x11grab on Linux (verified: a 2.000s mp4 by ffprobe).
+  Windows refuses and says why - nothing ships with it that records a screen
+  from a command line, and pulling in a recorder is a bigger promise than this
+  tool makes. Not gated in CI: recording on the macOS runner would summon the
+  Screen Recording prompt the input job is careful to avoid, and installing
+  ffmpeg on the Linux job costs more than the check is worth.
 
 ## How to work on it
 
 ```sh
-bun test                                        # 271, all pure
+bun test                                        # 275, all pure
 python3 scenarios/check-workflows.py .github/workflows/*.yml
 bun run build && ./dist/cuse --help
 ```

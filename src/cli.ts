@@ -5,7 +5,7 @@
 import { resolve } from "node:path";
 import { inflateSync, deflateSync } from "node:zlib";
 import { detectOS, chordToOS, type OS } from "./os.ts";
-import { captureCmd, typeCmd, launchCmd, focusCmd, comboKey } from "./commands.ts";
+import { captureCmd, typeCmd, launchCmd, focusCmd, comboKey, videoCmd } from "./commands.ts";
 import { movePlan, clickPlan, scrollPlan, type Plan } from "./plan.ts";
 import { preflight, frameWarning, INPUT_ACTIONS, type Probe } from "./preflight.ts";
 import { isSessionLocked, blindNote, LOCK_QUERY, LOCKED_REASON } from "./session.ts";
@@ -46,6 +46,10 @@ export type Options = {
   gone?: boolean;
   /** which screen to capture, 1-based, where the platform can pick one */
   display?: number;
+  /** record actual video rather than a series of stills */
+  video?: boolean;
+  /** where to write it */
+  out?: string;
 };
 
 export type Result = {
@@ -149,14 +153,22 @@ async function captureCoverage(os: OS, path: string, timeoutMs: number,
   });
 }
 
-/** Ask the platform's accessibility tree for an application's controls. */
-async function listElements(os: OS, app: string, timeoutMs: number): Promise<Element[]> {
+/**
+ * Ask the platform's accessibility tree for an application's controls.
+ *
+ * `note` is how a slower or less capable route says so. Falling back silently
+ * is what would turn "this machine does not trust cuse" into "Finder has no
+ * controls", which is the shape of every bug in this repo's history.
+ */
+type Tree = { els: Element[]; note?: string };
+
+async function listElements(os: OS, app: string, timeoutMs: number): Promise<Tree> {
   if (os === "macos") return macElements(app, timeoutMs);
   const argv = elementsCmd(os, app);
   const r = await runWithTimeout(argv, timeoutMs);
   const problem = explainFailure(argv, r, timeoutMs);
   if (problem) throw new Error(problem);
-  return parseElements(r.stdout, os);
+  return { els: parseElements(r.stdout, os) };
 }
 
 /**
@@ -170,7 +182,7 @@ async function listElements(os: OS, app: string, timeoutMs: number): Promise<Ele
  * Loaded lazily, like the mouse code, so that importing the CLI on Linux or
  * Windows never touches bun:ffi or a framework that is not there.
  */
-async function macElements(app: string, timeoutMs: number): Promise<Element[]> {
+async function macElements(app: string, timeoutMs: number): Promise<Tree> {
   const ax = await import("./macax.ts");
   // Trust is per process, and cuse's is not System Events'. A machine can have
   // AppleScript reading trees perfectly while this binary is refused, so the
@@ -190,22 +202,22 @@ async function macElements(app: string, timeoutMs: number): Promise<Element[]> {
     throw new Error(`no running application matching '${app}' - what is running: ${describeApps(apps)}`);
   }
   const raw = ax.elementsOfPid(target.pid, 300, 12, Date.now() + timeoutMs);
-  return raw.map((e) => ({
+  return { els: raw.map((e) => ({
     rawRole: e.role,
     role: normalizeRole(e.role, "macos"),
     name: e.name,
     x: Math.round(e.x), y: Math.round(e.y),
     width: Math.round(e.width), height: Math.round(e.height),
-  }));
+  })) };
 }
 
 /** The fallback route, through System Events, for an untrusted process. */
-async function systemEventsElements(app: string, timeoutMs: number): Promise<Element[]> {
+async function systemEventsElements(app: string, timeoutMs: number): Promise<Tree> {
   const argv = elementsCmd("macos", app);
   const r = await runWithTimeout(argv, timeoutMs);
   const problem = explainFailure(argv, r, timeoutMs);
   if (problem) throw new Error(`${problem} (and ${UNTRUSTED_SHORT})`);
-  return parseElements(r.stdout, "macos");
+  return { els: parseElements(r.stdout, "macos"), note: UNTRUSTED_SHORT };
 }
 
 const UNTRUSTED_SHORT =
@@ -256,7 +268,7 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
 
   // A name beats a picture: it survives a theme, a font, a window that moved.
   if (opts.element || opts.role) {
-    const els = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
+    const { els } = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
     const sel = { name: opts.element, role: opts.role };
     if (!geometryLooksUsable(els)) {
       throw new Error(
@@ -397,6 +409,25 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       }
 
       case "record": {
+        // Actual video, where the OS has a recorder. Stills cannot show a
+        // state that exists only between two of them.
+        if (opts.video) {
+          const seconds = Number(args[0] ?? 5);
+          if (!Number.isFinite(seconds) || seconds <= 0) {
+            return { ok: false, ...base, error: "record --video needs a length in seconds" };
+          }
+          const gap = preflight(os, "video", probe);
+          if (!gap.ok) return { ok: false, ...base, error: gap.reason };
+          const out = resolve(opts.out ?? (os === "macos" ? "record.mov" : "record.mp4"));
+          const argv = videoCmd(os, out, seconds);
+          // The deadline has to outlast the recording, or cuse kills its own
+          // camera: a 30s clip under a 15s timeout is a file that never closes.
+          await runner(action, Math.max(timeoutMs, seconds * 1000 + 15_000))(argv);
+          const size = (await Bun.file(out).exists()) ? Bun.file(out).size : 0;
+          if (size === 0) return { ok: false, ...base, error: `${argv[0]} produced no file` };
+          return { ok: true, ...base, detail: `${seconds}s of video, ${size}B -> ${out}`,
+                   data: { path: out, bytes: size, seconds } };
+        }
         // N captures in a row, for state that only misbehaves while it changes.
         const count = Number(args[0] ?? 3);
         const gapMs = Number(args[1] ?? 500);
@@ -494,11 +525,12 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       // The desktop's closest thing to a DOM: role, name and rectangle per
       // control, which is what makes "click the button that says Save" possible.
       case "elements": {
-        const els = await listElements(os, args[0] ?? "", timeoutMs);
+        const { els, note } = await listElements(os, args[0] ?? "", timeoutMs);
         const named = els.filter((e) => e.name);
         const blind = blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), els.length === 0);
+        const said = [blind, note].filter(Boolean).join("; ");
         return { ok: true, ...base,
-          ...(blind ? { warn: blind } : {}),
+          ...(said ? { warn: said } : {}),
           detail: `${els.length} controls, ${named.length} named` +
             (named.length ? `: ${named.slice(0, 6).map((e) => `${e.role} '${e.name}'`).join(", ")}` : ""),
           data: els };
@@ -526,7 +558,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           let found = false;
           try {
             if (target.element || target.role) {
-              const els = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
+              const { els } = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
               found = pickElement(els, { name: target.element, role: target.role }) !== null;
               sample = describeMisses(els, { name: target.element, role: target.role }, 5);
             } else {
@@ -741,6 +773,7 @@ const HELP = `cuse ${VERSION} - cross-platform computer-use CLI
 Screen
   capture [out.png]            screenshot; warns when the frame is blank
   record [n] [gapMs]           n captures in a row
+  record <seconds> --video     actual video, where the OS can (not Windows)
   settle [tries] [gapMs] [n]   wait until the screen stops changing
                                (--same-under sets how much noise counts as still)
   diff <a.png> <b.png>         how much changed: SAME or CHANGED
@@ -782,6 +815,8 @@ Flags
   --at=<fx,fy>                 where inside the target, 0..1 (default centre)
   --min-score=<0..1>           how close a match must be (default 0.9)
   --display=<n>                which screen to capture, 1-based (macOS)
+  --video                      record video instead of stills
+  --out=<path>                 where to write it
   --gone                       wait for the target to disappear instead
   --expect-front=<name>        refuse to type unless that window is in front
   --force                      act even if the session looks locked
