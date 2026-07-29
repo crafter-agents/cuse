@@ -1,21 +1,26 @@
 #!/bin/sh
-# What does AT-SPI actually give a headless runner, and does cuse tell the truth
-# about it either way?
+# Can cuse name a GTK control and press it, on a headless Linux runner?
 #
-# Both outcomes are asserted, because the bring-up itself is not reliable here -
-# one run saw zenity on the bus, the next saw nothing:
+# It could not, for one reason: every rectangle AT-SPI reported was 0,0. That
+# looked like a missing window manager and was not. Starting openbox moves the
+# dialog to 485,396 by X's own account and AT-SPI still answers 0,0 - the GTK
+# bridge does not translate DESKTOP_COORDS here, while WINDOW_COORDS is exact.
+# So cuse composes the answer: X says where the window is, the tree says where
+# the control is inside it. This asserts the result of that, end to end.
 #
-#   bus came up   -> the tree is readable, every rectangle is 0,0 because no
-#                    window manager tells the toolkit where its window is, and
-#                    cuse refuses to aim by it rather than clicking the corner.
-#   bus did not   -> cuse reports no controls and refuses to aim, instead of
-#                    returning a coordinate it has no basis for.
+# A window manager runs anyway, and it is what gives this gate teeth. Without
+# one every window sits at 0,0, so code that dropped the window origin entirely
+# would still click the right pixel and the job would stay green while measuring
+# nothing. Openbox places the dialog away from the origin, which is what makes a
+# wrong composition land somewhere visibly wrong.
 #
-# What is asserted is cuse's behaviour. Which of the two happened is reported,
-# not required, since that is a fact about the machine.
+# The proof is not a pixel delta: zenity writes what it received to a file when
+# OK is pressed. Nothing but a real click on a real button produces that.
 set -e
 export GTK_MODULES=gail:atk-bridge
 export NO_AT_BRIDGE=0
+CUSE=${CUSE:-./cuse}
+SENTINEL=CUSE_PRESSED_THE_REAL_BUTTON
 
 for d in /usr/libexec /usr/lib/at-spi2-core /usr/lib/x86_64-linux-gnu/at-spi2-core; do
   [ -x "$d/at-spi-bus-launcher" ] && LAUNCHER="$d/at-spi-bus-launcher"
@@ -27,55 +32,71 @@ gsettings set org.gnome.desktop.interface toolkit-accessibility true 2>/dev/null
 if [ -n "$LAUNCHER" ]; then "$LAUNCHER" --launch-immediately & sleep 2; fi
 if [ -n "$REGISTRYD" ]; then "$REGISTRYD" & sleep 2; fi
 
-zenity --entry --title=CU_TARGET --text="a control named Cancel lives here" > zenity-out.txt 2>/dev/null &
+# A window manager, so that the window is not at the origin and this gate can
+# tell a composed coordinate from a forgotten one.
+openbox >openbox.log 2>&1 &
+sleep 2
+
+rm -f zenity-out.txt
+zenity --entry --title=CU_TARGET --text="type here" > zenity-out.txt 2>/dev/null &
 zpid=$!
-sleep 4
-if ! kill -0 "$zpid" 2>/dev/null; then
-  echo "zenity did not stay up; nothing to read"
-  exit 1
-fi
 trap 'kill "$zpid" 2>/dev/null || true' EXIT
+"$CUSE" wait --window=CU_TARGET --timeout=25000 --json
 
 # Registering on the bus is a race between the registry daemon and the app, so
-# wait for it rather than taking the first answer.
+# wait for the tree rather than taking the first answer.
 echo "--- waiting for the app to register ---"
-apps=""
 for i in $(seq 1 20); do
-  apps=$(python3 -c 'import pyatspi; print(",".join(a.name for a in pyatspi.Registry.getDesktop(0) if a))' 2>/dev/null || true)
-  case "$apps" in *zenity*) break ;; esac
+  "$CUSE" elements zenity --json > gtk-elements.json 2>/dev/null || true
+  grep -q '"name":"Cancel"' gtk-elements.json && break
   sleep 1
 done
-echo "apps on the bus: ${apps:-(none)}"
+cat gtk-elements.json
+grep -q '"name":"Cancel"' gtk-elements.json || {
+  echo "the tree never named the control; nothing to aim at"; exit 1; }
 
-./cuse elements zenity --json | tee gtk-elements.json
+# The window is not at the origin, and the tree agrees with X about where it is.
+# Both halves matter: the first is what makes the rest of this job meaningful,
+# the second is the composition itself.
+"$CUSE" windows --json > windows.json
+bun -e '
+  const wins = (await Bun.file("windows.json").json()).data;
+  const els = (await Bun.file("gtk-elements.json").json()).data;
+  const w = wins.find((v) => v.title.includes("CU_TARGET"));
+  if (!w) throw new Error("X does not report the target window");
+  if (w.x === 0 && w.y === 0)
+    throw new Error("the window is at the origin: no window manager placed it, so this check proves nothing");
+  const dialog = els.find((e) => e.role === "dialog");
+  if (!dialog) throw new Error("no dialog in the accessibility tree");
+  if (Math.abs(dialog.x - w.x) > 2 || Math.abs(dialog.y - w.y) > 2)
+    throw new Error(`the tree places the dialog at ${dialog.x},${dialog.y} and X at ${w.x},${w.y}`);
+  // Not "are they at 0,0" but "are they anywhere at all": a backend that gave
+  // every control the window origin would clear that older check and still be
+  // aiming seventeen controls at one point.
+  const spots = new Set(els.map((e) => `${e.x},${e.y}`));
+  if (spots.size < 3)
+    throw new Error(`${els.length} controls share ${spots.size} position(s): this is not a layout`);
+  console.log(`window at ${w.x},${w.y}; ${els.length} controls composed against it`);
+'
 
-if grep -q '"name":"Cancel"' gtk-elements.json; then
-  echo "the bus came up: the tree is readable and names the control"
-  out=$(./cuse click --element=Cancel --app=zenity --json || true)
-  echo "$out"
-  if echo "$out" | grep -q '"ok":true'; then
-    echo "the tree was aimable after all - promote this gate from a refusal to a click"
-    exit 1
-  fi
-  echo "$out" | grep -q 'places them all at 0,0' || {
-    echo "expected the refusal to name the unusable geometry, got: $out"; exit 1; }
-  echo "refused correctly: a tree that cannot place its controls is not aimed at"
-else
-  echo "the bus did not come up on this runner - asserting the other half"
-  grep -q '"data":\[\]' gtk-elements.json || {
-    echo "expected an empty tree when nothing registered"; exit 1; }
-  out=$(./cuse click --element=Cancel --app=zenity --json || true)
-  echo "$out"
-  echo "$out" | grep -q '"ok":false' || {
-    echo "expected a refusal with nothing to aim at, got: $out"; exit 1; }
-  echo "refused correctly: nothing to aim at is not a coordinate"
-fi
+# The semantic loop, with no coordinate anywhere in it: name the field, type,
+# name the button, press. What zenity writes is the only thing being trusted.
+"$CUSE" focus CU_TARGET --json
+"$CUSE" click --element="type here" --role=text --app=zenity --json
+"$CUSE" type "$SENTINEL" --json
+"$CUSE" click --element=OK --role=button --app=zenity --json
+sleep 2
 
-# The other half of waiting: noticing that something is gone.
-echo "--- --gone, before and after ---"
-./cuse wait --gone --window=CU_TARGET --timeout=3000 --json && {
-  echo "the window was reported gone while it was still on screen"; exit 1; }
-kill "$zpid" 2>/dev/null || true
-./cuse wait --gone --window=CU_TARGET --timeout=15000 --json || {
+echo "--- what zenity received ---"
+cat zenity-out.txt || true
+grep -q "$SENTINEL" zenity-out.txt || {
+  echo "the control was named and resolved, but pressing it did nothing"
+  echo "where cuse thought things were:"; cat gtk-elements.json
+  exit 1; }
+echo "pressed a GTK button by name, and the app says so itself"
+
+# The other half of waiting: noticing that something is gone. Pressing OK
+# already closed it, so this is the after state.
+"$CUSE" wait --gone --window=CU_TARGET --timeout=15000 --json || {
   echo "the window closed and cuse never noticed"; exit 1; }
 echo "noticed the window closing"

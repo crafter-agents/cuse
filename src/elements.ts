@@ -61,16 +61,47 @@ export function resolveWindowsRole(raw: string): string {
   return WIN32_CLASSES[key] ?? fromUia;
 }
 
-export function normalizeRole(raw: string): string {
+/**
+ * One raw role name, two meanings, and the CLI could not say which it wanted.
+ *
+ * `text` is an editable entry to AT-SPI - GTK calls a label a `label` - and a
+ * read-only string to UI Automation, whose static text is `Text`. Mapping it to
+ * `label` everywhere meant `--role=text` matched captions and never a field, so
+ * the one selector an agent needs to fill in a form could not be written.
+ * Resolution needs to know whose vocabulary is being read.
+ */
+const PER_OS: Partial<Record<OS, Record<string, string>>> = {
+  linux: { text: "text", entry: "text", passwordtext: "text" },
+};
+
+export function normalizeRole(raw: string, os?: OS): string {
   if (raw.includes("|")) return resolveWindowsRole(raw);
-  return plainRole(raw);
+  const r = key(raw);
+  const own = os ? PER_OS[os]?.[r] : undefined;
+  return own ?? plainRole(raw);
 }
 
+/**
+ * What the user meant by `--role=button`.
+ *
+ * A selector is cuse's own vocabulary, not a platform's, so it is read the way
+ * `--help` documents it: `text` is something to type into, whatever the local
+ * accessibility API happens to call its captions.
+ */
+export function selectorRole(input: string): string {
+  const r = key(input);
+  return SELECTOR_WORDS[r] ?? plainRole(input);
+}
+
+const SELECTOR_WORDS: Record<string, string> = { text: "text", textfield: "text", entry: "text" };
+
+const key = (raw: string) => raw.trim().toLowerCase().replace(/^ax/, "").replace(/[\s_-]+/g, "");
+
 function plainRole(raw: string): string {
-  const r = raw.trim().toLowerCase().replace(/^ax/, "").replace(/[\s_-]+/g, "");
+  const r = key(raw);
   const map: Record<string, string> = {
     button: "button", pushbutton: "button", splitbutton: "button",
-    menubutton: "button", buttondropdown: "button",
+    menubutton: "button", buttondropdown: "button", togglebutton: "button",
     textfield: "text", edit: "text", textarea: "text", document: "text",
     searchfield: "text", combobox: "combobox",
     statictext: "label", text: "label", label: "label",
@@ -79,9 +110,14 @@ function plainRole(raw: string): string {
     link: "link", hyperlink: "link",
     menuitem: "menuitem", menubaritem: "menuitem", menu: "menu",
     list: "list", listitem: "listitem", table: "table", row: "row", cell: "cell",
-    image: "image", tab: "tab", tabgroup: "tab", slider: "slider",
-    window: "window", dialog: "dialog", sheet: "dialog",
+    tablecell: "cell", tablerow: "row",
+    image: "image", tab: "tab", tabgroup: "tab", pagetab: "tab", pagetablist: "tab",
+    slider: "slider",
+    window: "window", dialog: "dialog", sheet: "dialog", frame: "window", alert: "dialog",
     group: "group", pane: "group", scrollarea: "group", toolbar: "toolbar",
+    // AT-SPI names its layout boxes `filler` and `panel`; both are scenery, and
+    // a tree of GTK panels was reporting fifteen controls that cannot be used.
+    filler: "group", panel: "group",
   };
   return map[r] ?? (r || "unknown");
 }
@@ -202,43 +238,112 @@ export function elementsCmd(os: OS, app: string, limit = 300): string[] {
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not
     // present by default, and an app only appears on it if its toolkit exports
     // one - so this says exactly what is missing rather than returning nothing.
+    //
+    // Every rectangle used to come back 0,0, which cost this tool the whole
+    // Linux semantic route: the tree was readable and unaimable. The cause was
+    // not the missing window manager it looked like - starting openbox moves the
+    // window to 485,396 by X's own account and AT-SPI still answers 0,0.
+    // DESKTOP_COORDS is simply not translated by the GTK bridge here, while
+    // WINDOW_COORDS is exact. So the desktop position is composed rather than
+    // asked for: X says where the window is, AT-SPI says where the control is
+    // inside it, and the sum is a coordinate that can be clicked. This is right
+    // with a window manager and without one, and does not depend on the
+    // translation that was broken.
     case "linux": return ["python3", "-c",
-      "import sys\n" +
+      "import sys, subprocess\n" +
       "try:\n" +
       "    import pyatspi\n" +
       "except ImportError:\n" +
       "    sys.stderr.write('pyatspi not installed: apt-get install -y python3-pyatspi at-spi2-core\\n')\n" +
       "    sys.exit(1)\n" +
       "want = sys.argv[1].lower() if len(sys.argv) > 1 else ''\n" +
+      // Where X says each window is. Names repeat and titles change, so size is
+      // kept too: it is the fallback when a toolkit names its window one thing
+      // and its accessible frame another.
+      "def xwindows():\n" +
+      "    out = []\n" +
+      "    try:\n" +
+      "        ids = subprocess.run(['xdotool', 'search', '--onlyvisible', '--name', ''],\n" +
+      "                             capture_output=True, text=True, timeout=10).stdout.split()\n" +
+      "    except Exception:\n" +
+      "        sys.stderr.write('xdotool is needed to place controls on screen: apt-get install -y xdotool\\n')\n" +
+      "        return out\n" +
+      "    for wid in ids:\n" +
+      "        try:\n" +
+      "            name = subprocess.run(['xdotool', 'getwindowname', wid],\n" +
+      "                                  capture_output=True, text=True, timeout=5).stdout.strip()\n" +
+      "            geom = subprocess.run(['xdotool', 'getwindowgeometry', '--shell', wid],\n" +
+      "                                  capture_output=True, text=True, timeout=5).stdout\n" +
+      "        except Exception:\n" +
+      "            continue\n" +
+      "        d = dict(l.split('=', 1) for l in geom.strip().splitlines() if '=' in l)\n" +
+      "        try:\n" +
+      "            out.append((name, int(d['X']), int(d['Y']), int(d['WIDTH']), int(d['HEIGHT'])))\n" +
+      "        except Exception:\n" +
+      "            continue\n" +
+      "    return out\n" +
+      "WINS = xwindows()\n" +
+      // Which X window is this accessible frame? Its own title first, then its
+      // size when that is unambiguous. Anything less certain is not guessed at:
+      // an origin off by a window is a click in the wrong place, reported as a
+      // success, which is the failure this tool exists to avoid.
+      "def origin(node, ext):\n" +
+      "    name = (node.name or '').strip()\n" +
+      "    if name:\n" +
+      "        exact = [w for w in WINS if w[0] == name]\n" +
+      "        if len(exact) == 1:\n" +
+      "            return exact[0][1], exact[0][2]\n" +
+      "        part = [w for w in WINS if name.lower() in w[0].lower() or w[0].lower() in name.lower()]\n" +
+      "        if len(part) == 1:\n" +
+      "            return part[0][1], part[0][2]\n" +
+      "    bysize = [w for w in WINS if w[3] == ext.width and w[4] == ext.height]\n" +
+      "    if len(bysize) == 1:\n" +
+      "        return bysize[0][1], bysize[0][2]\n" +
+      "    return None\n" +
+      "TOPLEVEL = ('frame', 'window', 'dialog', 'alert', 'file chooser')\n" +
       "n = 0\n" +
-      "def walk(node, depth):\n" +
+      "def walk(node, ox, oy, depth):\n" +
       "    global n\n" +
       `    if n > ${limit} or depth > 12:\n` +
       "        return\n" +
       "    try:\n" +
-      "        ext = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)\n" +
+      "        ext = node.queryComponent().getExtents(pyatspi.WINDOW_COORDS)\n" +
+      "    except Exception:\n" +
+      "        ext = None\n" +
+      "    if ext is not None:\n" +
+      "        if node.getRoleName() in TOPLEVEL:\n" +
+      "            found = origin(node, ext)\n" +
+      "            if found is None:\n" +
+      "                sys.stderr.write('cannot place %r on screen: no X window matches it; '\n" +
+      "                                 'its controls are omitted rather than misplaced\\n'\n" +
+      "                                 % (node.name or node.getRoleName()))\n" +
+      "                return\n" +
+      "            ox, oy = found\n" +
       "        if ext.width > 0:\n" +
       "            print('\\t'.join([node.getRoleName(), node.name or '',\n" +
-      "                  str(ext.x), str(ext.y), str(ext.width), str(ext.height)]))\n" +
+      "                  str(ox + ext.x), str(oy + ext.y), str(ext.width), str(ext.height)]))\n" +
       "            n += 1\n" +
-      "    except Exception:\n" +
-      "        pass\n" +
       "    for child in node:\n" +
       "        if child is not None:\n" +
-      "            walk(child, depth + 1)\n" +
+      "            walk(child, ox, oy, depth + 1)\n" +
       "for app in pyatspi.Registry.getDesktop(0):\n" +
       "    if app is None:\n" +
       "        continue\n" +
       "    if want and want not in (app.name or '').lower():\n" +
       "        continue\n" +
-      "    walk(app, 0)\n", app];
+      "    walk(app, 0, 0, 0)\n", app];
 
     default: throw new Error(`elements unsupported on ${os}`);
   }
 }
 
-/** Tab-separated: role, name, x, y, width, height. */
-export function parseElements(text: string): Element[] {
+/**
+ * Tab-separated: role, name, x, y, width, height.
+ *
+ * The platform is optional and only settles the words two of them disagree on;
+ * without it the reading is the common one.
+ */
+export function parseElements(text: string, os?: OS): Element[] {
   const out: Element[] = [];
   for (const line of text.split("\n")) {
     const f = line.split("\t");
@@ -250,7 +355,7 @@ export function parseElements(text: string): Element[] {
     const rawRole = f[0]!.trim();
     out.push({
       rawRole,
-      role: normalizeRole(rawRole),
+      role: normalizeRole(rawRole, os),
       name: f.slice(1, f.length - 4).join(" ").trim(),
       x, y, width, height,
     });
@@ -274,7 +379,7 @@ export const ACTIONABLE = new Set([
 
 export function pickElement(els: Element[], sel: Selector): Element | null {
   const wantName = sel.name?.toLowerCase();
-  const wantRole = sel.role ? normalizeRole(sel.role) : undefined;
+  const wantRole = sel.role ? selectorRole(sel.role) : undefined;
 
   const matches = els.filter((e) => {
     if (wantRole && e.role !== wantRole) return false;
@@ -307,7 +412,11 @@ export function pickElement(els: Element[], sel: Selector): Element | null {
  * and names included, and gave every one of them the rectangle 0,0. Aiming at
  * that clicks the corner of the screen with full confidence, which is worse
  * than not reading the tree at all. Several controls stacked at the origin is
- * not a layout, it is a toolkit that does not know where its window is.
+ * not a layout, it is a tree that does not know where anything is.
+ *
+ * The Linux backend composes its coordinates now and no longer produces this,
+ * but the check stays: it is a property of the numbers, not of one platform,
+ * and the next toolkit to answer 0,0 for everything should be refused too.
  */
 export function geometryLooksUsable(els: Element[]): boolean {
   const positioned = els.filter((e) => e.x !== 0 || e.y !== 0);
@@ -322,7 +431,7 @@ export function pointInElement(e: Element, fx = 0.5, fy = 0.5): { x: number; y: 
 /** What to say when a selector matches nothing: the near misses, not silence. */
 export function describeMisses(els: Element[], sel: Selector, keep = 8): string {
   const named = els.filter((e) => e.name);
-  const pool = sel.role ? named.filter((e) => e.role === normalizeRole(sel.role!)) : named;
+  const pool = sel.role ? named.filter((e) => e.role === selectorRole(sel.role!)) : named;
   const sample = (pool.length ? pool : named).slice(0, keep)
     .map((e) => `${e.role} '${e.name}'`);
   return sample.length ? sample.join(", ") : "no named controls at all";

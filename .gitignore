@@ -1,6 +1,15 @@
 node_modules/
 dist/
 
+# `bun build --compile` leaves a 63 MB temp file behind when it is interrupted,
+# named after a timestamp so each one looks new. Five of them were committed.
+.*.bun-build
+
+# The compiled CLI, under every name the build steps give it.
+/cuse
+/cuse-*
+!/cuse-*.md
+
 # Screenshots are output, not source - except the ones a test needs to prove a
 # regression that no synthetic screen reproduced.
 *.png

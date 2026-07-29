@@ -312,11 +312,14 @@ jobs:
             aim-frame.png
             aim-needle.png
 
-  # What AT-SPI gives a headless runner, asserted rather than hoped for: the
-  # tree is readable, its geometry is not, and cuse refuses to aim by it. A job
-  # that is expected to fail is indistinguishable from a broken one, so this
-  # states today's truth and goes red when that changes - which is the signal to
-  # promote the Linux route from a refusal to a click.
+  # The semantic route on Linux, end to end: name a GTK control, press it, and
+  # let the app say it was pressed. This was a refusal for as long as AT-SPI
+  # reported every rectangle as 0,0; cuse composes the coordinate now, from the
+  # window's place in X and the control's place in the window.
+  #
+  # openbox is installed so the window is not at the origin. That is not what
+  # makes the route work - it works without a window manager too - it is what
+  # lets this job fail if the composition is ever dropped.
   linux-accessibility:
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -325,14 +328,22 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
       - run: bun build --compile src/cli.ts --outfile cuse
-      - name: bring up AT-SPI and select a GTK control by name
+      - name: bring up AT-SPI and press a GTK control by name
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
             xvfb xdotool x11-apps at-spi2-core python3-pyatspi zenity dbus-x11 \
-            libgtk-3-0 gsettings-desktop-schemas
+            libgtk-3-0 gsettings-desktop-schemas openbox
           timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" \
             dbus-run-session -- ./scenarios/linux-atspi.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-accessibility
+          path: |
+            gtk-elements.json
+            windows.json
+            zenity-out.txt
 
   # A real defect in shipped software, reproduced with cuse as the instrument.
   # `notepad` on the PATH is an App Execution Alias whose Store package Server
