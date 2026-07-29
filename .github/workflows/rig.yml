@@ -106,6 +106,7 @@ jobs:
             booted.txt
             appium-status.json
             open-warm.log
+            open-built.log
             open.log
             server.log
             ios-before.png

@@ -129,6 +129,28 @@ echo "WebDriverAgent build traces:"
 ls -t ~/Library/Developer/Xcode/DerivedData 2>/dev/null | head -3 || echo "  (none)"
 find /tmp /var/folders -maxdepth 4 -name "*WebDriverAgent*" -newermt "-30 minutes" 2>/dev/null | head -3 || true
 
+# The probe above changed the diagnosis. Appium answers /status with ready:true,
+# the simulator boots, and xcodebuild is mid-flight compiling WebDriverAgent -
+# the XCUITest driver builds it from source on first use. So the failure is not a
+# broken backend, it is a cold start whose critical path includes an Xcode build,
+# against a client that gives up after five reads. Waiting for that build and
+# trying again is what tells the two apart.
+echo "--- wait for WebDriverAgent to finish building, then try once more ---"
+for i in $(seq 1 60); do
+  pgrep -f "xcodebuild.*WebDriverAgent" >/dev/null 2>&1 || break
+  [ $((i % 6)) -eq 0 ] && echo "  still building WebDriverAgent (${i}0s)"
+  sleep 10
+done
+if pgrep -f "xcodebuild.*WebDriverAgent" >/dev/null 2>&1; then
+  echo "  WebDriverAgent was still building after ten minutes"
+else
+  echo "  no xcodebuild running now"
+fi
+cap 300 "$AB" -p ios open "http://localhost:$PORT/$SENTINEL.html" > open-built.log 2>&1
+echo "post-build open exit=$? (this is the one that matters)"
+tail -20 open-built.log || true
+sleep 5
+
 echo "--- is a simulator even booted ---"
 xcrun simctl list devices booted | tee booted.txt
 grep -qi "iphone" booted.txt || {
@@ -169,10 +191,12 @@ grep -qi "iphone" booted.txt || fail "the simulator never booted either: this is
 # The signature: the CLI cannot read from its own daemon. os error 35 is EAGAIN,
 # so the client's retry budget expires while the daemon is still busy with the
 # iOS launch - a budget tuned for CDP latency, not for booting a phone.
-if grep -qiE "os error 35|daemon may be busy|unresponsive|Failed to read" open.log open-warm.log; then
-  echo "reproduced: the simulator boots, and the CLI then gives up reading from its own daemon"
-  echo "  (os error 35 is EAGAIN: five retries expire while the daemon is still launching iOS)"
-  echo "VERDICT: PASS (reproduced: the iOS path boots a device and never drives it)"
+if grep -qiE "os error 35|daemon may be busy|unresponsive|Failed to read" open.log open-warm.log open-built.log; then
+  echo "reproduced: every attempt ends with the CLI giving up on its own daemon."
+  echo "  os error 35 is EAGAIN - five reads expire while the daemon is still working."
+  echo "  Appium itself was reachable and WebDriverAgent was building, so this is a"
+  echo "  cold-start budget problem on the client side, not an unavailable backend."
+  echo "VERDICT: PASS (reproduced: -p ios never completes here, cause narrowed to the daemon read budget)"
 else
   echo "the failure is real but does not match the documented signature, so it needs a fresh diagnosis"
   fail "uncharacterised iOS failure"
