@@ -52,6 +52,18 @@ echo "exit=$rc"
 cat devices.txt || true
 if [ "$rc" -ne 0 ]; then
   echo "NOTE: \`-p ios device list\` did not return within 90s while simctl answered instantly"
+  # Which part is slow? `device_list` is marked skip_launch_action in
+  # actions.rs, so it should not boot a simulator, and Appium's own startup
+  # timeout is 30s - neither explains 90. The remaining suspect is the daemon
+  # spawn, and a second call tells the two apart: if a daemon is now up and the
+  # repeat is fast, the cost is in starting it, not in listing devices.
+  echo "--- probe: is a daemon up now, and is the second call faster ---"
+  t0=$(date +%s)
+  cap 60 "$AB" -p ios device list > devices-2nd.txt 2>&1
+  rc2=$?
+  echo "second call: exit=$rc2 after $(( $(date +%s) - t0 ))s"
+  head -5 devices-2nd.txt 2>/dev/null || true
+  pgrep -fl "agent-browser" | head -5 || echo "(no agent-browser process is left running)"
 fi
 
 echo "--- serve a page whose path is the oracle ---"

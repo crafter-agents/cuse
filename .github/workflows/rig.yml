@@ -97,6 +97,7 @@ jobs:
           name: agent-browser-ios
           path: |
             devices.txt
+            devices-2nd.txt
             open.log
             server.log
             ios-before.png
