@@ -211,7 +211,23 @@ jobs:
           bun scenarios/aim-check.ts ./cuse target
           # And the semantic route: the accessibility tree should describe this
           # window without anyone taking a screenshot.
+          #
+          # Timed, because the way this used to fail was not a wrong answer but
+          # no answer: every attribute through System Events is an Apple Event,
+          # and Finder's tree took longer than cuse's own deadline. Reading it
+          # through the accessibility API is roughly ten times faster, so a
+          # generous ceiling here goes red if that route is ever lost.
+          start=$(date +%s)
           ./cuse elements TextEdit --json | tee elements.json
+          took=$(( $(date +%s) - start ))
+          echo "elements took ${took}s"
+          [ "$took" -lt 8 ] || { echo "reading one window's tree took ${took}s"; exit 1; }
+          # Finder is the app that could not be read at all. It may legitimately
+          # have no window open on a runner, so what is asserted is an answer
+          # rather than a count.
+          ./cuse elements Finder --json > finder.json
+          head -c 200 finder.json; echo
+          grep -q '"ok":true' finder.json || { echo "Finder's tree is unreadable again"; exit 1; }
           bun -e '
             const els = (await Bun.file("elements.json").json()).data;
             const text = els.filter((e) => e.role === "text");

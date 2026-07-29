@@ -28,7 +28,8 @@ pixels. Assume the same about anything you add.
 | `src/exec.ts` | running other people's programs under a deadline |
 | `src/commands.ts`, `src/os.ts`, `src/keys.ts` | per-OS argv and chords |
 | `src/plan.ts` | input actions, including the macOS ones that are not argv |
-| `src/macos.ts` | CoreGraphics through FFI: the only native code |
+| `src/macos.ts`, `src/macax.ts` | CoreGraphics and the accessibility API through FFI: the only native code |
+| `src/apps.ts` | which running process is "TextEdit" |
 | `src/preflight.ts`, `src/session.ts` | can this machine do it, and is anyone there |
 | `src/png.ts`, `src/xwd.ts`, `src/match.ts` | pixels: decode, encode, locate |
 | `src/window.ts`, `src/elements.ts` | what is on screen and what it is called |
@@ -73,6 +74,13 @@ control and a control's name is its content.
 **Killing a hung child is not enough.** A wrapper whose own child holds the stdout
 pipe keeps the read alive, so the deadline achieves nothing. `exec.ts` returns the
 moment the deadline passes and kills the descendant tree, bounded.
+
+**Finder's accessibility tree was unreadable, not slow.** Every attribute
+through System Events is an Apple Event answered on another process's main
+thread, so a 300-control window is over a thousand round trips and blew the
+deadline. Read through the accessibility API in this process it takes about
+350ms. *Lesson: "slow" and "impossible" are the same measurement until someone
+puts a number on it.*
 
 **`--role=text` could never select a text field.** `text` is an editable entry
 to AT-SPI, whose captions are `label`, and a caption to UI Automation, whose
@@ -169,9 +177,14 @@ Bun installed, so publishing that is a different promise from the binaries.
 - **Windows input beyond a self-made target.** Every Windows input proof uses a
   WinForms window this repo creates. A real third-party app would be better
   evidence.
-- **`elements` on macOS is slow-ish** (1.3s for 56 controls) because every
-  attribute is an Apple Event. Bulk queries already helped; a native AX binding
-  through FFI would help more.
+- **`elements` on macOS reads the tree directly now** (`src/macax.ts`), because
+  slow-ish turned out to be too generous: Finder did not answer at all, it hit
+  cuse's deadline and came back as a timeout. Through the C API it is 300
+  controls in about a third of a second. Two things to know: CoreFoundation
+  handles must be `u64` in bun:ffi, since a tagged pointer through the `ptr`
+  type segfaults on the first string; and accessibility trust is per process,
+  so a machine can refuse cuse while System Events works - the AppleScript
+  route is kept for exactly that and nothing else.
 - **Multiple monitors** are handled but unproven: no runner has two screens, so
   the layout maths is unit-tested and nothing more. Worth checking by hand on a
   real second monitor, especially the macOS flip (NSScreen measures up from the
@@ -184,7 +197,7 @@ Bun installed, so publishing that is a different promise from the binaries.
 ## How to work on it
 
 ```sh
-bun test                                        # 261, all pure
+bun test                                        # 271, all pure
 python3 scenarios/check-workflows.py .github/workflows/*.yml
 bun run build && ./dist/cuse --help
 ```
