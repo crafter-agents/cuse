@@ -156,6 +156,12 @@ fatal to GitHub, which reports a run with zero jobs and a bare "failure" that sa
 nothing. Run `scenarios/check-workflows.py` before pushing; it is strict about
 duplicates and also fails a job with no deadline.
 
+**A persistent daemon does not exit like a one-shot.** `agent-browser open`
+launches a browser and leaves a daemon behind by design, so a wrapper that caps
+it and reads the exit code calls a working launch a failure - the log had twelve
+orphaned Chrome processes under the word FAIL. Gate on whether the window
+exists, which is a question something else can answer.
+
 **Bound everything.** A hang with no `timeout-minutes` cost 45 minutes of a
 Windows runner.
 
