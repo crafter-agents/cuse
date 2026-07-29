@@ -147,23 +147,32 @@ Where each route works, measured on the runners:
 | --- | --- | --- |
 | macOS | AX via System Events, 11 controls for a TextEdit window | yes |
 | Windows | UI Automation | yes |
-| Linux | implemented against AT-SPI, but see below | yes |
+| Linux | AT-SPI, composed against X - 17 controls for a GTK dialog | yes |
 
-On Linux the tree can be read but not aimed at, on a runner. With `at-spi2-core`
-installed, `toolkit-accessibility` switched on and the bus started by hand, the
-registry sees a GTK app and cuse reads its 17 controls with the right roles and
-names - and every single rectangle comes back as 0,0. Without a window manager
-the toolkit does not know where its own window is. A tree that names controls
-but cannot place them is the confident-wrong-answer trap again, so cuse refuses
-to aim by it and says why.
+Linux took the longest to get right, and the reason is worth writing down. With
+`at-spi2-core` installed, `toolkit-accessibility` switched on and the bus
+started by hand, the registry sees a GTK app and cuse reads its 17 controls with
+the right roles and names - and every single rectangle used to come back as 0,0.
+A tree that names controls but cannot place them is the confident-wrong-answer
+trap, so cuse refused to aim by it.
 
-Bringing that bus up on a runner is itself unreliable - one run saw the app
-register, the next saw nothing - so CI asserts cuse's behaviour in both cases and
-reports which happened: with a tree, the refusal must name the unusable
-geometry; without one, an empty tree must still refuse rather than produce a
-coordinate. The day a runner reports real coordinates the job goes red on the
-first branch, which is the signal to promote the route from a refusal to a
-click.
+That looked like a missing window manager and was not. Start openbox and the
+dialog moves to 485,396 by X's own account, while AT-SPI carries on answering
+0,0: the GTK bridge does not translate `DESKTOP_COORDS` under Xvfb.
+`WINDOW_COORDS` is exact, though, so the answer is composed instead of asked
+for - X says where the window is, the tree says where the control is inside it,
+and the sum is a coordinate that can be clicked. It is right with a window
+manager and without one, and it does not depend on the translation that was
+broken.
+
+CI presses a real GTK button by name and lets zenity report what it received;
+the job runs a window manager so the window is *not* at the origin, which is
+what would make a dropped offset visible instead of harmless. To work on this
+without waiting for CI, `sh scenarios/linux-local.sh` runs the same scenario in
+a container.
+
+One thing still missing there: an X window whose title cuse cannot match to an
+accessible frame is skipped rather than guessed at, and it says so on stderr.
 
 One caveat worth knowing: on Windows the first click on an inactive window
 activates it and goes no further, so CI resolves the Save button and presses it
@@ -263,7 +272,7 @@ it (missing dependency, no display, locked session).
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input
   plans (`src/plan.ts`), capability reasoning (`src/preflight.ts`), lock-state
   parsing (`src/session.ts`) and image comparison (`src/png.ts`) are pure
-  functions. 234 tests, no machine side effects. The CLI only wires execution
+  functions. 238 tests, no machine side effects. The CLI only wires execution
   around them.
 - **Structured output.** Every action returns a typed `Result` ({ok, action, os,
   detail?, error?, warn?, data?}); `--json` emits it. A missing dependency comes
@@ -287,7 +296,7 @@ it (missing dependency, no display, locked session).
 ## Develop
 
 ```sh
-bun test          # 234 tests, the agnostic core
+bun test          # 238 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cuse
 ```
 
@@ -308,9 +317,6 @@ bun run build     # compile a standalone binary to dist/cuse
 - The binary name collides with `cuse(1)` from UUCP, which ships with macOS and
   many Linux distributions. Install it under another name or call it by path
   until that is settled.
-
-## Known limits
-
 - Linux has no accessibility tree out of the box: AT-SPI has to be installed,
   and the toolkit has to export one. A GTK app does and CI proves it; an xterm
   never will.

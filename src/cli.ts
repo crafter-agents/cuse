@@ -134,7 +134,7 @@ async function listElements(os: OS, app: string, timeoutMs: number): Promise<Ele
   const r = await runWithTimeout(argv, timeoutMs);
   const problem = explainFailure(argv, r, timeoutMs);
   if (problem) throw new Error(problem);
-  return parseElements(r.stdout);
+  return parseElements(r.stdout, os);
 }
 
 /** Ask the OS what windows exist, and parse whatever shape it answers in. */
@@ -164,8 +164,7 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
     if (!geometryLooksUsable(els)) {
       throw new Error(
         `the accessibility tree reports ${els.length} controls but places them all at 0,0 - ` +
-        `its coordinates cannot be aimed at (on Linux this means the toolkit has no window ` +
-        `manager telling it where its window is)`);
+        `its coordinates cannot be aimed at`);
     }
     const hit = pickElement(els, sel);
     if (!hit) {

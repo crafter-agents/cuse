@@ -19,8 +19,47 @@ describe("one vocabulary for three trees", () => {
   test("text entry too", () => {
     expect(normalizeRole("AXTextField")).toBe("text");
     expect(normalizeRole("Edit")).toBe("text");
-    expect(normalizeRole("text")).toBe("label");            // AT-SPI static text
+    expect(normalizeRole("text")).toBe("label");            // Windows UIA static text
     expect(normalizeRole("AXTextArea")).toBe("text");
+  });
+  // The same word, opposite meanings: `Text` is a caption to UI Automation and
+  // an editable entry to AT-SPI, whose captions are `label`. Read without a
+  // platform, GTK's entry came back as a label and `--role=text` could only ever
+  // match the caption above the field.
+  test("`text` is an entry on Linux and a caption on Windows", () => {
+    expect(normalizeRole("text", "linux")).toBe("text");
+    expect(normalizeRole("label", "linux")).toBe("label");
+    expect(normalizeRole("password text", "linux")).toBe("text");
+    expect(normalizeRole("text", "windows")).toBe("label");
+  });
+  test("AT-SPI's own names for the usual controls", () => {
+    expect(normalizeRole("toggle button", "linux")).toBe("button");
+    expect(normalizeRole("page tab", "linux")).toBe("tab");
+    expect(normalizeRole("table cell", "linux")).toBe("cell");
+    // Layout boxes are scenery: a GTK dialog is mostly these.
+    expect(normalizeRole("filler", "linux")).toBe("group");
+    expect(normalizeRole("panel", "linux")).toBe("group");
+  });
+});
+
+describe("a selector is cuse's vocabulary, not a platform's", () => {
+  // `--help` says text means something to type into. It has to mean that
+  // regardless of which tree is being read, or the flag is a trap.
+  test("--role=text asks for a field, and finds one", () => {
+    const tree = [
+      el({ role: "label", rawRole: "label", name: "Name", x: 10, y: 10, width: 100, height: 17 }),
+      el({ role: "text", rawRole: "text", name: "Name", x: 10, y: 30, width: 200, height: 34 }),
+    ];
+    const hit = pickElement(tree, { role: "text" })!;
+    expect(hit.height).toBe(34);
+    expect(hit.rawRole).toBe("text");
+  });
+  test("--role=label still asks for a caption", () => {
+    const tree = [
+      el({ role: "text", rawRole: "text", name: "Name", x: 10, y: 30, width: 200, height: 34 }),
+      el({ role: "label", rawRole: "label", name: "Name", x: 10, y: 10, width: 100, height: 17 }),
+    ];
+    expect(pickElement(tree, { role: "label" })!.height).toBe(17);
   });
   test("an unknown role is passed through, not swallowed", () => {
     expect(normalizeRole("AXSomethingNew")).toBe("somethingnew");

@@ -5,7 +5,8 @@ what was learned making it work, which is the part that does not survive in a
 diff.
 
 State at handoff: `main` at `f192248`, 234 tests, twelve CI gates green across
-macOS, Linux and Windows.
+macOS, Linux and Windows. Since then: the Linux accessibility route went from a
+refusal to a real click, and the test count moved with it.
 
 ## The one idea
 
@@ -33,6 +34,7 @@ pixels. Assume the same about anything you add.
 | `src/window.ts`, `src/elements.ts` | what is on screen and what it is called |
 | `src/wait.ts`, `src/args.ts` | waiting, and one parser shared with `serve` |
 | `scenarios/` | what CI drives; the interesting ones are the repro pair |
+| `scenarios/linux-local.sh` | the Linux a11y gate in a container, for iterating off CI |
 
 Everything except `cli.ts` and `macos.ts` is pure and unit-tested. Keep it that
 way: it is why the argv for three platforms can be asserted from one laptop.
@@ -72,6 +74,14 @@ control and a control's name is its content.
 pipe keeps the read alive, so the deadline achieves nothing. `exec.ts` returns the
 moment the deadline passes and kills the descendant tree, bounded.
 
+**`--role=text` could never select a text field.** `text` is an editable entry
+to AT-SPI, whose captions are `label`, and a caption to UI Automation, whose
+entries are `Edit`. One table mapped it to `label` for everybody, so the flag
+matched the caption above the field and the only selector for filling in a form
+was unusable. Role resolution takes the platform now, and a selector is read in
+cuse's own vocabulary rather than a toolkit's.
+*Lesson: the same word in two vocabularies needs to know which one it is in.*
+
 **A template with no structure cannot be located.** A patch of blank text box was
 found 65px from where it was cut, with a perfect score, because the score was a
 mean pixel distance and every blank patch matches every other. Correlation plus a
@@ -90,10 +100,12 @@ Gathered by the `recon` workflow; re-run it rather than trusting this.
   why `focus` must not depend on `_NET_ACTIVE_WINDOW`.
 - **Linux accessibility**: AT-SPI can be brought up by hand (bus launcher,
   registry daemon, `toolkit-accessibility`) and a GTK app then exports a real
-  tree - but every rectangle comes back 0,0, because nothing tells the toolkit
-  where its window is. The tree is readable and unaimable. cuse refuses to aim by
-  it; the day a runner reports real coordinates, `linux-accessibility` goes red on
-  purpose.
+  tree. Every rectangle used to come back 0,0, and the guess written here - that
+  a window manager would fix it - was wrong: openbox moves the dialog to
+  485,396 by X's own account and AT-SPI still answers 0,0. `DESKTOP_COORDS` is
+  simply not translated by the GTK bridge under Xvfb. `WINDOW_COORDS` is exact,
+  so cuse composes: the window's place in X plus the control's place in the
+  window. The route is a click now, not a refusal.
 - **macOS**: CoreGraphics event posting works with no permission prompt.
   `screencapture` works. But **macOS 26 raises a Screen Recording prompt after a
   few captures**, it floats above the frontmost app *without becoming it* - so
@@ -156,14 +168,11 @@ clone and build, which excludes almost everyone.
 - **Wayland** is unsupported and will stay so until someone needs it.
 - **`record` is stills, not video.** For a bug that only appears mid-animation, an
   actual capture would be better.
-- **The Linux accessibility route** is one window manager away from working. Try
-  starting a tiny WM (openbox) in that job and see whether the geometry becomes
-  real; if it does, promote the gate from a refusal to a click.
 
 ## How to work on it
 
 ```sh
-bun test                                        # 234, all pure
+bun test                                        # 238, all pure
 python3 scenarios/check-workflows.py .github/workflows/*.yml
 bun run build && ./dist/cuse --help
 ```
