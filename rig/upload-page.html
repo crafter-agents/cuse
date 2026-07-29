@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>cuse rig - file input</title>
+<h1>file input</h1>
+<input id="f" type="file">
+<script>
+  // The oracle for the CDP-bypass half: only a file that actually reached the
+  // input sets this.
+  window.__uploadedName = "";
+  document.getElementById("f").addEventListener("change", (e) => {
+    window.__uploadedName = e.target.files[0] ? e.target.files[0].name : "";
+    document.title = "picked:" + window.__uploadedName;
+  });
+</script>
