@@ -153,14 +153,22 @@ async function captureCoverage(os: OS, path: string, timeoutMs: number,
   });
 }
 
-/** Ask the platform's accessibility tree for an application's controls. */
-async function listElements(os: OS, app: string, timeoutMs: number): Promise<Element[]> {
+/**
+ * Ask the platform's accessibility tree for an application's controls.
+ *
+ * `note` is how a slower or less capable route says so. Falling back silently
+ * is what would turn "this machine does not trust cuse" into "Finder has no
+ * controls", which is the shape of every bug in this repo's history.
+ */
+type Tree = { els: Element[]; note?: string };
+
+async function listElements(os: OS, app: string, timeoutMs: number): Promise<Tree> {
   if (os === "macos") return macElements(app, timeoutMs);
   const argv = elementsCmd(os, app);
   const r = await runWithTimeout(argv, timeoutMs);
   const problem = explainFailure(argv, r, timeoutMs);
   if (problem) throw new Error(problem);
-  return parseElements(r.stdout, os);
+  return { els: parseElements(r.stdout, os) };
 }
 
 /**
@@ -174,7 +182,7 @@ async function listElements(os: OS, app: string, timeoutMs: number): Promise<Ele
  * Loaded lazily, like the mouse code, so that importing the CLI on Linux or
  * Windows never touches bun:ffi or a framework that is not there.
  */
-async function macElements(app: string, timeoutMs: number): Promise<Element[]> {
+async function macElements(app: string, timeoutMs: number): Promise<Tree> {
   const ax = await import("./macax.ts");
   // Trust is per process, and cuse's is not System Events'. A machine can have
   // AppleScript reading trees perfectly while this binary is refused, so the
@@ -194,22 +202,22 @@ async function macElements(app: string, timeoutMs: number): Promise<Element[]> {
     throw new Error(`no running application matching '${app}' - what is running: ${describeApps(apps)}`);
   }
   const raw = ax.elementsOfPid(target.pid, 300, 12, Date.now() + timeoutMs);
-  return raw.map((e) => ({
+  return { els: raw.map((e) => ({
     rawRole: e.role,
     role: normalizeRole(e.role, "macos"),
     name: e.name,
     x: Math.round(e.x), y: Math.round(e.y),
     width: Math.round(e.width), height: Math.round(e.height),
-  }));
+  })) };
 }
 
 /** The fallback route, through System Events, for an untrusted process. */
-async function systemEventsElements(app: string, timeoutMs: number): Promise<Element[]> {
+async function systemEventsElements(app: string, timeoutMs: number): Promise<Tree> {
   const argv = elementsCmd("macos", app);
   const r = await runWithTimeout(argv, timeoutMs);
   const problem = explainFailure(argv, r, timeoutMs);
   if (problem) throw new Error(`${problem} (and ${UNTRUSTED_SHORT})`);
-  return parseElements(r.stdout, "macos");
+  return { els: parseElements(r.stdout, "macos"), note: UNTRUSTED_SHORT };
 }
 
 const UNTRUSTED_SHORT =
@@ -260,7 +268,7 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
 
   // A name beats a picture: it survives a theme, a font, a window that moved.
   if (opts.element || opts.role) {
-    const els = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
+    const { els } = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
     const sel = { name: opts.element, role: opts.role };
     if (!geometryLooksUsable(els)) {
       throw new Error(
@@ -517,11 +525,12 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       // The desktop's closest thing to a DOM: role, name and rectangle per
       // control, which is what makes "click the button that says Save" possible.
       case "elements": {
-        const els = await listElements(os, args[0] ?? "", timeoutMs);
+        const { els, note } = await listElements(os, args[0] ?? "", timeoutMs);
         const named = els.filter((e) => e.name);
         const blind = blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), els.length === 0);
+        const said = [blind, note].filter(Boolean).join("; ");
         return { ok: true, ...base,
-          ...(blind ? { warn: blind } : {}),
+          ...(said ? { warn: said } : {}),
           detail: `${els.length} controls, ${named.length} named` +
             (named.length ? `: ${named.slice(0, 6).map((e) => `${e.role} '${e.name}'`).join(", ")}` : ""),
           data: els };
@@ -549,7 +558,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           let found = false;
           try {
             if (target.element || target.role) {
-              const els = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
+              const { els } = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
               found = pickElement(els, { name: target.element, role: target.role }) !== null;
               sample = describeMisses(els, { name: target.element, role: target.role }, 5);
             } else {
