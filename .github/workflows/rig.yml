@@ -98,6 +98,8 @@ jobs:
           path: |
             devices.txt
             devices-2nd.txt
+            requests.tsv
+            booted.txt
             open.log
             server.log
             ios-before.png

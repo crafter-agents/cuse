@@ -8,10 +8,16 @@
 # end-to-end check on ubuntu; the macOS runners only compile and run unit tests.
 # An untested backend is not a backend, it is a hypothesis.
 #
-# The oracle is deliberately outside both tools: a local HTTP server logs the
-# requests it receives. A uniquely named path can only appear in that log if a
-# browser on the simulator really navigated there. agent-browser's own report of
-# success is not consulted, and neither are pixels.
+# The oracle is deliberately outside both tools: a local HTTP server logs every
+# request with its User-Agent.
+#
+# Counting requests was not enough, and the first version of this gate passed
+# while proving nothing. The host and the simulator share a loopback, so every
+# hit arrives as ::1 - a fetch from desktop Chrome, from curl, or from a phone
+# are indistinguishable by address. If `-p ios` were to fall back to a desktop
+# browser, the log would fill up and the cell would go green with no simulator
+# involved. What is required now is a request for the sentinel path carrying an
+# iPhone User-Agent, plus a booted simulator to have produced it.
 set -uo pipefail
 
 CUSE="${CUSE:-./cuse}"
@@ -66,27 +72,24 @@ if [ "$rc" -ne 0 ]; then
   pgrep -fl "agent-browser" | head -5 || echo "(no agent-browser process is left running)"
 fi
 
-echo "--- serve a page whose path is the oracle ---"
-mkdir -p rig/served
-echo "<!doctype html><title>cuse rig ios</title><h1>$SENTINEL</h1>" > "rig/served/$SENTINEL.html"
-# http.server logs every request line to stderr; that log is the ground truth.
-python3 -m http.server "$PORT" --directory rig/served > server.log 2>&1 &
+echo "--- serve a page whose log is the oracle ---"
+rm -f requests.tsv
+REQLOG=requests.tsv PORT="$PORT" SENTINEL="$SENTINEL" bun rig/oracle-server.ts > server.log 2>&1 &
 SERVER_PID=$!
-# Wait for readiness rather than guessing. The first attempt slept two seconds
+# Wait for readiness rather than guessing. An earlier version slept two seconds
 # and failed on a runner that had just installed Appium and spent 90s on a hung
-# command; python had not finished starting.
+# command; the server had not finished starting.
 ready=""
 for i in $(seq 1 30); do
   curl -fsS -m 3 "http://localhost:$PORT/$SENTINEL.html" >/dev/null 2>&1 && { ready=y; break; }
   sleep 1
 done
 [ -n "$ready" ] || {
-  echo "python3: $(command -v python3 || echo missing)"
   echo "--- server log ---"; cat server.log 2>/dev/null
   echo "--- who holds the port ---"; lsof -i ":$PORT" 2>/dev/null | head
   fail "the local server never came up on $PORT"
 }
-echo "server is up after the readiness wait"
+echo "server is up; the warm-up request is in the log under curl's own User-Agent"
 
 echo "--- before ---"
 xcrun simctl io booted screenshot ios-before.png 2>/dev/null || echo "(no booted device yet, expected)"
@@ -95,22 +98,27 @@ echo "--- drive the simulator ---"
 # Booting a simulator and building WebDriverAgent on a cold runner is slow;
 # bounded generously, because a timeout here is a real answer.
 cap 420 "$AB" -p ios open "http://localhost:$PORT/$SENTINEL.html" > open.log 2>&1
-echo "exit=$? (not the assertion)"
-tail -20 open.log || true
+echo "open exit=$? (not the assertion, but read it)"
+tail -25 open.log || true
 sleep 5
 
-echo "--- the oracle: did a request for that path reach the server ---"
-grep -F "$SENTINEL" server.log > hits.txt 2>/dev/null
-cat hits.txt || true
-# The curl above also logged a hit, so the browser's request has to be a second
-# one. Otherwise a server that only ever saw our own warm-up would pass.
-hits=$(wc -l < hits.txt | tr -d ' ')
-echo "requests for the sentinel: $hits (one of them is this script's own warm-up)"
-[ "${hits:-0}" -ge 2 ] || {
-  echo "--- server log ---"; cat server.log
-  fail "no browser on the simulator requested the page: the iOS path did not drive anything"
+echo "--- is a simulator even booted ---"
+xcrun simctl list devices booted | tee booted.txt
+grep -qi "iphone" booted.txt || {
+  echo "--- what open said ---"; cat open.log
+  fail "no simulator is booted: nothing could have run a mobile browser"
 }
-echo "a browser on the simulator fetched the page"
+
+echo "--- the oracle: did a phone fetch that path ---"
+cat requests.tsv 2>/dev/null || true
+awk -F'\t' -v p="/$SENTINEL.html" '$1 == p && $2 ~ /iPhone/ { n++ } END { exit(n ? 0 : 1) }' requests.tsv || {
+  echo "requests seen, with their User-Agents:"
+  awk -F'\t' '{ printf "  %-40s %s\n", $1, substr($2, 1, 80) }' requests.tsv 2>/dev/null
+  echo "--- what open said ---"; cat open.log
+  fail "no request for the sentinel carried an iPhone User-Agent: whatever fetched the page, it was not a browser on the phone"
+}
+echo "a mobile browser on the simulator fetched the page:"
+awk -F'\t' -v p="/$SENTINEL.html" '$1 == p && $2 ~ /iPhone/ { print "  " substr($2, 1, 100) }' requests.tsv | head -3
 
 echo "--- evidence: what the phone screen looks like ---"
 xcrun simctl io booted screenshot ios-after.png 2>/dev/null || echo "(no screenshot)"
