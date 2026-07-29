@@ -104,6 +104,8 @@ jobs:
             devices-2nd.txt
             requests.tsv
             booted.txt
+            appium-status.json
+            open-warm.log
             open.log
             server.log
             ios-before.png

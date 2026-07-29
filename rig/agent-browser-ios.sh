@@ -111,6 +111,24 @@ echo "warm open exit=$? (not the assertion either)"
 tail -25 open-warm.log || true
 sleep 5
 
+echo "--- was Appium ever reachable, and how many are there ---"
+# Without this the report could only say the CLI gave up on its daemon, which is
+# a symptom. Two `npm exec appium --port 4723` processes showed up in an earlier
+# run, and an Appium that could not bind explains a daemon that never answers -
+# is_appium_running(port) followed by launch_appium(port) is a race.
+echo "processes on 4723:"
+pgrep -fl "appium" | head -5 || echo "  (none)"
+lsof -nP -iTCP:4723 -sTCP:LISTEN 2>/dev/null | head -5 || echo "  (nothing listening on 4723)"
+echo "does it answer:"
+curl -s -m 10 -o appium-status.json -w "  /status -> %{http_code}\n" \
+  "http://127.0.0.1:4723/status" || echo "  no answer"
+head -c 300 appium-status.json 2>/dev/null; echo
+# The XCUITest driver builds WebDriverAgent on first use, which is where a cold
+# runner most plausibly loses. Its log is under the derived data Appium uses.
+echo "WebDriverAgent build traces:"
+ls -t ~/Library/Developer/Xcode/DerivedData 2>/dev/null | head -3 || echo "  (none)"
+find /tmp /var/folders -maxdepth 4 -name "*WebDriverAgent*" -newermt "-30 minutes" 2>/dev/null | head -3 || true
+
 echo "--- is a simulator even booted ---"
 xcrun simctl list devices booted | tee booted.txt
 grep -qi "iphone" booted.txt || {
