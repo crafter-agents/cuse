@@ -116,6 +116,7 @@ jobs:
             appium-status.json
             open-warm.log
             open-built.log
+            post-build-status.txt
             '*.log'
             open.log
             server.log

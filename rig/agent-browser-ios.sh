@@ -9,7 +9,10 @@
 # An untested backend is not a backend, it is a hypothesis.
 #
 # The oracle is deliberately outside both tools: a local HTTP server logs every
-# request with its User-Agent.
+# request with its User-Agent. That choice is what caught the actual defect:
+# `-p ios open` exits 0, boots a simulator, and loads the page in desktop
+# headless Chrome. Right exit code, wrong device, and no way to tell from the
+# outside except by asking who fetched it.
 #
 # Counting requests was not enough, and the first version of this gate passed
 # while proving nothing. The host and the simulator share a loopback, so every
@@ -154,7 +157,8 @@ else
   echo "  no xcodebuild running now"
 fi
 cap 300 "$AB" -p ios open "http://localhost:$PORT/$SENTINEL.html" > open-built.log 2>&1
-echo "post-build open exit=$? (this is the one that matters)"
+pb=$?; echo "exit=$pb" > post-build-status.txt
+echo "post-build open exit=$pb (this is the one that matters)"
 tail -20 open-built.log || true
 sleep 5
 
@@ -181,41 +185,42 @@ if awk -F'\t' -v p="/$SENTINEL.html" '$1 == p && $2 ~ /iPhone/ { n++ } END { exi
   exit 0
 fi
 
-# It did not. That is a defect in the tool under test, and this repo already has
-# a pattern for those: reproduce it and assert its signature, so the job goes red
-# the day it changes. A permanently red job is indistinguishable from a broken
-# one, and a silent one proves nothing.
+# It did not. Which of two very different things happened?
 echo "no request carried an iPhone User-Agent. Requests seen:"
-awk -F'\t' '{ printf "  %-42s %s\n", $1, substr($2, 1, 80) }' requests.tsv 2>/dev/null
+awk -F'\t' '{ printf "  %-42s %s\n", $1, substr($2, 1, 90) }' requests.tsv 2>/dev/null
 
 echo "--- what the daemon itself said ---"
-ls -la "$AGENT_BROWSER_SOCKET_DIR" 2>/dev/null | head
 for f in "$AGENT_BROWSER_SOCKET_DIR"/*.log; do
   [ -f "$f" ] || continue
-  echo "=== $f ==="
-  tail -60 "$f"
+  echo "=== $f ==="; tail -40 "$f"
 done
 cp "$AGENT_BROWSER_SOCKET_DIR"/*.log . 2>/dev/null || true
 
 echo "--- what is being reproduced ---"
-cat open.log open-warm.log 2>/dev/null | tail -30
+cat open.log open-warm.log open-built.log 2>/dev/null | tail -30
 
-# The simulator booting is the part that works, and it has to keep working or
-# this reproduction is about something else.
-grep -qi "iphone" booted.txt || fail "the simulator never booted either: this is a different failure from the one documented"
+# The simulator booting has to keep working, or this is about something else.
+grep -qi "iphone" booted.txt || fail "no simulator booted at all: a different failure from the one documented"
 
-# The signature: the CLI cannot read from its own daemon. os error 35 is EAGAIN,
-# so the client's retry budget expires while the daemon is still busy with the
-# iOS launch - a budget tuned for CDP latency, not for booting a phone.
-if grep -qiE "os error 35|daemon may be busy|unresponsive|Failed to read" open.log open-warm.log open-built.log; then
-  echo "reproduced: every attempt ends with the CLI giving up on its own daemon."
-  echo "  os error 35 is EAGAIN - five reads expire while the daemon is still working."
-  echo "  Appium itself was reachable and WebDriverAgent was building, so this is a"
-  echo "  cold-start budget problem on the client side, not an unavailable backend."
-  echo "VERDICT: PASS (reproduced: -p ios never completes here, cause narrowed to the daemon read budget)"
-else
-  echo "the failure is real but does not match the documented signature, so it needs a fresh diagnosis"
-  fail "uncharacterised iOS failure"
+# Case A, the serious one: the command reports success and a DESKTOP browser
+# fetched the page. A simulator was booted and never used. An agent driving this
+# would believe it had tested a phone. Asserting the desktop User-Agent is what
+# stops this branch passing on an empty log.
+if grep -qiE "Macintosh|HeadlessChrome|Windows NT|X11" requests.tsv && grep -q "exit=0" post-build-status.txt 2>/dev/null; then
+  echo "reproduced: -p ios reported success and a desktop browser loaded the page."
+  echo "  A simulator was booted and never used; no request came from a phone."
+  echo "  This is a silent fallback - right exit code, wrong device."
+  echo "VERDICT: PASS (reproduced: -p ios falls back to a desktop browser and reports success)"
+  exit 0
 fi
-exit 0
+
+# Case B: nothing loaded the page at all.
+if grep -qiE "os error 35|daemon may be busy|unresponsive|Failed to read" open.log open-warm.log open-built.log; then
+  echo "reproduced: no browser loaded the page, and the CLI gave up reading from its own daemon."
+  echo "VERDICT: PASS (reproduced: -p ios never completes here)"
+  exit 0
+fi
+
+echo "the failure is real but matches neither documented shape, so it needs a fresh diagnosis"
+fail "uncharacterised iOS outcome"
 
