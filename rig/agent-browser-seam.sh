@@ -79,7 +79,11 @@ sleep 3
 #    landed on an 81x18 box at 81,18 - the top-left corner of the window. A name
 #    that common is not an identification.
 echo "--- 1. did a native panel appear ---"
-"$CUSE" elements "Google Chrome" --json > panel.json || fail "cuse could not read Chrome's tree"
+# The panel's buttons nest deeper than the default twelve levels inside
+# Chrome's tree, and Chrome's own chrome uses up the default node budget,
+# so the panel was identified while its Cancel was never in the dump.
+"$CUSE" elements "Google Chrome" --depth=30 --limit=1200 --json > panel.json \
+  || fail "cuse could not read Chrome's tree"
 echo "--- windows on screen ---"
 "$CUSE" windows --json > windows-after-click.json || true
 head -c 500 windows-after-click.json; echo
@@ -128,7 +132,7 @@ echo "clicking $CX,$CY"
 "$CUSE" click "$CX" "$CY" --json || fail "cuse could not click"
 sleep 3
 
-"$CUSE" elements "Google Chrome" --json > after.json || true
+"$CUSE" elements "Google Chrome" --depth=30 --limit=1200 --json > after.json || true
 bun rig/find-panel.ts after.json Cancel > after-summary.txt 2>/dev/null || true
 cat after-summary.txt
 grep -q "^NO-PANEL" after-summary.txt || {
