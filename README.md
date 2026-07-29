@@ -272,7 +272,7 @@ it (missing dependency, no display, locked session).
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input
   plans (`src/plan.ts`), capability reasoning (`src/preflight.ts`), lock-state
   parsing (`src/session.ts`) and image comparison (`src/png.ts`) are pure
-  functions. 238 tests, no machine side effects. The CLI only wires execution
+  functions. 261 tests, no machine side effects. The CLI only wires execution
   around them.
 - **Structured output.** Every action returns a typed `Result` ({ok, action, os,
   detail?, error?, warn?, data?}); `--json` emits it. A missing dependency comes
@@ -296,7 +296,7 @@ it (missing dependency, no display, locked session).
 ## Develop
 
 ```sh
-bun test          # 238 tests, the agnostic core
+bun test          # 261 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cuse
 ```
 
@@ -312,6 +312,12 @@ bun run build     # compile a standalone binary to dist/cuse
   guarantee. An app that has been launched but has not drawn yet is perfectly
   still, and one quiet interval used to be enough to fool it.
 - `scroll` on Windows sends Page Up/Down rather than a wheel event.
+- Multi-monitor is handled but not gated: every CI runner has one screen. What
+  cuse does is report the layout (`screen` lists each display and where the
+  frame starts), shift template matches by the frame's origin - the Windows
+  virtual screen starts at a negative x with a monitor to the left - and warn
+  when a capture does not cover every display. macOS captures one screen per
+  file, so `capture --display=2` is how the second one is reached.
 - Linux needs `x11-apps` and `xdotool`, and an X display. Both install in about
   seven seconds on a runner; Wayland is not supported.
 - The binary name collides with `cuse(1)` from UUCP, which ships with macOS and

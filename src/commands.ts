@@ -39,9 +39,19 @@ export type CapturePlan =
   | { argv: string[]; output: "file" }
   | { argv: string[]; output: "stdout" };
 
-export function captureCmd(os: OS, out: string): CapturePlan {
+/**
+ * @param display 1-based screen to capture, where the platform can pick one.
+ *
+ * macOS writes one file per screen, so asking for one file gets one screen -
+ * the main one - and a window on the second monitor is simply not in the frame.
+ * `-D` is how the others are reached. Linux and Windows already capture every
+ * monitor in a single frame, so there is nothing to select.
+ */
+export function captureCmd(os: OS, out: string, display?: number): CapturePlan {
   switch (os) {
-    case "macos": return { argv: ["screencapture", "-x", out], output: "file" };
+    case "macos": return { argv: display && display > 1
+      ? ["screencapture", "-x", "-D", String(display), out]
+      : ["screencapture", "-x", out], output: "file" };
     // xwd, not import: the runners ship neither, and x11-apps (which carries
     // xwd) is a fraction of imagemagick's size. cuse converts the dump itself,
     // which also fixes what import did on a low-colour display - emit a 1-bit

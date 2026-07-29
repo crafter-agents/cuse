@@ -31,6 +31,17 @@ describe("capture", () => {
     // the dump as if xwd had written a file - which is a bug that happened.
     expect(captureCmd("linux", "o.png")).toEqual({ argv: ["xwd", "-root", "-silent"], output: "stdout" });
   });
+  // `screencapture` writes one file per screen, so one filename means the main
+  // screen and a window on the second monitor is not in the frame at all.
+  test("macOS can be pointed at another screen", () => {
+    expect(captureCmd("macos", "o.png", 2).argv).toEqual(["screencapture", "-x", "-D", "2", "o.png"]);
+    // The first screen is the default behaviour, so it stays the plain command.
+    expect(captureCmd("macos", "o.png", 1).argv).toEqual(["screencapture", "-x", "o.png"]);
+  });
+  test("the other two capture every monitor already, so there is nothing to pick", () => {
+    expect(captureCmd("linux", "o.png", 2).argv).toEqual(captureCmd("linux", "o.png").argv);
+    expect(captureCmd("windows", "o.png", 2).argv).toEqual(captureCmd("windows", "o.png").argv);
+  });
   test("only the stdout backend needs converting, and it is marked as such", () => {
     expect(captureCmd("macos", "o.png").output).toBe("file");
     expect(captureCmd("windows", "o.png").output).toBe("file");

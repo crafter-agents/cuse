@@ -18,6 +18,8 @@ import { listWindowsCmd, parseWindows, pickWindow, pointIn, frontmostCmd, parseF
 import { findTemplate, crop, variance, MIN_VARIANCE } from "./match.ts";
 import { elementsCmd, parseElements, pickElement, pointInElement, describeMisses,
          geometryLooksUsable, type Element } from "./elements.ts";
+import { displaysCmd, parseDisplays, frameOrigin, coverageWarning, toScreenPoint,
+         desktopBounds, type Display } from "./display.ts";
 import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
 import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
          successDetail, type WaitTarget } from "./wait.ts";
@@ -41,6 +43,8 @@ export type Options = {
   app?: string;
   /** wait for the target to disappear rather than to appear */
   gone?: boolean;
+  /** which screen to capture, 1-based, where the platform can pick one */
+  display?: number;
 };
 
 export type Result = {
@@ -89,8 +93,9 @@ const deflate = (d: Uint8Array) => new Uint8Array(deflateSync(d));
  * stdout, which cuse converts - that is what removes the imagemagick dependency.
  */
 async function captureTo(os: OS, out: string, timeoutMs: number,
-                         run: (argv: string[]) => Promise<void>): Promise<void> {
-  const plan = captureCmd(os, out);
+                         run: (argv: string[]) => Promise<void>,
+                         display?: number): Promise<void> {
+  const plan = captureCmd(os, out, display);
   if (plan.output === "file") return run(plan.argv);
   const r = await runBytes(plan.argv, timeoutMs);
   const problem = explainFailure(plan.argv, r, timeoutMs);
@@ -128,6 +133,21 @@ async function readLockState(os: OS): Promise<string | null> {
   return r.code === 0 && !r.timedOut ? r.stdout : null;
 }
 
+/** Does this capture hold every screen? Answered from the file that was written. */
+async function captureCoverage(os: OS, path: string, timeoutMs: number,
+                               display?: number): Promise<string | undefined> {
+  const displays = await listDisplays(os, timeoutMs);
+  if (displays.length < 2) return undefined;
+  const header = readHeader(new Uint8Array(await Bun.file(path).arrayBuffer()));
+  if (!header) return undefined;
+  const scale = await pointScale(os, header.width);
+  const origin = frameOrigin(displays, os, display);
+  return coverageWarning(displays, {
+    ...origin,
+    width: Math.round(header.width / scale), height: Math.round(header.height / scale),
+  });
+}
+
 /** Ask the platform's accessibility tree for an application's controls. */
 async function listElements(os: OS, app: string, timeoutMs: number): Promise<Element[]> {
   const argv = elementsCmd(os, app);
@@ -135,6 +155,21 @@ async function listElements(os: OS, app: string, timeoutMs: number): Promise<Ele
   const problem = explainFailure(argv, r, timeoutMs);
   if (problem) throw new Error(problem);
   return parseElements(r.stdout, os);
+}
+
+/**
+ * What screens are attached.
+ *
+ * Never fatal: a machine that cannot answer this still has a screen, and the
+ * single-display assumption that held before is the right fallback. What is not
+ * acceptable is silently acting on it when the answer was available.
+ */
+async function listDisplays(os: OS, timeoutMs: number): Promise<Display[]> {
+  try {
+    const r = await runWithTimeout(displaysCmd(os), Math.min(timeoutMs, 10_000));
+    if (r.code !== 0 || r.timedOut) return [];
+    return parseDisplays(r.stdout, os);
+  } catch { return []; }
 }
 
 /** Ask the OS what windows exist, and parse whatever shape it answers in. */
@@ -189,7 +224,7 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
   }
   if (opts.find) {
     const shot = resolve("find-frame.png");
-    await captureTo(os, shot, timeoutMs, run);
+    await captureTo(os, shot, timeoutMs, run, opts.display);
     const hay = await loadImage(shot);
     const needle = await loadImage(opts.find);
     const plainness = variance(needle);
@@ -198,14 +233,23 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
         `'${opts.find}' is too plain to locate (variance ${plainness.toFixed(2)}, needs ${MIN_VARIANCE}): ` +
         `a patch this flat matches many places equally well`);
     }
-    const m = findTemplate(hay, needle, opts.minScore ?? 0.9);
-    if (!m) throw new Error(`'${opts.find}' is not on screen (nothing matched above ${opts.minScore ?? 0.9})`);
-    // The frame may be larger than the coordinate space input uses: a Retina
-    // capture is twice the point size, so scale the hit back before clicking.
     const scale = await pointScale(os, hay.width);
+    const displays = await listDisplays(os, timeoutMs);
+    const origin = frameOrigin(displays, os, opts.display);
+    const m = findTemplate(hay, needle, opts.minScore ?? 0.9);
+    if (!m) {
+      // A frame that never held the other monitor is a different answer from a
+      // frame that held it and did not contain this: say which happened.
+      const gap = coverageWarning(displays,
+        { ...origin, width: Math.round(hay.width / scale), height: Math.round(hay.height / scale) });
+      throw new Error(`'${opts.find}' is not on screen (nothing matched above ${opts.minScore ?? 0.9})` +
+        (gap ? ` - note that ${gap}` : ""));
+    }
+    // Two corrections, both invisible on a single Retina-less screen: the frame
+    // may be denser than the space clicks live in, and it may not start at 0,0.
+    const p = toScreenPoint(m.x + needle.width * fx, m.y + needle.height * fy, scale, origin);
     return {
-      x: Math.round((m.x + needle.width * fx) / scale),
-      y: Math.round((m.y + needle.height * fy) / scale),
+      ...p,
       how: `${opts.find} at ${m.centerX},${m.centerY} in the frame (score ${m.score.toFixed(3)})`,
     };
   }
@@ -278,10 +322,15 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         // Absolute, because the Windows backend saves through .NET, whose
         // working directory is not PowerShell's.
         const out = resolve(args[0] ?? "out.png");
-        await captureTo(os, out, timeoutMs, run);
+        await captureTo(os, out, timeoutMs, run, opts.display);
         const size = (await Bun.file(out).exists()) ? Bun.file(out).size : 0;
         if (size === 0) return { ok: false, ...base, error: "no file produced" };
-        const warn = await inspectFrame(out, size);
+        // Two ways a frame can be useless: it shows nothing, or it shows only
+        // part of the desk. The second is silent on a second monitor, where
+        // `screencapture` writes one file per screen and cuse asked for one.
+        const warn = [await inspectFrame(out, size),
+                      await captureCoverage(os, out, timeoutMs, opts.display)]
+          .filter(Boolean).join("; ");
         return { ok: true, ...base, detail: `${size}B -> ${out}`, ...(warn ? { warn } : {}) };
       }
 
@@ -349,17 +398,34 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       // rather than leaving every caller to guess.
       case "screen": {
         const shot = resolve("screen-probe.png");
-        await captureTo(os, shot, timeoutMs, run);
+        await captureTo(os, shot, timeoutMs, run, opts.display);
         const img = readHeader(new Uint8Array(await Bun.file(shot).arrayBuffer()));
         if (!img) return { ok: false, ...base, error: "capture produced something that is not a PNG" };
         const scale = await pointScale(os, img.width);
+        const displays = await listDisplays(os, timeoutMs);
+        const origin = frameOrigin(displays, os, opts.display);
+        const frame = {
+          ...origin,
+          width: Math.round(img.width / scale), height: Math.round(img.height / scale),
+        };
         const data = {
           frameWidth: img.width, frameHeight: img.height,
-          pointWidth: Math.round(img.width / scale), pointHeight: Math.round(img.height / scale),
+          pointWidth: frame.width, pointHeight: frame.height,
           scale,
+          // Where the frame's first pixel is: 0,0 everywhere except a Windows
+          // desk with a monitor left of or above the primary one.
+          originX: origin.x, originY: origin.y,
+          displays,
+          desktop: desktopBounds(displays),
         };
+        const warn = coverageWarning(displays, frame);
         return { ok: true, ...base,
-          detail: `${data.frameWidth}x${data.frameHeight} pixels, ${data.pointWidth}x${data.pointHeight} points (scale ${scale})`,
+          detail: `${data.frameWidth}x${data.frameHeight} pixels, ${data.pointWidth}x${data.pointHeight} points ` +
+            `(scale ${scale}) at ${origin.x},${origin.y}` +
+            (displays.length ? `; ${displays.length} display${displays.length > 1 ? "s" : ""}: ` +
+              displays.map((d) => `${d.width}x${d.height}+${d.x}+${d.y}${d.primary ? "*" : ""}`).join(" ")
+                              : "; display list unavailable"),
+          ...(warn ? { warn } : {}),
           data };
       }
 
@@ -640,7 +706,7 @@ Input
 Other
   os                           which platform this is
   serve                        read one command per line, answer one JSON per line
-  screen                       frame size, point size, and the ratio between
+  screen                       frame size, point size, the ratio, and every display
 
 Flags
   --json                       structured Result on stdout
@@ -653,6 +719,7 @@ Flags
   --find=<template.png>        aim at whatever matches this picture
   --at=<fx,fy>                 where inside the target, 0..1 (default centre)
   --min-score=<0..1>           how close a match must be (default 0.9)
+  --display=<n>                which screen to capture, 1-based (macOS)
   --gone                       wait for the target to disappear instead
   --expect-front=<name>        refuse to type unless that window is in front
   --force                      act even if the session looks locked
