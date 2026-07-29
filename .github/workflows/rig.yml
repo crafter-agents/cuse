@@ -58,6 +58,7 @@ jobs:
             windows.json
             windows-after-click.json
             panel-summary.txt
+            panel-candidates.txt
             after-summary.txt
 
   # portless puts a local CA in the system trust store, which macOS gates behind
