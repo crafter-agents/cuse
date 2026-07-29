@@ -54,6 +54,8 @@ jobs:
             panel.json
             after.json
             ab-snapshot.txt
+            open.log
+            windows.json
 
   # The mobile cell. agent-browser has a whole iOS Simulator backend and no test
   # anywhere: its own CI runs every end-to-end check on ubuntu, and the macOS
@@ -124,7 +126,7 @@ jobs:
         with:
           name: portless-wall
           path: |
-            proxy-start.log
-            trust.log
+            proxy-tls.log
+            proxy-plain.log
             windows-during-trust.json
             securityagent.json

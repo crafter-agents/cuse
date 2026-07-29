@@ -48,11 +48,24 @@ SERVER_PID=$!
 sleep 2
 
 echo "--- open the page ---"
-cap 60 "$AB" open "http://localhost:$PORT/upload-page.html" --headed || fail "agent-browser could not open the page"
-sleep 2
+# Never gate on `open`'s exit code. It leaves a persistent daemon behind by
+# design, so the command does not return the way a one-shot does; the first
+# version of this script capped it at 60s, killed it, and called a browser that
+# had in fact launched a failure. Whether a window exists is the question, and
+# cuse is the one that can answer it without asking agent-browser.
+cap 90 "$AB" open "http://localhost:$PORT/upload-page.html" --headed > open.log 2>&1
+echo "open exit=$? (not the assertion)"
+tail -5 open.log 2>/dev/null || true
+sleep 3
 
-echo "--- what is on screen before the click ---"
-"$CUSE" windows --json | head -c 400; echo
+echo "--- is there actually a browser window ---"
+"$CUSE" windows --json > windows.json
+head -c 400 windows.json; echo
+grep -qi "chrome" windows.json || {
+  echo "--- what open said ---"; cat open.log
+  fail "no Chrome window on screen: the page never opened"
+}
+echo "a browser window is up"
 
 echo "--- click the file input, which hands over to the OS ---"
 # This blocks in some builds: the panel is modal to the page. Bounded, and its
