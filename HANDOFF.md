@@ -157,10 +157,12 @@ mouse. CI runners are the environment; a laptop is for reading, not for input.
 
 ## What is left
 
-**A. Ship it.** No releases, no npm, no binaries. `bun build --compile --target`
-produces standalone executables per platform; a workflow that attaches them to a
-tag is the single highest-return thing left. Today the only way to try cuse is to
-clone and build, which excludes almost everyone.
+**A. Ship it.** Done for GitHub Releases: pushing a `v*` tag builds five
+standalone binaries, starts each one on the OS it was built for, and publishes
+them with checksums. Nothing is published until a binary has run - the build
+machine cannot tell a working cross-compile from a file the target cannot
+execute. npm is still open: `bin` points at the TypeScript entry, which needs
+Bun installed, so publishing that is a different promise from the binaries.
 
 **Then, roughly in order:**
 

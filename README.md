@@ -29,6 +29,22 @@ cuse <action> --json        # structured Result for agents
 
 ## Install
 
+Download the binary for your platform from
+[Releases](https://github.com/crafter-agents/cuse/releases) — one file, nothing
+to install alongside it, no runtime.
+
+```sh
+curl -fsSLo cuse https://github.com/crafter-agents/cuse/releases/latest/download/cuse-macos-arm64
+chmod +x cuse && ./cuse os
+```
+
+Swap the name for `cuse-macos-x64`, `cuse-linux-x64`, `cuse-linux-arm64` or
+`cuse-windows-x64.exe`. Every release publishes `SHA256SUMS`, and each binary is
+started on the OS it was built for before the release exists — a cross-compiled
+executable that cannot run is not something the build machine can notice.
+
+Or from source:
+
 ```sh
 bun install
 bun run build          # standalone binary at dist/cuse, no runtime needed

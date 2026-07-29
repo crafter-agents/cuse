@@ -1,0 +1,146 @@
+name: release
+# Until this existed, the only way to try cuse was to clone it and build it,
+# which excludes almost everyone. A tag now produces a standalone binary per
+# platform, with nothing to install alongside it.
+#
+# Nothing is published until a binary has been run on the OS it was built for.
+# A cross-compiled executable that exits 0 at build time and cannot start on the
+# target is exactly the shape of failure this project is built against, and the
+# build machine cannot see it.
+on:
+  push:
+    tags: ["v*"]
+  # Build and smoke-test without publishing anything, to check this workflow
+  # without spending a tag on it.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # The version lives in three places and they drifted: package.json said 2.1.0
+  # while the CLI answered 2.2.0. A release is the moment that matters, so it is
+  # checked before anything is built.
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - name: the CLI, the package and the tag must agree
+        run: |
+          cli=$(bun -e 'const m = await import("./src/cli.ts"); console.log(m.VERSION)')
+          pkg=$(bun -e 'console.log((await Bun.file("package.json").json()).version)')
+          echo "cli=$cli package.json=$pkg ref=${GITHUB_REF}"
+          [ "$cli" = "$pkg" ] || { echo "the CLI says $cli and package.json says $pkg"; exit 1; }
+          case "$GITHUB_REF" in
+            refs/tags/*)
+              tag=${GITHUB_REF#refs/tags/v}
+              [ "$tag" = "$cli" ] || { echo "tag v$tag does not match the version $cli"; exit 1; } ;;
+            *) echo "not a tag: version agreement checked, tag skipped" ;;
+          esac
+
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-darwin-arm64
+            name: cuse-macos-arm64
+          - target: bun-darwin-x64
+            name: cuse-macos-x64
+          - target: bun-linux-x64
+            name: cuse-linux-x64
+          - target: bun-linux-arm64
+            name: cuse-linux-arm64
+          - target: bun-windows-x64
+            name: cuse-windows-x64.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun test
+      - name: compile
+        run: bun build --compile --target=${{ matrix.target }} src/cli.ts --outfile ${{ matrix.name }}
+      # An empty or truncated artifact is a green build and a broken download.
+      - name: the file is a real executable
+        run: |
+          ls -l ${{ matrix.name }}
+          size=$(wc -c < ${{ matrix.name }})
+          [ "$size" -gt 20000000 ] || { echo "$size bytes is not a bun binary"; exit 1; }
+          file ${{ matrix.name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  # Each binary is started on the OS it claims to be for. This is the check that
+  # cannot be done on the build machine, and the only one that would catch a
+  # cross-compile that produces a file nothing can execute.
+  verify:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: cuse-macos-arm64
+            run: ./cuse-macos-arm64
+          - os: ubuntu-latest
+            name: cuse-linux-x64
+            run: ./cuse-linux-x64
+          - os: windows-latest
+            name: cuse-windows-x64.exe
+            run: ./cuse-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: "${{ matrix.name }}" }
+      - name: it runs, and knows where it is
+        shell: bash
+        run: |
+          chmod +x ${{ matrix.name }} || true
+          v=$(${{ matrix.run }} --version)
+          echo "version: $v"
+          out=$(${{ matrix.run }} os --json)
+          echo "$out"
+          echo "$out" | grep -q '"ok":true' || { echo "the binary ran but refused"; exit 1; }
+      # Downloading a computer-use tool that cannot see the screen is worth
+      # catching here rather than in someone's first session.
+      - name: and can take a screenshot on its own platform
+        if: matrix.os != 'ubuntu-latest'
+        shell: bash
+        run: |
+          ${{ matrix.run }} capture shot.png --json
+          test -s shot.png || { echo "no frame"; exit 1; }
+      - name: linux needs a display first
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends x11-apps
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" ${{ matrix.run }} capture shot.png --json
+          test -s shot.png || { echo "no frame"; exit 1; }
+
+  publish:
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - name: one directory, and a checksum for each file
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec cp {} release/ \;
+          cd release && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
