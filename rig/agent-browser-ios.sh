@@ -189,6 +189,18 @@ fi
 echo "no request carried an iPhone User-Agent. Requests seen:"
 awk -F'\t' '{ printf "  %-42s %s\n", $1, substr($2, 1, 90) }' requests.tsv 2>/dev/null
 
+# The daemon records which path it took, in its own state files. launch_ios sets
+# engine="safari" and provider="ios"; the default CDP path sets engine="chrome".
+# So `provider=ios` beside `engine=chrome` is the fallback, stated by the tool
+# about itself - the most direct evidence there is, and it was sitting on disk
+# for eight rounds while I inferred from User-Agents.
+echo "--- which path the daemon says it took ---"
+for f in "$AGENT_BROWSER_SOCKET_DIR"/*.engine "$AGENT_BROWSER_SOCKET_DIR"/*.provider; do
+  [ -f "$f" ] || continue
+  echo "  $(basename "$f") = $(cat "$f")"
+done
+cp "$AGENT_BROWSER_SOCKET_DIR"/*.engine "$AGENT_BROWSER_SOCKET_DIR"/*.provider . 2>/dev/null || true
+
 echo "--- what the daemon itself said ---"
 for f in "$AGENT_BROWSER_SOCKET_DIR"/*.log; do
   [ -f "$f" ] || continue
@@ -206,8 +218,12 @@ grep -qi "iphone" booted.txt || fail "no simulator booted at all: a different fa
 # fetched the page. A simulator was booted and never used. An agent driving this
 # would believe it had tested a phone. Asserting the desktop User-Agent is what
 # stops this branch passing on an empty log.
+engine="$(cat "$AGENT_BROWSER_SOCKET_DIR"/default.engine 2>/dev/null || echo unknown)"
+provider="$(cat "$AGENT_BROWSER_SOCKET_DIR"/default.provider 2>/dev/null || echo unknown)"
+echo "the daemon recorded engine=$engine provider=$provider"
 if grep -qiE "Macintosh|HeadlessChrome|Windows NT|X11" requests.tsv && grep -q "exit=0" post-build-status.txt 2>/dev/null; then
   echo "reproduced: -p ios reported success and a desktop browser loaded the page."
+  echo "  launch_ios sets engine=safari; this run recorded engine=$engine."
   echo "  A simulator was booted and never used; no request came from a phone."
   echo "  This is a silent fallback - right exit code, wrong device."
   echo "VERDICT: PASS (reproduced: -p ios falls back to a desktop browser and reports success)"

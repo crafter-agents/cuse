@@ -117,6 +117,8 @@ jobs:
             open-warm.log
             open-built.log
             post-build-status.txt
+            default.engine
+            default.provider
             '*.log'
             open.log
             server.log
