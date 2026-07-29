@@ -58,6 +58,7 @@ jobs:
             windows.json
             windows-after-click.json
             panel-summary.txt
+            panel-candidates.txt
             after-summary.txt
 
   # The mobile cell. agent-browser has a whole iOS Simulator backend and no test
