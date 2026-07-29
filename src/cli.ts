@@ -46,6 +46,9 @@ export type Options = {
   gone?: boolean;
   /** which screen to capture, 1-based, where the platform can pick one */
   display?: number;
+  /** how deep to walk an accessibility tree, and how many controls to keep */
+  depth?: number;
+  limit?: number;
   /** record actual video rather than a series of stills */
   video?: boolean;
   /** where to write it */
@@ -162,9 +165,10 @@ async function captureCoverage(os: OS, path: string, timeoutMs: number,
  */
 type Tree = { els: Element[]; note?: string };
 
-async function listElements(os: OS, app: string, timeoutMs: number): Promise<Tree> {
-  if (os === "macos") return macElements(app, timeoutMs);
-  const argv = elementsCmd(os, app);
+async function listElements(os: OS, app: string, timeoutMs: number,
+                            depth?: number, limit?: number): Promise<Tree> {
+  if (os === "macos") return macElements(app, timeoutMs, depth, limit);
+  const argv = elementsCmd(os, app, limit, depth);
   const r = await runWithTimeout(argv, timeoutMs);
   const problem = explainFailure(argv, r, timeoutMs);
   if (problem) throw new Error(problem);
@@ -182,7 +186,8 @@ async function listElements(os: OS, app: string, timeoutMs: number): Promise<Tre
  * Loaded lazily, like the mouse code, so that importing the CLI on Linux or
  * Windows never touches bun:ffi or a framework that is not there.
  */
-async function macElements(app: string, timeoutMs: number): Promise<Tree> {
+async function macElements(app: string, timeoutMs: number,
+                           depth?: number, limit?: number): Promise<Tree> {
   const ax = await import("./macax.ts");
   // Trust is per process, and cuse's is not System Events'. A machine can have
   // AppleScript reading trees perfectly while this binary is refused, so the
@@ -201,8 +206,16 @@ async function macElements(app: string, timeoutMs: number): Promise<Tree> {
   if (!target) {
     throw new Error(`no running application matching '${app}' - what is running: ${describeApps(apps)}`);
   }
-  const raw = ax.elementsOfPid(target.pid, 300, 12, Date.now() + timeoutMs);
-  return { els: raw.map((e) => ({
+  const walk = ax.elementsOfPid(target.pid, limit ?? 300, depth ?? 12, Date.now() + timeoutMs);
+  // A tree that stopped early is missing controls, and a caller who cannot tell
+  // that apart from an app without them will conclude the wrong thing.
+  const truncated = walk.stopped === "deadline"
+    ? `the walk ran out of time after ${walk.rows.length} controls - there is more of this tree ` +
+      `than was read (raise --timeout, or narrow it with --depth)`
+    : walk.stopped === "limit"
+    ? `stopped at the --limit of ${limit ?? 300} controls - this tree is bigger than that`
+    : undefined;
+  return { note: truncated, els: walk.rows.map((e) => ({
     rawRole: e.role,
     role: normalizeRole(e.role, "macos"),
     name: e.name,
@@ -268,7 +281,8 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
 
   // A name beats a picture: it survives a theme, a font, a window that moved.
   if (opts.element || opts.role) {
-    const { els } = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
+    const { els } = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs,
+                                       opts.depth, opts.limit);
     const sel = { name: opts.element, role: opts.role };
     if (!geometryLooksUsable(els)) {
       throw new Error(
@@ -525,7 +539,8 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       // The desktop's closest thing to a DOM: role, name and rectangle per
       // control, which is what makes "click the button that says Save" possible.
       case "elements": {
-        const { els, note } = await listElements(os, args[0] ?? "", timeoutMs);
+        const { els, note } = await listElements(os, args[0] ?? "", timeoutMs,
+                                                 opts.depth, opts.limit);
         const named = els.filter((e) => e.name);
         const blind = blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), els.length === 0);
         const said = [blind, note].filter(Boolean).join("; ");
@@ -558,7 +573,8 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           let found = false;
           try {
             if (target.element || target.role) {
-              const { els } = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs);
+              const { els } = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs,
+                                                 opts.depth, opts.limit);
               found = pickElement(els, { name: target.element, role: target.role }) !== null;
               sample = describeMisses(els, { name: target.element, role: target.role }, 5);
             } else {
@@ -815,6 +831,8 @@ Flags
   --at=<fx,fy>                 where inside the target, 0..1 (default centre)
   --min-score=<0..1>           how close a match must be (default 0.9)
   --display=<n>                which screen to capture, 1-based (macOS)
+  --depth=<n>                  how deep to walk the accessibility tree (default 12)
+  --limit=<n>                  how many controls to return (default 300)
   --video                      record video instead of stills
   --out=<path>                 where to write it
   --gone                       wait for the target to disappear instead

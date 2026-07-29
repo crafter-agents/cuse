@@ -1,0 +1,97 @@
+name: rig
+# Verification cells: cuse pointed at real third-party tools, at the exact seam
+# where they stop being able to see themselves.
+#
+# Everything in `ci.yml` drives a target this repo controls. That is the right
+# way to test cuse, and it is the wrong way to find out whether cuse is useful:
+# a target you wrote answers the way you expected. These jobs install published
+# tools from npm and drive them where the operating system takes over.
+#
+# Not on every push. A macOS runner bills at ten times a Linux one and these
+# install browsers and proxies, so they run nightly and on demand. A gate that
+# gets deleted for slowing the build protects nothing.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * *"
+  push:
+    paths:
+      - "rig/**"
+      - ".github/workflows/rig.yml"
+
+jobs:
+  # agent-browser handles web content through CDP. A file input hands control to
+  # the operating system, and the panel that appears is not in the DOM.
+  agent-browser-seam:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun build --compile src/cli.ts --outfile cuse
+
+      - name: install agent-browser from npm
+        run: |
+          bun add -g agent-browser@0.33.1
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+      - name: what version is under test
+        run: agent-browser --version || true
+
+      - name: install the browser it drives
+        run: agent-browser install --with-deps || agent-browser install || true
+
+      - name: the seam
+        run: |
+          chmod +x rig/agent-browser-seam.sh
+          ./rig/agent-browser-seam.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-browser-seam
+          path: |
+            panel.json
+            after.json
+            ab-snapshot.txt
+            open.log
+            windows.json
+            windows-after-click.json
+            panel-summary.txt
+            panel-candidates.txt
+            panel-svc.json
+            svc-summary.txt
+            svc-candidates.txt
+            after-summary.txt
+
+  # portless puts a local CA in the system trust store, which macOS gates behind
+  # an authentication surface no synthetic event can answer.
+  portless-wall:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun build --compile src/cli.ts --outfile cuse
+
+      - name: install portless from npm
+        run: |
+          bun add -g portless@0.15.4
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+      - run: portless --version || true
+
+      - name: the wall
+        run: |
+          chmod +x rig/portless-wall.sh
+          ./rig/portless-wall.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: portless-wall
+          path: |
+            proxy-tls.log
+            proxy-plain.log
+            windows-during-trust.json
+            securityagent.json
