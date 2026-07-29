@@ -64,6 +64,67 @@ jobs:
             svc-candidates.txt
             after-summary.txt
 
+  # The mobile cell. agent-browser has a whole iOS Simulator backend and no test
+  # anywhere: its own CI runs every end-to-end check on ubuntu, and the macOS
+  # runners only compile. An untested backend is a hypothesis.
+  agent-browser-ios:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun build --compile src/cli.ts --outfile cuse
+
+      - name: what Xcode and simulators are here
+        run: |
+          xcodebuild -version || true
+          xcrun simctl list runtimes | head -10 || true
+
+      - name: install agent-browser and the driver it needs
+        run: |
+          bun add -g agent-browser@0.33.1
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          # agent-browser launches Appium itself and reuses one already
+          # listening on 4723, so this only has to exist on PATH.
+          npm install -g appium
+          appium driver install xcuitest || appium driver list --installed
+
+      # Missing this is what produced four wrong diagnoses. The daemon's own log
+      # says `[chrome-search] browsers_dir does not exist`: with -p ios it still
+      # resolves a browser at startup, and there was none installed because this
+      # step only existed in the other job. Whether that resolution *should*
+      # happen for an iOS session is a question for whoever owns it - but it
+      # cannot be asked until the browser is there.
+      - name: install the browser the daemon looks for even with -p ios
+        run: agent-browser install --with-deps || agent-browser install || true
+
+      - name: drive a simulator
+        run: |
+          chmod +x rig/agent-browser-ios.sh
+          ./rig/agent-browser-ios.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: agent-browser-ios
+          path: |
+            devices.txt
+            devices-2nd.txt
+            requests.tsv
+            booted.txt
+            appium-status.json
+            open-warm.log
+            open-built.log
+            post-build-status.txt
+            default.engine
+            default.provider
+            '*.log'
+            open.log
+            server.log
+            ios-before.png
+            ios-after.png
+
   # portless puts a local CA in the system trust store, which macOS gates behind
   # an authentication surface no synthetic event can answer.
   portless-wall:

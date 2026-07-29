@@ -156,6 +156,28 @@ fatal to GitHub, which reports a run with zero jobs and a bare "failure" that sa
 nothing. Run `scenarios/check-workflows.py` before pushing; it is strict about
 duplicates and also fails a job with no deadline.
 
+**A modal panel is not in `AXWindows`.** macOS raises a file panel out of
+process; from the browser's element it appears as a childless `dialog` node
+while its contents hang off `AXFocusedWindow`. Walking only `AXWindows` finds a
+panel with no buttons, which reads exactly like a panel that has none. Both
+roots are read now, guarded by role - asked of some applications they answer
+with the element whose subtree is the menu bar. *Lesson: this was recorded in
+agent-desktop a month earlier and lost in the rewrite; read the prior art's
+findings, not only its code.*
+
+**A truncated tree said nothing about being truncated.** The walk stops on three
+conditions and reported none, so a tree missing the control you asked about was
+indistinguishable from an app without it. Measured on Finder: `--depth=6` gave
+2000 controls, `--depth=12` gave 41, `--depth=30` gave 32 - depth-first plus a
+wall-clock deadline means a deeper walk spends its budget in the first large
+subtree. It says which limit stopped it now.
+
+**A persistent daemon does not exit like a one-shot.** `agent-browser open`
+launches a browser and leaves a daemon behind by design, so a wrapper that caps
+it and reads the exit code calls a working launch a failure - the log had twelve
+orphaned Chrome processes under the word FAIL. Gate on whether the window
+exists, which is a question something else can answer.
+
 **Bound everything.** A hang with no `timeout-minutes` cost 45 minutes of a
 Windows runner.
 
