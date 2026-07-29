@@ -54,6 +54,8 @@ jobs:
             panel.json
             after.json
             ab-snapshot.txt
+            open.log
+            windows.json
 
   # portless puts a local CA in the system trust store, which macOS gates behind
   # an authentication surface no synthetic event can answer.
@@ -82,7 +84,7 @@ jobs:
         with:
           name: portless-wall
           path: |
-            proxy-start.log
-            trust.log
+            proxy-tls.log
+            proxy-plain.log
             windows-during-trust.json
             securityagent.json
