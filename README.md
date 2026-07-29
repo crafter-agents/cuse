@@ -359,6 +359,12 @@ Chasing it found four bugs in cuse, which is the argument for doing it at all:
   and a bare "failure". A strict checker now runs before pushing, and every job
   has a deadline - learning that cost 45 minutes of a hung runner.
 
+## Handing this over
+
+`HANDOFF.md` has what a diff cannot carry: every real bug found and its root
+cause, what each runner actually provides, the traps that cost time, and what is
+left to do.
+
 ## Status
 
 v2 is a TypeScript rewrite of the original bash spike, kept as
