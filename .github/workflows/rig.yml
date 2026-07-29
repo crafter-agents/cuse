@@ -90,6 +90,15 @@ jobs:
           npm install -g appium
           appium driver install xcuitest || appium driver list --installed
 
+      # Missing this is what produced four wrong diagnoses. The daemon's own log
+      # says `[chrome-search] browsers_dir does not exist`: with -p ios it still
+      # resolves a browser at startup, and there was none installed because this
+      # step only existed in the other job. Whether that resolution *should*
+      # happen for an iOS session is a question for whoever owns it - but it
+      # cannot be asked until the browser is there.
+      - name: install the browser the daemon looks for even with -p ios
+        run: agent-browser install --with-deps || agent-browser install || true
+
       - name: drive a simulator
         run: |
           chmod +x rig/agent-browser-ios.sh
