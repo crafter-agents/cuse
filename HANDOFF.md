@@ -174,9 +174,13 @@ Bun installed, so publishing that is a different promise from the binaries.
 
 **Then, roughly in order:**
 
-- **Windows input beyond a self-made target.** Every Windows input proof uses a
-  WinForms window this repo creates. A real third-party app would be better
-  evidence.
+- ~~**Windows input beyond a self-made target.**~~ Done: `windows-third-party`
+  drives Character Map, which Microsoft ships and this repo did not write. The
+  clipboard is seeded with a sentinel and required to change, so the gate cannot
+  pass on a button that resolved and never fired. It reads `button 'Select'` and
+  `button 'Copy'` out of a `#32770` dialog and the clipboard comes back `!!`.
+  Recon first: charmap, mspaint, regedit and osk are on the runner; `write` and
+  `wordpad` are gone.
 - **`elements` on macOS reads the tree directly now** (`src/macax.ts`), because
   slow-ish turned out to be too generous: Finder did not answer at all, it hit
   cuse's deadline and came back as a timeout. Through the C API it is 300
