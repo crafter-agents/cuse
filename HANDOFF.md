@@ -82,6 +82,13 @@ was unusable. Role resolution takes the platform now, and a selector is read in
 cuse's own vocabulary rather than a toolkit's.
 *Lesson: the same word in two vocabularies needs to know which one it is in.*
 
+**A template match was treated as an absolute coordinate.** Windows copies the
+whole virtual screen starting at its own origin, which is negative when a
+monitor sits left of or above the primary, so a hit 40px into the frame is at
+x=-1880 and not x=40. The frame's origin is carried now instead of assumed.
+*Lesson: two coordinate spaces that coincide on the developer's machine are
+still two spaces.*
+
 **A template with no structure cannot be located.** A patch of blank text box was
 found 65px from where it was cut, with a perfect score, because the score was a
 mean pixel distance and every blank patch matches every other. Correlation plus a
@@ -163,8 +170,11 @@ clone and build, which excludes almost everyone.
 - **`elements` on macOS is slow-ish** (1.3s for 56 controls) because every
   attribute is an Apple Event. Bulk queries already helped; a native AX binding
   through FFI would help more.
-- **Multiple monitors** are not handled anywhere: `screen` reports one frame and
-  one scale.
+- **Multiple monitors** are handled but unproven: no runner has two screens, so
+  the layout maths is unit-tested and nothing more. Worth checking by hand on a
+  real second monitor, especially the macOS flip (NSScreen measures up from the
+  bottom-left of the main screen, clicks measure down from its top-left) and the
+  Windows virtual-screen origin, which is negative with a monitor to the left.
 - **Wayland** is unsupported and will stay so until someone needs it.
 - **`record` is stills, not video.** For a bug that only appears mid-animation, an
   actual capture would be better.
@@ -172,7 +182,7 @@ clone and build, which excludes almost everyone.
 ## How to work on it
 
 ```sh
-bun test                                        # 238, all pure
+bun test                                        # 261, all pure
 python3 scenarios/check-workflows.py .github/workflows/*.yml
 bun run build && ./dist/cuse --help
 ```

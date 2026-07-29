@@ -57,6 +57,7 @@ export function parseArgs(argv: string[]): Parsed {
     window: flag("window"),
     find: flag("find"),
     minScore: num(flag("min-score")),
+    display: num(flag("display")),
     expectFront: flag("expect-front"),
     element: flag("element"),
     role: flag("role"),
