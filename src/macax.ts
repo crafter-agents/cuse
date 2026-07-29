@@ -180,9 +180,38 @@ export function elementsOfPid(pid: number, limit = 300, maxDepth = 12,
     cf.CFRelease(kids);
   };
 
-  // Windows, not the application element: an app's own children include its
-  // menu bar, which is hundreds of nodes nobody asked about and would eat the
-  // whole node budget before reaching the window.
+  // The focused window first, and separately, because a modal panel is often
+  // not in AXWindows at all. macOS raises the file panel out of process, and
+  // from the browser's element it appears as a childless `dialog` node while its
+  // real contents - sidebar, column browser, Cancel and Open - hang off
+  // AXFocusedWindow. Walking only AXWindows found the dialog and none of its
+  // controls, which reads exactly like a panel with no buttons in it.
+  // Guarded by its role. `AXFocusedWindow` does not always answer with a window:
+  // asked of some applications it hands back something whose subtree is the menu
+  // bar, and walking that put a hundred menu items in front of the controls
+  // anyone actually asked for.
+  const roleOf = (el: bigint): string => {
+    const v = copyAttr(el, "AXRole");
+    if (!v) return "";
+    const r = toStr(v);
+    cf.CFRelease(v);
+    return r;
+  };
+  for (const attr of ["AXFocusedWindow", "AXMainWindow"]) {
+    const el = copyAttr(app, attr);
+    if (!el) continue;
+    const role = roleOf(el);
+    // Guarded by role: asked of some applications these hand back the element
+    // whose subtree is the menu bar, and walking that puts a hundred menu items
+    // in front of the controls anyone asked for.
+    if (/^AX(Window|Sheet|Dialog|Popover)$/.test(role)) walk(el, 0);
+    else console.error(`cuse: ${attr} is a ${role || "?"}, not a window; skipping it`);
+    cf.CFRelease(el);
+  }
+
+  // Then the ordinary windows. Not the application element itself: its children
+  // include the menu bar, hundreds of nodes nobody asked about, which would eat
+  // the whole budget before reaching a window.
   const wins = copyAttr(app, "AXWindows");
   if (wins) {
     if (cf.CFGetTypeID(wins) === ARRAY_ID) {
@@ -195,5 +224,15 @@ export function elementsOfPid(pid: number, limit = 300, maxDepth = 12,
     cf.CFRelease(wins);
   }
   cf.CFRelease(app);
-  return { rows, stopped };
+  // The focused window is usually also in AXWindows, so the same control can be
+  // collected twice. Identical role, name and rectangle is the same control for
+  // every purpose a caller has.
+  const seen = new Set<string>();
+  const unique = rows.filter((r) => {
+    const k = `${r.role}|${r.name}|${r.x}|${r.y}|${r.width}|${r.height}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return { rows: unique, stopped };
 }
