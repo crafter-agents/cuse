@@ -206,8 +206,16 @@ async function macElements(app: string, timeoutMs: number,
   if (!target) {
     throw new Error(`no running application matching '${app}' - what is running: ${describeApps(apps)}`);
   }
-  const raw = ax.elementsOfPid(target.pid, limit ?? 300, depth ?? 12, Date.now() + timeoutMs);
-  return { els: raw.map((e) => ({
+  const walk = ax.elementsOfPid(target.pid, limit ?? 300, depth ?? 12, Date.now() + timeoutMs);
+  // A tree that stopped early is missing controls, and a caller who cannot tell
+  // that apart from an app without them will conclude the wrong thing.
+  const truncated = walk.stopped === "deadline"
+    ? `the walk ran out of time after ${walk.rows.length} controls - there is more of this tree ` +
+      `than was read (raise --timeout, or narrow it with --depth)`
+    : walk.stopped === "limit"
+    ? `stopped at the --limit of ${limit ?? 300} controls - this tree is bigger than that`
+    : undefined;
+  return { note: truncated, els: walk.rows.map((e) => ({
     rawRole: e.role,
     role: normalizeRole(e.role, "macos"),
     name: e.name,
