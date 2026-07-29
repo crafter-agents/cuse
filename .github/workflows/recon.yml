@@ -86,3 +86,33 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scenarios/win-recon.ps1
+
+      # Every Windows input proof so far drives a WinForms window this repo
+      # creates, which is the bias the rest of this file exists to remove. Which
+      # applications the runner already has decides whether that can change.
+      - name: windows - is there a third-party app to drive
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          foreach ($n in 'charmap','mspaint','write','wordpad','regedit','calc','explorer','notepad','osk','magnify','cleanmgr','dxdiag') {
+            $p = (Get-Command "$n.exe" -ErrorAction SilentlyContinue).Source
+            if (-not $p) { $p = "$env:SystemRoot\System32\$n.exe"; if (-not (Test-Path $p)) { $p = $null } }
+            if ($p) {
+              $len = (Get-Item $p).Length
+              # A zero-byte file on the PATH is an App Execution Alias, which is
+              # how `notepad` starts nothing at all on Server SKUs.
+              Write-Output ("HAVE {0,-9} {1,10} bytes  {2}" -f $n, $len, $p)
+            } else { Write-Output ("MISS {0}" -f $n) }
+          }
+          Write-Output "### does charmap actually open a window"
+          $proc = Start-Process charmap -PassThru -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 4
+          if ($proc) {
+            Write-Output "started pid=$($proc.Id) hasExited=$($proc.HasExited)"
+            Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+            $root = [System.Windows.Automation.AutomationElement]::RootElement
+            foreach ($w in $root.FindAll('Children', [System.Windows.Automation.Condition]::TrueCondition)) {
+              Write-Output ("window: '{0}' {1}" -f $w.Current.Name, $w.Current.ClassName)
+            }
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          } else { Write-Output "charmap did not start" }
