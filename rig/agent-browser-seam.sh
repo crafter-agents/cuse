@@ -73,16 +73,48 @@ echo "--- click the file input, which hands over to the OS ---"
 cap 25 "$AB" click "#f" >/dev/null 2>&1 || true
 sleep 3
 
-# 1. The panel exists. Named by role rather than by title, because the panel's
-#    window title differs across macOS versions.
+# 1. The panel exists, and is identifiable as a panel.
+#    The first version grepped for a control named Cancel and passed on Chrome's
+#    own chrome: 217 controls came back, one of them matched, and the click
+#    landed on an 81x18 box at 81,18 - the top-left corner of the window. A name
+#    that common is not an identification.
 echo "--- 1. did a native panel appear ---"
 "$CUSE" elements "Google Chrome" --json > panel.json || fail "cuse could not read Chrome's tree"
-head -c 400 panel.json; echo
-grep -q '"name":"Cancel"' panel.json || {
-  echo "controls cuse did see:"; grep -oE '"name":"[^"]{1,30}"' panel.json | sort -u | head -20
-  fail "no Cancel button: the click did not raise a file panel"
+echo "--- windows on screen ---"
+"$CUSE" windows --json > windows-after-click.json || true
+head -c 500 windows-after-click.json; echo
+echo "--- distinct controls cuse can see ---"
+bun -e '
+  const els = (await Bun.file("panel.json").json()).data ?? [];
+  const seen = new Map();
+  for (const e of els) {
+    const k = `${e.role}|${e.name}`;
+    if (!seen.has(k)) seen.set(k, e);
+  }
+  console.log(`${els.length} controls, ${seen.size} distinct role+name`);
+  for (const [k, e] of [...seen].slice(0, 60)) {
+    console.log(`  ${e.role.padEnd(12)} ${JSON.stringify(e.name).padEnd(34)} ${e.width}x${e.height} at ${e.x},${e.y}`);
+  }
+  // An NSOpenPanel is identifiable by its structure, not by one common word:
+  // a window titled Open, a sidebar outline, or a column browser.
+  const panel = els.find((e) =>
+    (e.role === "window" && /^open$/i.test(e.name)) ||
+    (/outline|browser/.test(e.role) && /sidebar|column/i.test(e.name)) ||
+    /column view/i.test(e.name));
+  if (!panel) {
+    console.log("NO-PANEL");
+  } else {
+    console.log(`PANEL ${panel.role} ${JSON.stringify(panel.name)} at ${panel.x},${panel.y}`);
+  }
+' | tee panel-summary.txt
+
+grep -q "^PANEL " panel-summary.txt || {
+  echo "clicking the file input did not produce a panel cuse can identify."
+  echo "That is the finding: either the click never reached the input, or the"
+  echo "panel is not in this process tree. The dump above is the evidence."
+  fail "no identifiable file panel"
 }
-echo "a native panel is up, and cuse names its controls"
+echo "a native panel is up, and cuse can pick it out of the tree"
 
 # 2. CDP cannot see it. agent-browser's own snapshot is the witness.
 echo "--- 2. can agent-browser see it ---"
@@ -93,15 +125,41 @@ if grep -qiE "\bCancel\b|openAndSavePanel|NSOpenPanel" ab-snapshot.txt; then
 fi
 echo "agent-browser's snapshot does not contain the panel, as expected"
 
-# 3. cuse can act on it. Pressing Cancel is the smallest real action, and the
-#    panel going away is the oracle - nothing else makes it disappear.
-echo "--- 3. press Cancel in the out-of-process panel ---"
-"$CUSE" click --element=Cancel --role=button --app="Google Chrome" --json || fail "cuse could not press Cancel"
-sleep 2
+# 3. cuse can act on it. The Cancel that matters is the one inside the panel's
+#    rectangle - Chrome has its own, and picking by name alone is what made the
+#    first attempt click the corner of the window.
+echo "--- 3. press the panel's own Cancel ---"
+read -r CX CY < <(bun -e '
+  const els = (await Bun.file("panel.json").json()).data ?? [];
+  const panel = els.find((e) =>
+    (e.role === "window" && /^open$/i.test(e.name)) ||
+    (/outline|browser/.test(e.role) && /sidebar|column/i.test(e.name)) ||
+    /column view/i.test(e.name));
+  if (!panel) throw new Error("panel vanished between steps");
+  const inside = (e) =>
+    e.x >= panel.x - 400 && e.y >= panel.y - 200 &&
+    e.x + e.width <= panel.x + panel.width + 400 &&
+    e.y + e.height <= panel.y + panel.height + 200;
+  const cancel = els.filter((e) => e.role === "button" && /^cancel$/i.test(e.name) && inside(e))
+                    .sort((a, b) => a.width * a.height - b.width * b.height)[0];
+  if (!cancel) throw new Error("no Cancel button inside the panel");
+  console.log(`${Math.round(cancel.x + cancel.width / 2)} ${Math.round(cancel.y + cancel.height / 2)}`);
+') || fail "could not locate the panel's Cancel button"
+echo "clicking $CX,$CY"
+"$CUSE" click "$CX" "$CY" --json || fail "cuse could not click"
+sleep 3
+
 "$CUSE" elements "Google Chrome" --json > after.json || true
-if grep -q '"name":"Cancel"' after.json; then
-  fail "Cancel was pressed and the panel is still there"
-fi
+bun -e '
+  const els = (await Bun.file("after.json").json()).data ?? [];
+  const panel = els.find((e) =>
+    (e.role === "window" && /^open$/i.test(e.name)) ||
+    (/outline|browser/.test(e.role) && /sidebar|column/i.test(e.name)) ||
+    /column view/i.test(e.name));
+  console.log(panel ? "STILL-THERE" : "GONE");
+' | tee after-summary.txt
+
+grep -q "^GONE" after-summary.txt || fail "Cancel was pressed and the panel is still there"
 echo "the panel is gone: cuse acted on a surface agent-browser cannot reach"
 
 echo "VERDICT: PASS"

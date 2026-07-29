@@ -56,6 +56,9 @@ jobs:
             ab-snapshot.txt
             open.log
             windows.json
+            windows-after-click.json
+            panel-summary.txt
+            after-summary.txt
 
   # The mobile cell. agent-browser has a whole iOS Simulator backend and no test
   # anywhere: its own CI runs every end-to-end check on ubuntu, and the macOS

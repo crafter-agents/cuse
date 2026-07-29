@@ -60,8 +60,21 @@ echo "<!doctype html><title>cuse rig ios</title><h1>$SENTINEL</h1>" > "rig/serve
 # http.server logs every request line to stderr; that log is the ground truth.
 python3 -m http.server "$PORT" --directory rig/served > server.log 2>&1 &
 SERVER_PID=$!
-sleep 2
-curl -fsS "http://localhost:$PORT/$SENTINEL.html" >/dev/null || fail "the local server is not serving"
+# Wait for readiness rather than guessing. The first attempt slept two seconds
+# and failed on a runner that had just installed Appium and spent 90s on a hung
+# command; python had not finished starting.
+ready=""
+for i in $(seq 1 30); do
+  curl -fsS -m 3 "http://localhost:$PORT/$SENTINEL.html" >/dev/null 2>&1 && { ready=y; break; }
+  sleep 1
+done
+[ -n "$ready" ] || {
+  echo "python3: $(command -v python3 || echo missing)"
+  echo "--- server log ---"; cat server.log 2>/dev/null
+  echo "--- who holds the port ---"; lsof -i ":$PORT" 2>/dev/null | head
+  fail "the local server never came up on $PORT"
+}
+echo "server is up after the readiness wait"
 
 echo "--- before ---"
 xcrun simctl io booted screenshot ios-before.png 2>/dev/null || echo "(no booted device yet, expected)"
