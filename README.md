@@ -195,6 +195,12 @@ One caveat worth knowing: on Windows the first click on an inactive window
 activates it and goes no further, so CI resolves the Save button and presses it
 with two clicks for exactly that reason.
 
+The Windows gates drive Character Map as well as a window this repo builds, on
+the grounds that a target you wrote answers the way you expected. It is a
+classic Win32 dialog Microsoft ships; cuse reads `button 'Select'` and `button
+'Copy'` out of it, presses them, and the clipboard - seeded with a sentinel
+first, so the check cannot pass on a stale one - comes back holding characters.
+
 WinForms answers `Pane` for every control through UI Automation, which used to
 make `--role` useless there. The same controls describe themselves properly
 through the older IAccessible interface, so cuse asks both and prefers whichever

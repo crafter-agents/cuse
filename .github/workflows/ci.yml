@@ -361,6 +361,61 @@ jobs:
             windows.json
             zenity-out.txt
 
+  # Every other Windows proof drives a window this repo builds for the purpose,
+  # which is the bias the rest of this file exists to remove: a target you wrote
+  # answers the way you expected. Character Map is shipped by Microsoft, is a
+  # classic Win32 dialog rather than a Store package, and has what is needed to
+  # prove a semantic click - a button with a name and a clipboard to write to.
+  #
+  # The oracle is the clipboard, seeded with a sentinel first. Requiring it to
+  # change means the check cannot pass on an empty clipboard, a stale one, or a
+  # click that resolved perfectly and pressed nothing.
+  windows-third-party:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun build --compile src/cli.ts --outfile cuse
+      - name: drive an application nobody here wrote
+        shell: bash
+        run: |
+          powershell -NoProfile -Command "Set-Clipboard -Value 'CUSE_NOTHING_HAPPENED'"
+          powershell -NoProfile -Command "Start-Process charmap" &
+          ./cuse wait --window="Character Map" --timeout=30000 --json
+          ./cuse focus "Character Map" --json
+          ./cuse elements "Character Map" --json | tee charmap.json
+          # A real Win32 app names its controls, unlike the WinForms target that
+          # answers Pane for everything.
+          grep -q '"role":"button"' charmap.json || {
+            echo "no button role in a native Win32 dialog; what came back:"
+            grep -oE '"rawRole":"[^"]*"' charmap.json | sort -u; exit 1; }
+          # Twice, each: on Windows the first click on an inactive window only
+          # activates it. Select copies the highlighted character into the field,
+          # Copy puts the field on the clipboard.
+          ./cuse click --element=Select --role=button --app="Character Map" --json
+          sleep 1
+          ./cuse click --element=Select --role=button --app="Character Map" --json
+          sleep 1
+          ./cuse click --element=Copy --role=button --app="Character Map" --json
+          sleep 1
+          ./cuse click --element=Copy --role=button --app="Character Map" --json
+          sleep 2
+          got=$(powershell -NoProfile -Command "Get-Clipboard" | tr -d '\r\n')
+          echo "clipboard now: '$got'"
+          [ -n "$got" ] || { echo "the clipboard is empty: nothing was pressed"; exit 1; }
+          [ "$got" != "CUSE_NOTHING_HAPPENED" ] || {
+            echo "the clipboard still holds the sentinel: the buttons resolved but never fired"
+            ./cuse frontmost --json || true
+            exit 1; }
+          echo "pressed a button in an application this repo did not write"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-third-party
+          path: charmap.json
+
   # A real defect in shipped software, reproduced with cuse as the instrument.
   # `notepad` on the PATH is an App Execution Alias whose Store package Server
   # SKUs do not provision: the process starts, every API reports success, and no
