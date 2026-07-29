@@ -98,6 +98,18 @@ describe("asking each platform", () => {
       expect(elementsCmd(os, "x", 42).join(" ")).toContain("42");
     }
   });
+  // The rig found this: an NSOpenPanel's buttons nest deeper than twelve levels
+  // inside Chrome's tree, so the panel was identified and its Cancel was not in
+  // the dump at all.
+  test("how deep to walk is a parameter, not a constant", () => {
+    expect(elementsCmd("linux", "x", 300, 20).join(" ")).toContain("depth > 20");
+    expect(elementsCmd("linux", "x", 300).join(" ")).toContain("depth > 12");
+  });
+  test("the AppleScript fallback keeps its own tighter ceiling", () => {
+    // Every level costs Apple Events there, which is why that route was
+    // replaced; asking it for twenty is asking for a timeout.
+    expect(elementsCmd("macos", "x", 300, 20).join(" ")).toContain("depth > 8");
+  });
   test("an app name with a quote cannot break out of the script", () => {
     expect(elementsCmd("windows", "it's").join(" ")).toContain("it''s");
   });

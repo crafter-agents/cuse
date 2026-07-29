@@ -128,7 +128,7 @@ function plainRole(raw: string): string {
  * Capped, because an accessibility tree can be enormous and an agent waiting on
  * a full walk of a browser window is an agent that has hung.
  */
-export function elementsCmd(os: OS, app: string, limit = 300): string[] {
+export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): string[] {
   switch (os) {
     // Not here: the macOS tree is read through the accessibility API in
     // `macax.ts`, not through System Events. Every attribute asked for through
@@ -159,7 +159,7 @@ export function elementsCmd(os: OS, app: string, limit = 300): string[] {
       'end run\n' +
       'on walk(el, depth)\n' +
       '  set out to ""\n' +
-      `  if seen > ${limit} or depth > 6 then return out\n` +
+      `  if seen > ${limit} or depth > ${Math.min(depth, 8)} then return out\n` +
       '  tell application "System Events"\n' +
       '    set kids to {}\n' +
       '    try\n' +
@@ -306,7 +306,7 @@ export function elementsCmd(os: OS, app: string, limit = 300): string[] {
       "n = 0\n" +
       "def walk(node, ox, oy, depth):\n" +
       "    global n\n" +
-      `    if n > ${limit} or depth > 12:\n` +
+      `    if n > ${limit} or depth > ${depth}:\n` +
       "        return\n" +
       "    try:\n" +
       "        ext = node.queryComponent().getExtents(pyatspi.WINDOW_COORDS)\n" +
