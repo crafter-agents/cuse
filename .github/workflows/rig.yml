@@ -10,8 +10,27 @@ name: rig
 # Not on every push. A macOS runner bills at ten times a Linux one and these
 # install browsers and proxies, so they run nightly and on demand. A gate that
 # gets deleted for slowing the build protects nothing.
+# On demand it is a reproduction machine: pick the version, pick the cell, or
+# point it at a pull request and it builds that instead. A report saying "0.32.3
+# does this and 0.33.1 does not" cannot be answered by a workflow with the
+# version baked in.
 on:
   workflow_dispatch:
+    inputs:
+      cells:
+        description: "which cells to run"
+        type: choice
+        default: all
+        options: [all, seam, ios, portless]
+      agent_browser_version:
+        description: "agent-browser version from npm (ignored when a PR is given)"
+        default: "0.33.1"
+      agent_browser_pr:
+        description: "build agent-browser from this vercel-labs PR instead of npm"
+        default: ""
+      portless_version:
+        description: "portless version from npm"
+        default: "0.15.4"
   schedule:
     - cron: "17 5 * * *"
   push:
@@ -19,23 +38,36 @@ on:
       - "rig/**"
       - ".github/workflows/rig.yml"
 
+# A scheduled or push run has no inputs, and must behave as it always did.
+env:
+  CELLS: ${{ github.event.inputs.cells || 'all' }}
+  AB_VERSION: ${{ github.event.inputs.agent_browser_version || '0.33.1' }}
+  AB_PR: ${{ github.event.inputs.agent_browser_pr || '' }}
+  PORTLESS_VERSION: ${{ github.event.inputs.portless_version || '0.15.4' }}
+
 jobs:
   # agent-browser handles web content through CDP. A file input hands control to
   # the operating system, and the panel that appears is not in the DOM.
   agent-browser-seam:
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.cells == 'all' || github.event.inputs.cells == 'seam'
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      # Only needed when building a pull request; free when installing from npm.
+      - uses: dtolnay/rust-toolchain@stable
+        if: env.AB_PR != ''
       - run: bun build --compile src/cli.ts --outfile cuse
 
-      - name: install agent-browser from npm
+      - name: install the agent-browser under test
         run: |
-          bun add -g agent-browser@0.33.1
-          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
-      - name: what version is under test
+          chmod +x rig/install-agent-browser.sh
+          ./rig/install-agent-browser.sh
+      - name: what is under test
         run: agent-browser --version || true
 
       - name: install the browser it drives
@@ -68,8 +100,11 @@ jobs:
   # anywhere: its own CI runs every end-to-end check on ubuntu, and the macOS
   # runners only compile. An untested backend is a hypothesis.
   agent-browser-ios:
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.cells == 'all' || github.event.inputs.cells == 'ios'
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -81,10 +116,12 @@ jobs:
           xcodebuild -version || true
           xcrun simctl list runtimes | head -10 || true
 
-      - name: install agent-browser and the driver it needs
+      - uses: dtolnay/rust-toolchain@stable
+        if: env.AB_PR != ''
+      - name: install the agent-browser under test, and the driver it needs
         run: |
-          bun add -g agent-browser@0.33.1
-          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          chmod +x rig/install-agent-browser.sh
+          ./rig/install-agent-browser.sh
           # agent-browser launches Appium itself and reuses one already
           # listening on 4723, so this only has to exist on PATH.
           npm install -g appium
@@ -128,6 +165,9 @@ jobs:
   # portless puts a local CA in the system trust store, which macOS gates behind
   # an authentication surface no synthetic event can answer.
   portless-wall:
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.cells == 'all' || github.event.inputs.cells == 'portless'
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -136,9 +176,10 @@ jobs:
         with: { bun-version: latest }
       - run: bun build --compile src/cli.ts --outfile cuse
 
-      - name: install portless from npm
+      - name: install the portless under test
         run: |
-          bun add -g portless@0.15.4
+          echo "portless@$PORTLESS_VERSION"
+          bun add -g "portless@$PORTLESS_VERSION"
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
       - run: portless --version || true
 

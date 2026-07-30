@@ -323,6 +323,22 @@ bun test          # 275 tests, the agnostic core
 bun run build     # compile a standalone binary to dist/cuse
 ```
 
+## Reproducing an issue in someone else's tool
+
+The `rig` workflow installs published tools and drives them where the operating
+system takes over. On demand it takes the version, the cell, or a pull request
+number - which makes it usable for the question a bug report actually asks.
+
+```sh
+gh workflow run rig.yml -f cells=ios -f agent_browser_version=0.32.3
+gh workflow run rig.yml -f cells=seam -f agent_browser_pr=1451
+```
+
+Each cell asserts with an oracle outside the tool under test: a server that logs
+who fetched a page, a certificate the system either trusts or does not, a panel
+that is in the accessibility tree or is not. That is the difference between
+asking a tool whether it worked and finding out.
+
 ## Known limits
 
 - macOS needs Screen Recording permission for the calling terminal. Without it
