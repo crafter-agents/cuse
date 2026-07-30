@@ -36,6 +36,8 @@ pixels. Assume the same about anything you add.
 | `src/wait.ts`, `src/args.ts` | waiting, and one parser shared with `serve` |
 | `scenarios/` | what CI drives; the interesting ones are the repro pair |
 | `scenarios/linux-local.sh` | the Linux a11y gate in a container, for iterating off CI |
+| `rig/` | published third-party tools, driven where the OS takes over |
+| `rig/install-agent-browser.sh` | one version from npm, or the build of a pull request |
 
 Everything except `cli.ts` and `macos.ts` is pure and unit-tested. Keep it that
 way: it is why the argv for three platforms can be asserted from one laptop.
@@ -224,6 +226,25 @@ Bun installed, so publishing that is a different promise from the binaries.
   tool makes. Not gated in CI: recording on the macOS runner would summon the
   Screen Recording prompt the input job is careful to avoid, and installing
   ffmpeg on the Linux job costs more than the check is worth.
+
+## Reproducing someone else's issue
+
+`rig.yml` is a reproduction machine on demand. Pick the cell, pick the version,
+or give it a pull request number and it builds that instead of installing from
+npm - read-only against the upstream repository, never pushing.
+
+```sh
+gh workflow run rig.yml -f cells=ios -f agent_browser_version=0.32.3
+gh workflow run rig.yml -f cells=seam -f agent_browser_pr=1451
+```
+
+Scheduled and push runs take the defaults and behave as they always did. Every
+cell uploads its evidence: the request log with User-Agents, the daemon's own
+state files, element dumps, screenshots.
+
+What it is good for is issues on operating-system surfaces - the point where a
+tool stops being able to see itself. What it does not do is prove a web-only
+bug; that is what the tool's own suite is for.
 
 ## How to work on it
 
