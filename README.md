@@ -418,8 +418,14 @@ left to do.
 
 ## Status
 
-v2 is a TypeScript rewrite of the original bash spike, kept as
-`bin/cu-legacy.sh` under its original name. CI runs the unit tests, a capture gate and an input gate on
-macOS, Linux and Windows, and a `recon` workflow that reports what each runner
-actually provides — which is where the dependency and Windows decisions above
-came from. Built by Kai.
+**0.1.0 is the first public release.** The code called itself 2.x for a while -
+it is a TypeScript rewrite of the original bash spike, kept as
+`bin/cu-legacy.sh` under its original name - but nothing was ever published
+under those numbers, and the two files carrying them had drifted apart. A first
+release that claims 2.3.0 with no history behind it says the numbers were
+invented, which is exactly what happened, so it starts at 0.1.0 instead.
+
+CI runs the unit tests and nine gates on macOS, Linux and Windows; a `rig`
+workflow drives published third-party tools where the operating system takes
+over; and a `recon` workflow reports what each runner actually provides, which
+is where the dependency and Windows decisions above came from. Built by Kai.

@@ -737,7 +737,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
   }
 }
 
-export const VERSION = "2.3.0";
+export const VERSION = "0.1.0";
 
 /**
  * One process, many commands.
