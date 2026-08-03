@@ -19,12 +19,32 @@ for candidate in ./dist/cuse ./bin/cuse ./bin/cu; do
   [ -x "$candidate" ] && { CU="$candidate"; break; }
 done
 if [ -z "$CU" ] && command -v cuse >/dev/null 2>&1; then CU="$(command -v cuse)"; fi
-if [ -z "$CU" ] && command -v bun >/dev/null 2>&1 && [ -f src/cli.ts ]; then
-  echo "no built binary; running from source with bun"
-  CU="bun run src/cli.ts"
+# A fresh checkout has src/ and no dist/: dist is gitignored, and the runner is
+# not required to arrive with a toolchain. So build it here rather than assume
+# somebody else did. Verified 2026-08-03: repro-farm clones the target and runs
+# the scenario directly, with no setup step, so a scenario that only looks for a
+# prebuilt binary can never work there.
+if [ -z "$CU" ] && [ -f src/cli.ts ]; then
+  if ! command -v bun >/dev/null 2>&1; then
+    echo "no bun on PATH; installing it (needed to build cuse from source)"
+    curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1
+    export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
+    export PATH="$BUN_INSTALL/bin:$PATH"
+  fi
+  if command -v bun >/dev/null 2>&1; then
+    echo "building from source with $(bun --version)"
+    if bun build --compile src/cli.ts --outfile dist/cuse >/dev/null 2>&1 && [ -x dist/cuse ]; then
+      CU="./dist/cuse"
+    else
+      # Compiling can fail where running does not, so fall back rather than
+      # give up: the point is to exercise cuse, not to prove the build works.
+      echo "compile failed; running from source instead"
+      CU="bun run src/cli.ts"
+    fi
+  fi
 fi
 if [ -z "$CU" ]; then
-  echo "FAIL: no cuse binary found (looked for dist/cuse, bin/cuse, bin/cu, cuse on PATH, src/cli.ts with bun)"
+  echo "FAIL: no cuse binary found and could not build one (looked for dist/cuse, bin/cuse, bin/cu, cuse on PATH, and building src/cli.ts with bun)"
   echo "=== VERDICT ==="
   echo "CU-INCOMPLETE"
   exit 1
