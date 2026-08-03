@@ -354,9 +354,29 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
  */
 async function pointScale(os: OS, frameWidth: number): Promise<number> {
   if (os !== "macos") return 1;
-  const r = await runWithTimeout(["osascript", "-e",
-    'tell application "Finder" to get bounds of window of desktop'], 5000);
-  const logical = Number(r.stdout.split(",")[2]);
+
+  // Ask the window server, not Finder. The old path asked Finder for the bounds
+  // of the desktop window, which reads as the obvious question but routes
+  // through an application that can be busy, hidden, or not answering Apple
+  // events at all. Measured on a healthy M4: that AppleScript did not return
+  // within two minutes, so every `cuse screen` spent the full 5000 ms timeout
+  // and then fell back to scale 1. The command still answered correctly, which
+  // is why nobody noticed a metadata call costing five seconds.
+  //
+  // NSScreen.backingScaleFactor is the same number the compositor uses, needs no
+  // application to be running, and measured 71 ms.
+  const r = await runWithTimeout(["osascript", "-l", "JavaScript", "-e",
+    'ObjC.import("AppKit");' +
+    "String($.NSScreen.screens.objectAtIndex(0).backingScaleFactor)"], 5000);
+  const scale = Number(r.stdout.trim());
+  if (Number.isFinite(scale) && scale > 0) return Math.round(scale);
+
+  // Fall back to the ratio only if the window server did not answer: a frame
+  // wider than the logical desktop still implies the scale.
+  const f = await runWithTimeout(["osascript", "-l", "JavaScript", "-e",
+    'ObjC.import("AppKit");' +
+    "String($.NSScreen.screens.objectAtIndex(0).frame.size.width)"], 5000);
+  const logical = Number(f.stdout.trim());
   if (!Number.isFinite(logical) || logical <= 0) return 1;
   const ratio = frameWidth / logical;
   // Only trust a clean integer ratio; anything else means the guess is wrong.
