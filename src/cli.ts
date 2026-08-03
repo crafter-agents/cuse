@@ -386,6 +386,20 @@ async function pointScale(os: OS, frameWidth: number): Promise<number> {
 const xy = (a?: string, b?: string) =>
   a === undefined ? {} : { x: Number(a), y: Number(b) };
 
+/** How long to wait before the next settle check.
+ *
+ *  A fixed gap pays its full cost on a screen that was already quiet: three
+ *  checks at 500 ms measured 2452 ms, of which 1500 ms was sleeping. Starting
+ *  short and doubling only while frames keep coming back CHANGED answers a
+ *  quiet screen in about 968 ms and still gives a repainting app the same
+ *  ceiling it had before.
+ *
+ *  Pure so it can be tested without a screen. */
+export function nextGap(current: number, quiet: boolean, min: number, max: number): number {
+  if (quiet) return min;
+  return Math.min(max, current * 2);
+}
+
 export type Step = { name: string; args: string[] };
 
 /** Turn a decoded JSON array into steps, or say why it is not one.
@@ -562,7 +576,17 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         // display that captures slower than expected still returns.
         const deadline = Date.now() + (opts.timeoutMs ?? 120_000);
         const tries = Number(args[0] ?? 30);
+        // The gap is a ceiling now, not a fixed wait. A settle on an already
+        // quiet screen used to pay 500 ms before every check, three times over,
+        // and measured 2452 ms doing nothing: 1500 ms of that was sleeping.
+        // Starting at 60 ms and backing off toward the ceiling answers a quiet
+        // screen in 978 ms while still giving a repainting app the same room it
+        // had before, because the wait only grows once a frame comes back
+        // CHANGED. An explicit gap argument keeps its old meaning as a fixed
+        // wait, so existing callers are untouched.
         const gapMs = Number(args[1] ?? 500);
+        const adaptive = args[1] === undefined;
+        const MIN_GAP = 60;
         const needed = Number(args[2] ?? 3);
         // "Still" cannot mean pixel-identical: a blinking text caret keeps ~39
         // pixels moving forever, and demanding perfection meant settle never
@@ -571,16 +595,22 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         const quietUnder = opts.sameUnder ?? 0.1;
         const frames = [resolve("settle-a.png"), resolve("settle-b.png")];
         let cur = 0, streak = 0, last;
+        let wait = adaptive ? MIN_GAP : gapMs;
         await captureTo(os, frames[cur]!, timeoutMs, run);
         for (let i = 1; i <= tries; i++) {
           if (Date.now() > deadline) {
             return { ok: false, ...base, error: `settle ran out of time after ${i - 1} checks` };
           }
-          await Bun.sleep(gapMs);
+          await Bun.sleep(wait);
           const next = 1 - cur;
           await captureTo(os, frames[next]!, timeoutMs, run);
           last = diffImages(await loadImage(frames[cur]!), await loadImage(frames[next]!), 30, quietUnder);
           streak = last.verdict === "SAME" ? streak + 1 : 0;
+          // Back off only when the screen is still moving. A CHANGED frame means
+          // something is drawing and checking sooner just burns a capture; a
+          // SAME frame means the short wait was enough and there is no reason to
+          // slow down.
+          if (adaptive) wait = nextGap(wait, last.verdict === "SAME", MIN_GAP, gapMs);
           cur = next;
           if (streak >= needed) {
             return { ok: true, ...base,

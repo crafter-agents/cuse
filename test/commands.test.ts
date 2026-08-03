@@ -6,7 +6,7 @@ import {
 } from "../src/commands.ts";
 import { movePlan, clickPlan, dragPlan, scrollPlan } from "../src/plan.ts";
 import { preflight, frameWarning, requiredTool } from "../src/preflight.ts";
-import { parseSteps } from "../src/cli.ts";
+import { parseSteps, nextGap } from "../src/cli.ts";
 import { parseMacLockState, parseWindowsLockState, isSessionLocked, LOCK_QUERY, LOCKED_REASON } from "../src/session.ts";
 import type { OS } from "../src/os.ts";
 
@@ -429,5 +429,31 @@ describe("run: parsing a batch of actions", () => {
     expect("steps" in r).toBe(true);
     if (!("steps" in r)) return;
     expect(r.steps.length).toBe(0);
+  });
+});
+
+// settle used to sleep a fixed 500 ms before every check, so an already quiet
+// screen paid 1500 ms doing nothing. The wait now starts short and only grows
+// while the screen is still moving.
+describe("settle backs off only while the screen moves", () => {
+  test("a quiet frame drops straight back to the floor", () => {
+    expect(nextGap(480, true, 60, 500)).toBe(60);
+  });
+
+  test("a changed frame doubles the wait", () => {
+    expect(nextGap(60, false, 60, 500)).toBe(120);
+    expect(nextGap(120, false, 60, 500)).toBe(240);
+  });
+
+  test("never waits longer than the ceiling", () => {
+    expect(nextGap(400, false, 60, 500)).toBe(500);
+    expect(nextGap(500, false, 60, 500)).toBe(500);
+  });
+
+  test("a screen that never settles converges on the old fixed gap", () => {
+    let g = 60;
+    for (let i = 0; i < 10; i++) g = nextGap(g, false, 60, 500);
+    // The point of the ceiling: worst case is what the old code always did.
+    expect(g).toBe(500);
   });
 });
