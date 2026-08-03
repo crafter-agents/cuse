@@ -13,7 +13,7 @@ import { dlopen, FFIType as T, type Pointer } from "bun:ffi";
 const CG_PATH = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
 const CF_PATH = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
 
-const LEFT_DOWN = 1, LEFT_UP = 2;   // CGEventType
+const LEFT_DOWN = 1, LEFT_UP = 2, LEFT_DRAGGED = 6; // CGEventType
 const CLICK_STATE = 1;              // CGEventField.kCGMouseEventClickState
 const HID_TAP = 0;                  // CGEventTapLocation.kCGHIDEventTap
 const UNIT_LINE = 1;                // CGScrollEventUnit.kCGScrollEventUnitLine
@@ -70,6 +70,23 @@ export function click(count: number, x?: number, y?: number): void {
     }
   }
   cf.CFRelease(event);
+}
+
+export function drag(fromX: number, fromY: number, toX: number, toY: number): void {
+  const { cg, cf } = syms();
+  warp(fromX, fromY);
+
+  const points: Array<[number, number, number]> = [
+    [LEFT_DOWN, fromX, fromY],
+    [LEFT_DRAGGED, (fromX + toX) / 2, (fromY + toY) / 2],
+    [LEFT_DRAGGED, toX, toY],
+    [LEFT_UP, toX, toY],
+  ];
+  for (const [type, x, y] of points) {
+    const event = need(cg.CGEventCreateMouseEvent(null, type, x, y, 0), "drag event");
+    cg.CGEventPost(HID_TAP, event);
+    cf.CFRelease(event);
+  }
 }
 
 export function scroll(lines: number): void {

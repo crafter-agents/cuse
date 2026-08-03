@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { inflateSync, deflateSync } from "node:zlib";
 import { detectOS, chordToOS, type OS } from "./os.ts";
 import { captureCmd, typeCmd, launchCmd, focusCmd, comboKey, videoCmd } from "./commands.ts";
-import { movePlan, clickPlan, scrollPlan, type Plan } from "./plan.ts";
+import { movePlan, clickPlan, dragPlan, scrollPlan, type Plan } from "./plan.ts";
 import { preflight, frameWarning, INPUT_ACTIONS, type Probe } from "./preflight.ts";
 import { isSessionLocked, blindNote, LOCK_QUERY, LOCKED_REASON } from "./session.ts";
 import { decodePNG, diffImages, isUniform, readHeader, type Image } from "./png.ts";
@@ -86,6 +86,7 @@ async function execute(plan: Plan, run: (argv: string[]) => Promise<void>): Prom
       const mac = await import("./macos.ts");
       if (plan.op === "warp") return mac.warp(plan.x, plan.y);
       if (plan.op === "click") return mac.click(plan.count, plan.x, plan.y);
+      if (plan.op === "drag") return mac.drag(plan.fromX, plan.fromY, plan.toX, plan.toY);
       return mac.scroll(plan.lines);
     }
   }
@@ -704,6 +705,12 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           : await resolveTarget(os, opts, timeoutMs, run);
         await execute(movePlan(os, t.x, t.y), run);
         return { ok: true, ...base, detail: `moved to ${t.how}`, data: { x: t.x, y: t.y } };
+      }
+      case "drag": {
+        const [fromX, fromY, toX, toY] = args.slice(0, 4).map(Number);
+        await execute(dragPlan(os, fromX!, fromY!, toX!, toY!), run);
+        return { ok: true, ...base, detail: `dragged ${fromX},${fromY} to ${toX},${toY}`,
+          data: { fromX, fromY, toX, toY } };
       }
       case "click": case "dblclick": {
         const count = action === "dblclick" ? 2 : 1;

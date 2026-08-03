@@ -4,7 +4,7 @@ import {
   captureCmd, typeCmd, launchCmd, focusCmd, comboKey, videoCmd,
   escapeAppleScript, escapePowerShell, escapeSendKeys,
 } from "../src/commands.ts";
-import { movePlan, clickPlan, scrollPlan } from "../src/plan.ts";
+import { movePlan, clickPlan, dragPlan, scrollPlan } from "../src/plan.ts";
 import { preflight, frameWarning, requiredTool } from "../src/preflight.ts";
 import { parseMacLockState, parseWindowsLockState, isSessionLocked, LOCK_QUERY, LOCKED_REASON } from "../src/session.ts";
 import type { OS } from "../src/os.ts";
@@ -154,6 +154,30 @@ describe("mouse plans", () => {
     const l = clickPlan("linux", 2);
     if (l.kind === "exec-many") expect(l.argvs.at(-1)).toEqual(["xdotool", "click", "--repeat", "2", "1"]);
   });
+  test("macOS drag carries both points to the native backend", () => {
+    expect(dragPlan("macos", 1, 2, 30, 40)).toEqual({
+      kind: "native", op: "drag", fromX: 1, fromY: 2, toX: 30, toY: 40,
+    });
+  });
+  test("linux drag holds the left button while moving", () => {
+    expect(dragPlan("linux", 1, 2, 30, 40)).toEqual({ kind: "exec-many", argvs: [
+      ["xdotool", "mousemove", "1", "2"],
+      ["xdotool", "mousedown", "1"],
+      ["xdotool", "mousemove", "30", "40"],
+      ["xdotool", "mouseup", "1"],
+    ] });
+  });
+  test("windows drag presses, moves, and releases through user32", () => {
+    const plan = dragPlan("windows", 1, 2, 30, 40);
+    expect(plan.kind).toBe("exec");
+    if (plan.kind === "exec") {
+      const script = plan.argv.join(" ");
+      expect(script).toContain("Point(1,2)");
+      expect(script).toContain("mouse_event(2");
+      expect(script).toContain("Point(30,40)");
+      expect(script).toContain("mouse_event(4");
+    }
+  });
   test("scroll direction maps to sign on macOS and to buttons on linux", () => {
     expect(scrollPlan("macos", "up", 3)).toEqual({ kind: "native", op: "scroll", lines: 3 });
     expect(scrollPlan("macos", "down", 3)).toEqual({ kind: "native", op: "scroll", lines: -3 });
@@ -165,6 +189,7 @@ describe("mouse plans", () => {
     for (const os of OSES) {
       expect(movePlan(os, 1, 1)).toBeDefined();
       expect(clickPlan(os, 1, 1, 1)).toBeDefined();
+      expect(dragPlan(os, 1, 1, 2, 2)).toBeDefined();
       expect(scrollPlan(os, "down", 1)).toBeDefined();
     }
   });
@@ -191,14 +216,14 @@ describe("preflight", () => {
     if (!r.ok) expect(r.reason).toContain("x11-apps");
   });
   test("every linux input action needs xdotool, the mouse ones included", () => {
-    for (const a of ["type", "key", "click", "dblclick", "move", "scroll", "copy"]) {
+    for (const a of ["type", "key", "click", "dblclick", "move", "drag", "scroll", "copy"]) {
       const r = preflight("linux", a, withEnv({ DISPLAY: ":99" }, ["xwd"]));
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.reason).toContain("xdotool");
     }
   });
   test("macOS needs nothing installed, mouse included", () => {
-    for (const a of ["capture", "type", "click", "move", "scroll"]) {
+    for (const a of ["capture", "type", "click", "move", "drag", "scroll"]) {
       expect(requiredTool("macos", a)).toBeNull();
       expect(preflight("macos", a, withEnv({})).ok).toBe(true);
     }
