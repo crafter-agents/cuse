@@ -76,6 +76,43 @@ if [ -z "$OS" ]; then
 fi
 echo "=== cuse self-test on $OS ==="
 
+# Linux runners are headless: there is no X server, so capture returns nothing
+# and every input action has nowhere to go. Dispatched on 2026-08-03 that showed
+# up as six honest failures on ubuntu while macos and windows passed.
+#
+# The repo already knows the answer. .github/workflows/release.yml and
+# scenarios/linux-local.sh both drive cuse through xvfb-run with the same
+# server args, so this reuses that recipe rather than inventing a second one.
+# Re-exec once under a virtual display, guarded so the second pass does not try
+# again.
+if [ "$OS" = "linux" ] && [ -z "${DISPLAY:-}" ] && [ -z "${CUSE_SELFTEST_XVFB:-}" ]; then
+  # A display is necessary but not sufficient: cuse reaches X through xwd and
+  # xdotool, and a bare runner has neither. Install what is missing before
+  # re-execing, so the run does not fail six checks for a reason that one
+  # apt-get line answers. Best effort: if apt is unavailable the checks below
+  # will say exactly which tool was missing.
+  missing=""
+  for tool in xvfb-run xwd xdotool xterm; do
+    command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+  done
+  if [ -n "$missing" ] && command -v apt-get >/dev/null 2>&1; then
+    echo "installing X tooling for headless linux:$missing"
+    sudo apt-get update -qq >/dev/null 2>&1 || true
+    sudo apt-get install -y -qq xvfb x11-apps xdotool xterm >/dev/null 2>&1 || true
+  fi
+  if command -v xvfb-run >/dev/null 2>&1; then
+    echo "headless linux: re-running under xvfb-run"
+    export CUSE_SELFTEST_XVFB=1
+    exec xvfb-run -a --server-args="-screen 0 1280x1024x24" bash "${BASH_SOURCE[0]}" "$@"
+  fi
+  # Say what is missing instead of failing six checks that all mean one thing.
+  echo "SKIP-ALL: headless linux with no xvfb-run; cuse needs an X server here"
+  echo "  install it with: apt-get install -y xvfb"
+  echo "=== VERDICT ==="
+  echo "CU-INCOMPLETE on linux: no display and no xvfb-run to provide one"
+  exit 1
+fi
+
 fails=0
 skipped=0
 note() { echo "$1"; }
