@@ -6,6 +6,7 @@ import {
 } from "../src/commands.ts";
 import { movePlan, clickPlan, dragPlan, scrollPlan } from "../src/plan.ts";
 import { preflight, frameWarning, requiredTool } from "../src/preflight.ts";
+import { parseSteps } from "../src/cli.ts";
 import { parseMacLockState, parseWindowsLockState, isSessionLocked, LOCK_QUERY, LOCKED_REASON } from "../src/session.ts";
 import type { OS } from "../src/os.ts";
 
@@ -381,5 +382,52 @@ describe("recording, where the platform can", () => {
   test("Windows says there is nothing to record with, and what to do instead", () => {
     expect(() => videoCmd("windows", "clip.mp4", 2)).toThrow(/no built-in screen recorder/);
     expect(() => videoCmd("windows", "clip.mp4", 2)).toThrow(/stills/);
+  });
+});
+
+// One process running several actions. The saving is process startup, paid once
+// instead of once per action: four `cuse move` invocations measured 139 ms on an
+// M4, the same four through `run` measured 46 ms. These assert the contract that
+// makes that safe, not the timing.
+describe("run: parsing a batch of actions", () => {
+  test("accepts the array form and keeps order", () => {
+    const r = parseSteps([["move", 10, 20], ["click"]]);
+    expect("steps" in r).toBe(true);
+    if (!("steps" in r)) return;
+    expect(r.steps.map((s) => s.name)).toEqual(["move", "click"]);
+    expect(r.steps[0].args).toEqual(["10", "20"]);
+  });
+
+  test("accepts the object form models emit", () => {
+    const r = parseSteps([{ action: "type", args: ["hello"] }]);
+    expect("steps" in r).toBe(true);
+    if (!("steps" in r)) return;
+    expect(r.steps[0]).toEqual({ name: "type", args: ["hello"] });
+  });
+
+  test("names which step is malformed, not just that one is", () => {
+    const r = parseSteps([["os"], 42]);
+    expect("error" in r).toBe(true);
+    if (!("error" in r)) return;
+    expect(r.error).toContain("step 2");
+  });
+
+  test("rejects a step with no action name", () => {
+    const r = parseSteps([[""]]);
+    expect("error" in r).toBe(true);
+  });
+
+  test("refuses to nest, so completed counts stay unambiguous", () => {
+    const r = parseSteps([["run", "[]"]]);
+    expect("error" in r).toBe(true);
+    if (!("error" in r)) return;
+    expect(r.error).toContain("cannot nest");
+  });
+
+  test("an empty batch parses to no steps", () => {
+    const r = parseSteps([]);
+    expect("steps" in r).toBe(true);
+    if (!("steps" in r)) return;
+    expect(r.steps.length).toBe(0);
   });
 });

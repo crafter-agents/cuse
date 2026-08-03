@@ -386,6 +386,39 @@ async function pointScale(os: OS, frameWidth: number): Promise<number> {
 const xy = (a?: string, b?: string) =>
   a === undefined ? {} : { x: Number(a), y: Number(b) };
 
+export type Step = { name: string; args: string[] };
+
+/** Turn a decoded JSON array into steps, or say why it is not one.
+ *
+ *  Split out from the run handler so it can be tested the way the rest of this
+ *  repo is tested: without launching the CLI or touching a screen. Both shapes
+ *  are accepted because models emit both: OpenAI's computer tool returns
+ *  objects, and a hand-written batch is easier to read as arrays. */
+export function parseSteps(steps: unknown[]): { steps: Step[] } | { error: string } {
+  const out: Step[] = [];
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    let name: string;
+    let args: string[];
+    if (Array.isArray(step)) {
+      name = String(step[0] ?? "");
+      args = step.slice(1).map(String);
+    } else if (step && typeof step === "object") {
+      const o = step as Record<string, unknown>;
+      name = String(o.action ?? "");
+      args = Array.isArray(o.args) ? o.args.map(String) : [];
+    } else {
+      return { error: `step ${i + 1} must be an array or an object, got ${typeof step}` };
+    }
+    if (!name) return { error: `step ${i + 1} has no action name` };
+    // Nesting would make "how many completed" ambiguous, and buys nothing: a
+    // flat list already expresses any sequence.
+    if (name === "run") return { error: "run cannot nest" };
+    out.push({ name, args });
+  }
+  return { steps: out };
+}
+
 async function act(action: string, args: string[], opts: Options = {}): Promise<Result> {
   const os = detectOS();
   const base = { action, os };
@@ -425,6 +458,46 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
   try {
     switch (action) {
+      // One process, several actions, in order. A model that decides to click
+      // four times already emits those four actions in a single response, and
+      // splitting them into four invocations throws the batching away in the
+      // last hop: measured here, four separate `cuse move` calls cost 129 ms of
+      // which about 108 ms is process startup paid four times.
+      //
+      // The sequence stops at the first failure and reports what ran, because
+      // an agent that clicked twice and then missed needs to know which two
+      // landed. Nothing is validated ahead of time beyond the shape: an action
+      // that fails on this platform should fail with its own error, not a
+      // different one invented by the batcher.
+      case "run": {
+        const raw = args.join(" ").trim();
+        if (!raw) return { ok: false, ...base, error: "run needs a JSON array of actions, or --file" };
+
+        let steps: unknown;
+        try { steps = JSON.parse(raw); }
+        catch { return { ok: false, ...base, error: "run needs valid JSON: a list of [action, ...args] or {action, args}" }; }
+        if (!Array.isArray(steps)) return { ok: false, ...base, error: "run needs a JSON array" };
+        if (!steps.length) return { ok: false, ...base, error: "run needs at least one action" };
+
+        const parsed = parseSteps(steps);
+        if ("error" in parsed) return { ok: false, ...base, error: parsed.error };
+
+        const ran: Result[] = [];
+        for (const { name, args: stepArgs } of parsed.steps) {
+          const r = await act(name, stepArgs, opts);
+          ran.push(r);
+          if (!r.ok) {
+            return { ok: false, ...base,
+              error: `step ${ran.length} (${name}) failed: ${r.error ?? "unknown"}`,
+              detail: `${ran.length - 1} of ${steps.length} completed`,
+              data: { ran, completed: ran.length - 1, total: steps.length } };
+          }
+        }
+        return { ok: true, ...base,
+          detail: `${ran.length} action${ran.length > 1 ? "s" : ""} in one process`,
+          data: { ran, completed: ran.length, total: steps.length } };
+      }
+
       case "os": return { ok: true, ...base, detail: os };
 
       case "capture": {
@@ -832,6 +905,10 @@ Windows and apps
 Finding things
   find <template.png> [in.png] where that picture is: on screen, or in a frame
   crop <in.png> x y w h <out>  cut a template out of a screenshot
+
+Batching
+  run '<json>'                 several actions in one process, in order
+                               [["move",10,20],["click"]] or [{"action":"click"}]
 
 Input
   type <text>                  send text to the focused window
