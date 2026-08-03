@@ -103,7 +103,12 @@ if [ "$OS" = "linux" ] && [ -z "${DISPLAY:-}" ] && [ -z "${CUSE_SELFTEST_XVFB:-}
   if command -v xvfb-run >/dev/null 2>&1; then
     echo "headless linux: re-running under xvfb-run"
     export CUSE_SELFTEST_XVFB=1
-    exec xvfb-run -a --server-args="-screen 0 1280x1024x24" bash "${BASH_SOURCE[0]}" "$@"
+    # SCENARIO_DIR, not BASH_SOURCE: the script already cd'd to the repo root, so
+    # the relative path it was invoked with no longer resolves. Observed on
+    # ubuntu 2026-08-03, from the artifact: "bash:
+    # target/scenarios/cuse-selftest.sh: No such file or directory" right after
+    # the re-exec line.
+    exec xvfb-run -a --server-args="-screen 0 1280x1024x24" bash "$SCENARIO_DIR/$(basename "${BASH_SOURCE[0]}")" "$@"
   fi
   # Say what is missing instead of failing six checks that all mean one thing.
   echo "SKIP-ALL: headless linux with no xvfb-run; cuse needs an X server here"
