@@ -11,7 +11,7 @@ export type Probe = {
   has: (tool: string) => boolean;
 };
 
-export const INPUT_ACTIONS = ["type", "key", "move", "scroll", "click", "dblclick", "select-all", "copy", "paste"];
+export const INPUT_ACTIONS = ["type", "key", "move", "drag", "scroll", "click", "dblclick", "select-all", "copy", "paste"];
 
 /** Actions that drive a window but are not keystrokes, so no lock guard. */
 export const WINDOW_ACTIONS = ["launch", "focus"];

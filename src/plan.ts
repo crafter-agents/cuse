@@ -11,6 +11,7 @@ export type Plan =
   | { kind: "exec-many"; argvs: string[][] }
   | { kind: "native"; op: "warp"; x: number; y: number }
   | { kind: "native"; op: "click"; x?: number; y?: number; count: number }
+  | { kind: "native"; op: "drag"; fromX: number; fromY: number; toX: number; toY: number }
   | { kind: "native"; op: "scroll"; lines: number };
 
 const ps = (script: string) => ["powershell", "-NoProfile", "-Command", script];
@@ -51,6 +52,27 @@ export function clickPlan(os: OS, count: number, x?: number, y?: number): Plan {
     }
     case "windows": return { kind: "exec", argv: WIN_CLICK(count, x, y) };
     default: throw new Error(`click unsupported on ${os}`);
+  }
+}
+
+export function dragPlan(os: OS, fromX: number, fromY: number, toX: number, toY: number): Plan {
+  switch (os) {
+    case "macos": return { kind: "native", op: "drag", fromX, fromY, toX, toY };
+    case "linux": return { kind: "exec-many", argvs: [
+      ["xdotool", "mousemove", String(fromX), String(fromY)],
+      ["xdotool", "mousedown", "1"],
+      ["xdotool", "mousemove", String(toX), String(toY)],
+      ["xdotool", "mouseup", "1"],
+    ] };
+    case "windows": return { kind: "exec", argv: ps(
+      `$ErrorActionPreference='Stop';` +
+      `Add-Type -AssemblyName System.Windows.Forms,System.Drawing;` +
+      `Add-Type 'using System;using System.Runtime.InteropServices;public class M{[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,int e);}';` +
+      `[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(${fromX},${fromY});` +
+      `Start-Sleep -Milliseconds 60;[M]::mouse_event(2,0,0,0,0);` +
+      `Start-Sleep -Milliseconds 60;[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(${toX},${toY});` +
+      `Start-Sleep -Milliseconds 60;[M]::mouse_event(4,0,0,0,0);`) };
+    default: throw new Error(`drag unsupported on ${os}`);
   }
 }
 
