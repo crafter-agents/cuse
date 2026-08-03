@@ -13,6 +13,19 @@
 # worse than a red.
 set -uo pipefail
 
+# Run from the repo root, whatever the caller's directory is. repro-farm invokes
+# this as `target/scenarios/cuse-selftest.sh` from the workspace root, so every
+# relative path below (src/cli.ts, dist/cuse) resolved against the wrong
+# directory and the build block never even ran: the three runners reported
+# "could not build one" without printing a single line from inside it.
+#
+# A scenario that only works when invoked from one directory is not a scenario,
+# it is a local script with a coincidence.
+SCENARIO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCENARIO_DIR")"
+cd "$REPO_ROOT" || { echo "FAIL: cannot enter repo root $REPO_ROOT"; echo "=== VERDICT ==="; echo "CU-INCOMPLETE"; exit 1; }
+echo "repo root: $REPO_ROOT"
+
 # Build from source when there is no binary: a checkout has src/, not dist/.
 CU=""
 for candidate in ./dist/cuse ./bin/cuse ./bin/cu; do
