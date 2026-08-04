@@ -945,6 +945,7 @@ Input
   key <chord>                  e.g. cmd+s, ctrl+shift+a, Return
   move <x> <y>                 move the cursor
   click | dblclick [x] [y]     click; or aim with --window / --find
+  drag <x1> <y1> <x2> <y2>     hold the button from one point to another
   scroll <up|down> [amount]    scroll the view under the cursor
   select-all | copy | paste    the platform's own chord for each
 
