@@ -208,6 +208,14 @@ says something - `Pane|43` becomes `button`.
 
 ## Waiting for a thing, not for a duration
 
+`settle` used to sleep a fixed interval before every check, so a screen that was
+already quiet paid the full wait three times over: 2452 ms of which 1500 ms was
+sleeping. It now starts at 60 ms and doubles only while frames keep coming back
+CHANGED, capped at the same ceiling. A quiet screen answers in about 968 ms, and
+a repainting app gets exactly the room it had before.
+
+Passing an explicit gap keeps its old meaning as a fixed wait.
+
 Every desktop script is full of sleeps, and each one is a guess: too short on a
 slow machine, wasted time on a fast one. `wait` polls for the thing itself.
 
@@ -229,6 +237,25 @@ list until the document shows up - and a loop like that in a caller is usually a
 tool missing a verb.
 
 ## One process, many commands
+
+Two shapes, and they are not the same tool. `run` takes a list, executes it in
+one process and exits, each action independent:
+
+```console
+$ cuse run '[["move",100,100],["click"],["type","hello"]]'
+{"ok":true,"action":"run","detail":"3 actions in one process"}
+```
+
+It stops at the first failure and says how many landed, because an agent that
+clicked once and then missed needs that distinction:
+
+```json
+{"ok": false, "error": "step 2 (click) failed: ...",
+ "data": {"completed": 1, "total": 3}}
+```
+
+`serve` keeps the process open and remembers state between lines, so an app
+selected once applies to everything after.
 
 An agent doing twenty things paid for twenty process starts and re-enumerated
 the desktop each time. `serve` reads one command per line and answers with one
