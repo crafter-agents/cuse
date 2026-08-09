@@ -1,5 +1,7 @@
 import { test, expect, describe } from "bun:test";
-import { act, exitCodeFor, VERSION, type Result } from "../src/cli.ts";
+import { act, exitCodeFor, fillTarget, VERSION, type Result } from "../src/cli.ts";
+import type { OS } from "../src/os.ts";
+import type { Plan } from "../src/plan.ts";
 
 const r = (over: Partial<Result>): Result => ({ ok: false, action: "type", os: "macos", ...over });
 
@@ -36,4 +38,38 @@ test("click rejects an unknown modifier before dispatch", async () => {
   const result = await act("click", [], { modifiers: "ctrl+bogus" });
   expect(result).toMatchObject({ ok: false,
     error: "invalid --modifiers='ctrl+bogus': unknown modifier 'bogus'" });
+});
+
+test("fill refuses to type without an aimed target", async () => {
+  const result = await act("fill", ["hello"]);
+  expect(result).toMatchObject({ ok: false,
+    error: "fill needs --element=<name>, --role=<kind>, --window=<name>, --find=<template.png>, or coordinates" });
+  expect(exitCodeFor(result)).toBe(2);
+});
+
+test("fill requires a complete coordinate pair", async () => {
+  const result = await act("fill", ["hello", "40"], { element: "Name" });
+  expect(result).toMatchObject({ ok: false, error: "fill coordinates need both <x> and <y>" });
+  expect(exitCodeFor(result)).toBe(2);
+});
+
+test("fill dispatches click, platform select-all, then type on every OS", async () => {
+  for (const os of ["macos", "linux", "windows"] as OS[]) {
+    const events: Array<{ kind: "plan"; value: Plan } | { kind: "run"; value: string[] }> = [];
+    const run = async (argv: string[]) => { events.push({ kind: "run", value: argv }); };
+    const perform = async (plan: Plan) => { events.push({ kind: "plan", value: plan }); };
+
+    await fillTarget(os, "new value", 40, 60, run, perform);
+
+    expect(events).toHaveLength(3);
+    expect(events[0]).toEqual({ kind: "plan", value: expect.objectContaining(
+      os === "macos"
+        ? { kind: "native", op: "click", count: 1, x: 40, y: 60 }
+        : { kind: os === "linux" ? "exec-many" : "exec" }) });
+    expect(events[1]).toEqual({ kind: "run", value: expect.any(Array) });
+    expect(events[2]).toEqual({ kind: "run", value: expect.any(Array) });
+    expect((events[1] as { kind: "run"; value: string[] }).value.join(" ")).toContain(
+      os === "macos" ? "command down" : os === "linux" ? "ctrl+a" : "^a");
+    expect((events[2] as { kind: "run"; value: string[] }).value.join(" ")).toContain("new value");
+  }
 });

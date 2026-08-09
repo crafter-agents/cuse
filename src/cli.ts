@@ -96,6 +96,15 @@ async function execute(plan: Plan, run: (argv: string[]) => Promise<void>): Prom
   }
 }
 
+/** Focus an aimed field, replace its contents, and type the requested value. */
+export async function fillTarget(os: OS, text: string, x: number, y: number,
+                                 run: (argv: string[]) => Promise<void>,
+                                 perform: typeof execute = execute): Promise<void> {
+  await perform(clickPlan(os, 1, x, y), run);
+  await run(chordToOS(os, comboKey(os, "select-all")).cmd);
+  await run(typeCmd(os, text));
+}
+
 const inflate = (d: Uint8Array) => new Uint8Array(inflateSync(d));
 const deflate = (d: Uint8Array) => new Uint8Array(deflateSync(d));
 
@@ -440,6 +449,18 @@ export function parseSteps(steps: unknown[]): { steps: Step[] } | { error: strin
 async function act(action: string, args: string[], opts: Options = {}): Promise<Result> {
   const os = detectOS();
   const base = { action, os };
+  if (action === "fill") {
+    const aimed = opts.window || opts.find || opts.element || opts.role;
+    const hasOneCoordinate = (args[1] !== undefined) !== (args[2] !== undefined);
+    if (hasOneCoordinate) {
+      return { ok: false, ...base, error: "fill coordinates need both <x> and <y>" };
+    }
+    const hasCoordinates = args[1] !== undefined && args[2] !== undefined;
+    if (!aimed && !hasCoordinates) {
+      return { ok: false, ...base,
+        error: "fill needs --element=<name>, --role=<kind>, --window=<name>, --find=<template.png>, or coordinates" };
+    }
+  }
   if (["click", "dblclick"].includes(action) && opts.button &&
       !["left", "right", "middle"].includes(opts.button)) {
     return { ok: false, ...base,
@@ -459,13 +480,13 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
   // Fail before touching the machine, with the reason and the fix, not an opaque
   // exit code from a missing binary or an absent display.
   if (!["os", "diff"].includes(action)) {
-    const pre = preflight(os, action, probe);
+    const pre = preflight(os, action === "fill" ? "click" : action, probe);
     if (!pre.ok) return { ok: false, ...base, error: pre.reason };
   }
 
   // Nothing typed at a login window ever helps. Only a definite "locked"
   // blocks; an unreadable session state is not treated as one.
-  if (INPUT_ACTIONS.includes(action) && !force) {
+  if ((INPUT_ACTIONS.includes(action) || action === "fill") && !force) {
     const locked = await isSessionLocked({ os, read: () => readLockState(os) });
     if (locked === true) return { ok: false, ...base, error: LOCKED_REASON };
   }
@@ -473,7 +494,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
   // The same problem one layer up: the session is unlocked, but a dialog took
   // focus and would receive the keystrokes instead. Opt-in, because cuse cannot
   // know what the caller meant to type at.
-  if (opts.expectFront && INPUT_ACTIONS.includes(action) && !force) {
+  if (opts.expectFront && (INPUT_ACTIONS.includes(action) || action === "fill") && !force) {
     try {
       const argv = frontmostCmd(os);
       const r = await runWithTimeout(argv, 5000);
@@ -834,6 +855,15 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       }
 
       case "type": { await run(typeCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: "typed" }; }
+      case "fill": {
+        const aimed = opts.window || opts.find || opts.element || opts.role;
+        const t = args[1] !== undefined
+          ? { x: Number(args[1]), y: Number(args[2]), how: `${args[1]},${args[2]}` }
+          : aimed ? await resolveTarget(os, opts, timeoutMs, run) : null;
+        if (!t) throw new Error("fill has no target");
+        await fillTarget(os, args[0] ?? "", t.x, t.y, run);
+        return { ok: true, ...base, detail: `filled at ${t.how}`, data: { x: t.x, y: t.y } };
+      }
       case "focus": { await run(focusCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: `focused ${args[0]}` }; }
       case "launch": { await run(launchCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: `launched ${args[0]}` }; }
       case "key": { await run(chordToOS(os, args[0] ?? "").cmd); return { ok: true, ...base, detail: `sent ${args[0]}` }; }
@@ -960,6 +990,7 @@ Batching
 
 Input
   type <text>                  send text to the focused window
+  fill <text> [x] [y]         replace text in an aimed control
   key <chord>                  e.g. cmd+s, ctrl+shift+a, Return
   move <x> <y>                 move the cursor
   click | dblclick [x] [y]     click; or aim with --window / --find
@@ -1002,7 +1033,7 @@ Exit codes
 export function exitCodeFor(r: Result): number {
   if (r.ok) return 0;
   const e = r.error ?? "";
-  if (/^unknown action|needs two PNG paths|^invalid --button=|^invalid --modifiers=/.test(e)) return 2;
+  if (/^unknown action|needs two PNG paths|^fill (needs|coordinates need) |^invalid --button=|^invalid --modifiers=/.test(e)) return 2;
   if (/did not finish within|ran out of time|never went quiet/.test(e)) return 3;
   if (/not found:|DISPLAY is unset|session is locked|unsupported platform/.test(e)) return 4;
   return 1;
