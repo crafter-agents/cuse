@@ -59,10 +59,18 @@ test("ocr-read requires an image path", async () => {
   expect(exitCodeFor(result)).toBe(2);
 });
 
-test("ocr-read recognizes text through Vision", async () => {
+test("ocr-read recognizes text through Vision or refuses an unsupported OS", async () => {
   const result = await act("ocr-read", ["test/fixtures/ocr-sample.png"], {});
-  expect(result.ok).toBe(true);
-  expect((result.data as { lines: string[] }).lines.some((line) => /Hello Vision 123/.test(line))).toBe(true);
+  if (result.os === "macos") {
+    expect(result.ok).toBe(true);
+    expect((result.data as { lines: string[] }).lines.some((line) => /Hello Vision 123/.test(line))).toBe(true);
+  } else {
+    expect(result).toMatchObject({
+      ok: false,
+      error: `ocr-read unsupported on ${result.os} - not yet built`,
+    });
+    expect(exitCodeFor(result)).toBe(4);
+  }
 }, 30_000);
 
 test("fill dispatches click, platform select-all, then type on every OS", async () => {

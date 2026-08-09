@@ -480,7 +480,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
   // Fail before touching the machine, with the reason and the fix, not an opaque
   // exit code from a missing binary or an absent display.
-  if (!["os", "diff"].includes(action)) {
+  if (!["os", "diff", "ocr-read"].includes(action)) {
     const pre = preflight(os, action === "fill" ? "click" : action, probe);
     if (!pre.ok) return { ok: false, ...base, error: pre.reason };
   }
@@ -1046,7 +1046,7 @@ export function exitCodeFor(r: Result): number {
   const e = r.error ?? "";
   if (/^unknown action|needs two PNG paths|^ocr-read needs|^fill (needs|coordinates need) |^invalid --button=|^invalid --modifiers=/.test(e)) return 2;
   if (/did not finish within|ran out of time|never went quiet/.test(e)) return 3;
-  if (/not found:|DISPLAY is unset|session is locked|unsupported platform/.test(e)) return 4;
+  if (/not found:|DISPLAY is unset|session is locked|unsupported (on|platform)/.test(e)) return 4;
   return 1;
 }
 
