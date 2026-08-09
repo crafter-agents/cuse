@@ -67,6 +67,7 @@ export function parseArgs(argv: string[]): Parsed {
     role: flag("role"),
     app: flag("app"),
     button: flag("button"),
+    modifiers: flag("modifiers"),
     at: atRaw ? (atRaw.split(",").map(Number) as [number, number]) : undefined,
   };
 

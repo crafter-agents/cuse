@@ -142,7 +142,7 @@ describe("mouse plans", () => {
     if (w.kind === "exec") expect(w.argv.join(" ")).toContain("Point(10,20)");
   });
   test("click without coordinates does not invent a position", () => {
-    expect(clickPlan("macos", 1)).toEqual({ kind: "native", op: "click", x: undefined, y: undefined, count: 1, button: "left" });
+    expect(clickPlan("macos", 1)).toEqual({ kind: "native", op: "click", x: undefined, y: undefined, count: 1, button: "left", mods: [] });
     const l = clickPlan("linux", 1);
     if (l.kind === "exec-many") expect(l.argvs).toEqual([["xdotool", "click", "--repeat", "1", "1"]]);
   });
@@ -167,6 +167,27 @@ describe("mouse plans", () => {
     if (windows.kind === "exec") {
       expect(windows.argv.join(" ")).toContain("mouse_event(8,0,0,0,0)");
       expect(windows.argv.join(" ")).toContain("mouse_event(16,0,0,0,0)");
+    }
+  });
+  test("click modifiers reach every platform plan", () => {
+    expect(clickPlan("macos", 1, undefined, undefined, "left", ["CTRL", "opt", "meta"])).toMatchObject({
+      op: "click", mods: ["ctrl", "alt", "cmd"],
+    });
+    const linux = clickPlan("linux", 1, undefined, undefined, "left", ["ctrl", "meta"]);
+    if (linux.kind === "exec-many") {
+      expect(linux.argvs).toEqual([
+        ["xdotool", "keydown", "ctrl", "super"],
+        ["xdotool", "click", "--repeat", "1", "1"],
+        ["xdotool", "keyup", "super", "ctrl"],
+      ]);
+    }
+    const windows = clickPlan("windows", 1, undefined, undefined, "left", ["cmd", "shift", "alt"]);
+    if (windows.kind === "exec") {
+      const script = windows.argv.join(" ");
+      expect(script.indexOf("keybd_event(17,0,0,0)")).toBeLessThan(script.indexOf("mouse_event(2,0,0,0,0)"));
+      expect(script).toContain("keybd_event(16,0,0,0)");
+      expect(script).toContain("keybd_event(18,0,0,0)");
+      expect(script.indexOf("keybd_event(18,0,2,0)")).toBeGreaterThan(script.indexOf("mouse_event(4,0,0,0,0)"));
     }
   });
   test("macOS drag carries both points to the native backend", () => {

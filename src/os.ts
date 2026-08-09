@@ -4,6 +4,19 @@ import { canonicalKeyName, macKeyCode, windowsKey, linuxKey } from "./keys.ts";
 
 export type OS = "macos" | "linux" | "windows" | "unknown";
 
+export function normalizeMods(mods: string[]): string[] {
+  return mods.map((mod) => {
+    const lower = mod.toLowerCase();
+    if (lower === "meta") return "cmd";
+    if (lower === "opt") return "alt";
+    return lower;
+  });
+}
+
+export function hasMod(mods: string[], name: string): boolean {
+  return normalizeMods(mods).includes(normalizeMods([name])[0]!);
+}
+
 export function detectOS(platform: NodeJS.Platform = process.platform): OS {
   if (platform === "darwin") return "macos";
   if (platform === "linux") return "linux";
@@ -33,15 +46,16 @@ export function parseChord(chord: string): { mods: string[]; base: string } {
 
 /** How a modifier chord maps to each OS input plane. Pure. */
 export function chordToOS(os: OS, chord: string): { cmd: string[]; note?: string } {
-  const { mods, base } = parseChord(chord);
-  const has = (m: string) => mods.some((x) => x === m || (m === "cmd" && x === "meta"));
+  const parsed = parseChord(chord);
+  const mods = normalizeMods(parsed.mods);
+  const { base } = parsed;
 
   if (os === "macos") {
     const using: string[] = [];
-    if (has("cmd")) using.push("command down");
-    if (has("ctrl")) using.push("control down");
-    if (has("shift")) using.push("shift down");
-    if (has("alt") || has("opt")) using.push("option down");
+    if (hasMod(mods, "cmd")) using.push("command down");
+    if (hasMod(mods, "ctrl")) using.push("control down");
+    if (hasMod(mods, "shift")) using.push("shift down");
+    if (hasMod(mods, "alt")) using.push("option down");
     const usingClause = using.length ? ` using {${using.join(", ")}}` : "";
     // System Events cannot name Escape or the function keys; they go by code.
     const named = canonicalKeyName(base);
@@ -63,9 +77,9 @@ export function chordToOS(os: OS, chord: string): { cmd: string[]; note?: string
     // SendKeys: ^=ctrl %=alt +=shift; cmd -> ctrl. Prefixes are emitted in a
     // fixed order so the argv is stable to assert against.
     let prefix = "";
-    if (has("cmd") || has("ctrl")) prefix += "^";
-    if (has("alt")) prefix += "%";
-    if (has("shift")) prefix += "+";
+    if (hasMod(mods, "cmd") || hasMod(mods, "ctrl")) prefix += "^";
+    if (hasMod(mods, "alt")) prefix += "%";
+    if (hasMod(mods, "shift")) prefix += "+";
     // A named key has to be braced or SendKeys types its letters instead.
     const named = canonicalKeyName(base);
     const sk = prefix + (named ? windowsKey(named) : escapeSendKeys(base));

@@ -4,7 +4,7 @@
 
 import { resolve } from "node:path";
 import { inflateSync, deflateSync } from "node:zlib";
-import { detectOS, chordToOS, type OS } from "./os.ts";
+import { detectOS, chordToOS, normalizeMods, type OS } from "./os.ts";
 import { captureCmd, typeCmd, launchCmd, focusCmd, comboKey, videoCmd } from "./commands.ts";
 import { movePlan, clickPlan, dragPlan, scrollPlan, type MouseButton, type Plan } from "./plan.ts";
 import { preflight, frameWarning, INPUT_ACTIONS, type Probe } from "./preflight.ts";
@@ -44,6 +44,8 @@ export type Options = {
   app?: string;
   /** mouse button used by click and dblclick */
   button?: string;
+  /** modifier chord held during click and dblclick */
+  modifiers?: string;
   /** wait for the target to disappear rather than to appear */
   gone?: boolean;
   /** which screen to capture, 1-based, where the platform can pick one */
@@ -87,7 +89,7 @@ async function execute(plan: Plan, run: (argv: string[]) => Promise<void>): Prom
     case "native": {
       const mac = await import("./macos.ts");
       if (plan.op === "warp") return mac.warp(plan.x, plan.y);
-      if (plan.op === "click") return mac.click(plan.count, plan.x, plan.y, plan.button);
+      if (plan.op === "click") return mac.click(plan.count, plan.x, plan.y, plan.button, plan.mods);
       if (plan.op === "drag") return mac.drag(plan.fromX, plan.fromY, plan.toX, plan.toY);
       return mac.scroll(plan.lines);
     }
@@ -442,6 +444,13 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       !["left", "right", "middle"].includes(opts.button)) {
     return { ok: false, ...base,
       error: `invalid --button='${opts.button}': expected left, right, or middle` };
+  }
+  const modifierTokens = opts.modifiers?.split("+") ?? [];
+  const invalidModifier = modifierTokens.find((mod) =>
+    !["ctrl", "shift", "alt", "opt", "cmd", "meta"].includes(mod.toLowerCase()));
+  if (["click", "dblclick"].includes(action) && invalidModifier !== undefined) {
+    return { ok: false, ...base,
+      error: `invalid --modifiers='${opts.modifiers}': unknown modifier '${invalidModifier}'` };
   }
   const { force = false, sameUnder = 1 } = opts;
   const timeoutMs = timeoutFor(action, opts.timeoutMs);
@@ -845,13 +854,14 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       case "click": case "dblclick": {
         const count = action === "dblclick" ? 2 : 1;
         const button = (opts.button ?? "left") as MouseButton;
+        const modifiers = normalizeMods(modifierTokens);
         // Coordinates if given; otherwise aim at a window or a picture. A bare
         // click with neither still clicks wherever the cursor already is.
         const aimed = opts.window || opts.find || opts.element || opts.role;
         const t = args[0] !== undefined
           ? { x: Number(args[0]), y: Number(args[1]), how: `${args[0]},${args[1]}` }
           : aimed ? await resolveTarget(os, opts, timeoutMs, run) : null;
-        await execute(clickPlan(os, count, t?.x, t?.y, button), run);
+        await execute(clickPlan(os, count, t?.x, t?.y, button, modifiers), run);
         return { ok: true, ...base,
           detail: t ? `${action} at ${t.how}` : action,
           ...(t ? { data: { x: t.x, y: t.y } } : {}) };
@@ -969,6 +979,7 @@ Flags
   --element=<name>             aim at a control by its accessibility name
   --role=<kind>                narrow it: button, text, checkbox, link, ...
   --button=<left|right|middle> mouse button for click / dblclick (default left)
+  --modifiers=<chord>          modifiers held during click / dblclick, e.g. ctrl+shift
   --app=<name>                 which application's controls to look at
   --window=<name>              aim at a window instead of a coordinate
   --find=<template.png>        aim at whatever matches this picture
@@ -991,7 +1002,7 @@ Exit codes
 export function exitCodeFor(r: Result): number {
   if (r.ok) return 0;
   const e = r.error ?? "";
-  if (/^unknown action|needs two PNG paths|^invalid --button=/.test(e)) return 2;
+  if (/^unknown action|needs two PNG paths|^invalid --button=|^invalid --modifiers=/.test(e)) return 2;
   if (/did not finish within|ran out of time|never went quiet/.test(e)) return 3;
   if (/not found:|DISPLAY is unset|session is locked|unsupported platform/.test(e)) return 4;
   return 1;

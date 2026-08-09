@@ -4,7 +4,7 @@
 // Events cannot move the cursor or click, so those go through CoreGraphics
 // in-process instead of argv. The plan type makes that difference explicit and
 // still testable from any machine.
-import type { OS } from "./os.ts";
+import { hasMod, normalizeMods, type OS } from "./os.ts";
 
 export type MouseButton = "left" | "right" | "middle";
 
@@ -12,7 +12,7 @@ export type Plan =
   | { kind: "exec"; argv: string[] }
   | { kind: "exec-many"; argvs: string[][] }
   | { kind: "native"; op: "warp"; x: number; y: number }
-  | { kind: "native"; op: "click"; x?: number; y?: number; count: number; button: MouseButton }
+  | { kind: "native"; op: "click"; x?: number; y?: number; count: number; button: MouseButton; mods: string[] }
   | { kind: "native"; op: "drag"; fromX: number; fromY: number; toX: number; toY: number }
   | { kind: "native"; op: "scroll"; lines: number };
 
@@ -25,7 +25,15 @@ const WIN_BUTTON_FLAGS: Record<MouseButton, [number, number]> = {
   middle: [0x0020, 0x0040],
 };
 
-const WIN_CLICK = (count: number, x?: number, y?: number, button: MouseButton = "left") => ps(
+const WIN_CLICK = (count: number, x?: number, y?: number, button: MouseButton = "left",
+                   modifiers: string[] = []) => {
+  const mods = normalizeMods(modifiers);
+  const keys = [
+    ...(hasMod(mods, "ctrl") || hasMod(mods, "cmd") ? [0x11] : []),
+    ...(hasMod(mods, "shift") ? [0x10] : []),
+    ...(hasMod(mods, "alt") ? [0x12] : []),
+  ];
+  return ps(
   // Load the assembly before using a type from it, and stop on error rather
   // than carrying on. Written the other way round, the cursor move referenced
   // System.Windows.Forms before Add-Type had loaded it: PowerShell reported a
@@ -33,9 +41,12 @@ const WIN_CLICK = (count: number, x?: number, y?: number, button: MouseButton = 
   // cursor already was. cuse said ok and nothing had been pressed.
   `$ErrorActionPreference='Stop';` +
   `Add-Type -AssemblyName System.Windows.Forms,System.Drawing;` +
-  `Add-Type 'using System;using System.Runtime.InteropServices;public class M{[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,int e);}';` +
+  `Add-Type 'using System;using System.Runtime.InteropServices;public class M{[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,int e);[DllImport("user32.dll")]public static extern void keybd_event(byte v,byte s,uint f,int e);}';` +
   (x !== undefined ? `[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(${x},${y});Start-Sleep -Milliseconds 60;` : "") +
-  Array.from({ length: count }, () => `[M]::mouse_event(${WIN_BUTTON_FLAGS[button][0]},0,0,0,0);Start-Sleep -Milliseconds 40;[M]::mouse_event(${WIN_BUTTON_FLAGS[button][1]},0,0,0,0);`).join("Start-Sleep -Milliseconds 60;"));
+  keys.map((key) => `[M]::keybd_event(${key},0,0,0);`).join("") +
+  Array.from({ length: count }, () => `[M]::mouse_event(${WIN_BUTTON_FLAGS[button][0]},0,0,0,0);Start-Sleep -Milliseconds 40;[M]::mouse_event(${WIN_BUTTON_FLAGS[button][1]},0,0,0,0);`).join("Start-Sleep -Milliseconds 60;") +
+  keys.toReversed().map((key) => `[M]::keybd_event(${key},0,2,0);`).join(""));
+};
 
 export function movePlan(os: OS, x: number, y: number): Plan {
   switch (os) {
@@ -50,17 +61,21 @@ export function movePlan(os: OS, x: number, y: number): Plan {
 }
 
 export function clickPlan(os: OS, count: number, x?: number, y?: number,
-                          button: MouseButton = "left"): Plan {
+                          button: MouseButton = "left", modifiers: string[] = []): Plan {
+  const mods = normalizeMods(modifiers);
   switch (os) {
-    case "macos": return { kind: "native", op: "click", x, y, count, button };
+    case "macos": return { kind: "native", op: "click", x, y, count, button, mods };
     case "linux": {
       const argvs: string[][] = [];
       if (x !== undefined) argvs.push(["xdotool", "mousemove", String(x), String(y)]);
       const number: Record<MouseButton, string> = { left: "1", middle: "2", right: "3" };
+      const keys = mods.map((mod) => mod === "cmd" ? "super" : mod);
+      if (keys.length) argvs.push(["xdotool", "keydown", ...keys]);
       argvs.push(["xdotool", "click", "--repeat", String(count), number[button]]);
+      if (keys.length) argvs.push(["xdotool", "keyup", ...keys.toReversed()]);
       return { kind: "exec-many", argvs };
     }
-    case "windows": return { kind: "exec", argv: WIN_CLICK(count, x, y, button) };
+    case "windows": return { kind: "exec", argv: WIN_CLICK(count, x, y, button, mods) };
     default: throw new Error(`click unsupported on ${os}`);
   }
 }

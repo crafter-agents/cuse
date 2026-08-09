@@ -20,6 +20,12 @@ const CLICK_STATE = 1;              // CGEventField.kCGMouseEventClickState
 const BUTTON_NUMBER = 3;            // CGEventField.kCGMouseEventButtonNumber
 const HID_TAP = 0;                  // CGEventTapLocation.kCGHIDEventTap
 const UNIT_LINE = 1;                // CGScrollEventUnit.kCGScrollEventUnitLine
+const MODIFIER_FLAGS: Record<string, number> = {
+  shift: 0x00020000,
+  ctrl: 0x00040000,
+  alt: 0x00080000,
+  cmd: 0x00100000,
+};
 
 let lib: ReturnType<typeof open> | null = null;
 
@@ -30,6 +36,7 @@ function open() {
     CGEventCreateMouseEvent: { args: [T.ptr, T.u32, T.double, T.double, T.u32], returns: T.ptr },
     CGEventCreateScrollWheelEvent: { args: [T.ptr, T.u32, T.u32, T.i32], returns: T.ptr },
     CGEventSetType: { args: [T.ptr, T.u32], returns: T.void },
+    CGEventSetFlags: { args: [T.ptr, T.u32], returns: T.void },
     CGEventSetIntegerValueField: { args: [T.ptr, T.u32, T.i64], returns: T.void },
     CGEventPost: { args: [T.u32, T.ptr], returns: T.void },
   });
@@ -53,7 +60,7 @@ export function warp(x: number, y: number): void {
 }
 
 export function click(count: number, x?: number, y?: number,
-                      button: MouseButton = "left"): void {
+                      button: MouseButton = "left", modifiers: string[] = []): void {
   const { cg, cf } = syms();
   const at = x !== undefined && y !== undefined;
   if (at) warp(x!, y!);
@@ -69,6 +76,7 @@ export function click(count: number, x?: number, y?: number,
   const event = at
     ? need(cg.CGEventCreateMouseEvent(null, spec.down, x!, y!, spec.number), "mouse event")
     : need(cg.CGEventCreate(null), "event");
+  const flags = modifiers.reduce((mask, mod) => mask | (MODIFIER_FLAGS[mod] ?? 0), 0);
 
   for (let n = 1; n <= count; n++) {
     for (const type of [spec.down, spec.up]) {
@@ -76,6 +84,7 @@ export function click(count: number, x?: number, y?: number,
       cg.CGEventSetIntegerValueField(event, BUTTON_NUMBER, BigInt(spec.number));
       // Click state is what makes the second click register as a double click.
       cg.CGEventSetIntegerValueField(event, CLICK_STATE, BigInt(n));
+      cg.CGEventSetFlags(event, flags);
       cg.CGEventPost(HID_TAP, event);
     }
   }

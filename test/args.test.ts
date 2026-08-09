@@ -47,6 +47,9 @@ describe("reading the options", () => {
   test("a click button is parsed as an action option", () => {
     expect(parseArgs(["click", "--button=right"]).opts.button).toBe("right");
   });
+  test("click modifiers are parsed as an action option", () => {
+    expect(parseArgs(["click", "--modifiers=ctrl+shift"]).opts.modifiers).toBe("ctrl+shift");
+  });
   test("--json is recognised but is not an option of the action", () => {
     const p = parseArgs(["os", "--json"]);
     expect(p.json).toBe(true);
