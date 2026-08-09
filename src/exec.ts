@@ -26,6 +26,7 @@ export const DEFAULT_TIMEOUT_MS = 15_000;
 
 export const TIMEOUTS: Record<string, number> = {
   capture: 20_000,   // a first screencapture on a cold macOS session is slow
+  "ocr-read": 30_000, // cold Swift and Vision module loading measured about 14s
   launch: 30_000,    // cold app start, and `open -a` waits for the app
   focus: 15_000,     // the Linux path polls for ten seconds by design
   type: 20_000,      // long strings are typed character by character

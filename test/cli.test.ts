@@ -53,6 +53,18 @@ test("fill requires a complete coordinate pair", async () => {
   expect(exitCodeFor(result)).toBe(2);
 });
 
+test("ocr-read requires an image path", async () => {
+  const result = await act("ocr-read", []);
+  expect(result).toMatchObject({ ok: false, error: "ocr-read needs an image path" });
+  expect(exitCodeFor(result)).toBe(2);
+});
+
+test("ocr-read recognizes text through Vision", async () => {
+  const result = await act("ocr-read", ["test/fixtures/ocr-sample.png"], {});
+  expect(result.ok).toBe(true);
+  expect((result.data as { lines: string[] }).lines.some((line) => /Hello Vision 123/.test(line))).toBe(true);
+}, 30_000);
+
 test("fill dispatches click, platform select-all, then type on every OS", async () => {
   for (const os of ["macos", "linux", "windows"] as OS[]) {
     const events: Array<{ kind: "plan"; value: Plan } | { kind: "run"; value: string[] }> = [];

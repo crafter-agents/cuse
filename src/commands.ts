@@ -100,6 +100,11 @@ export function videoCmd(os: OS, out: string, seconds: number): string[] {
   }
 }
 
+export function ocrReadCmd(os: OS, scriptPath: string, imagePath: string): string[] {
+  if (os === "macos") return ["swift", scriptPath, imagePath];
+  throw new Error(`ocr-read unsupported on ${os} - not yet built`);
+}
+
 export function typeCmd(os: OS, text: string): string[] {
   switch (os) {
     case "macos": return ["osascript", "-e", `tell application "System Events" to keystroke "${escapeAppleScript(text)}"`];

@@ -22,6 +22,7 @@ import { runningAppsCmd, parseApps, pickApp, describeApps, type App } from "./ap
 import { displaysCmd, parseDisplays, frameOrigin, coverageWarning, toScreenPoint,
          desktopBounds, type Display } from "./display.ts";
 import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
+import { recognizeText } from "./ocr.ts";
 import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
          successDetail, type WaitTarget } from "./wait.ts";
 
@@ -854,6 +855,15 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         return { ok: true, ...base, detail: `changed ${d.percent}% - ${d.verdict}`, data: d };
       }
 
+      case "ocr-read": {
+        const path = args[0];
+        if (!path) return { ok: false, ...base, error: "ocr-read needs an image path" };
+        const result = await recognizeText(os, path, timeoutMs);
+        return { ok: true, ...base,
+          detail: result.lines.length ? `${result.lines.length} line(s) recognized` : "no text found",
+          data: result };
+      }
+
       case "type": { await run(typeCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: "typed" }; }
       case "fill": {
         const aimed = opts.window || opts.find || opts.element || opts.role;
@@ -983,6 +993,7 @@ Windows and apps
 Finding things
   find <template.png> [in.png] where that picture is: on screen, or in a frame
   crop <in.png> x y w h <out>  cut a template out of a screenshot
+  ocr-read <in.png>            recognize text in an image (macOS only, v1)
 
 Batching
   run '<json>'                 several actions in one process, in order
@@ -1033,7 +1044,7 @@ Exit codes
 export function exitCodeFor(r: Result): number {
   if (r.ok) return 0;
   const e = r.error ?? "";
-  if (/^unknown action|needs two PNG paths|^fill (needs|coordinates need) |^invalid --button=|^invalid --modifiers=/.test(e)) return 2;
+  if (/^unknown action|needs two PNG paths|^ocr-read needs|^fill (needs|coordinates need) |^invalid --button=|^invalid --modifiers=/.test(e)) return 2;
   if (/did not finish within|ran out of time|never went quiet/.test(e)) return 3;
   if (/not found:|DISPLAY is unset|session is locked|unsupported platform/.test(e)) return 4;
   return 1;

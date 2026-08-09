@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { detectOS, chordToOS } from "../src/os.ts";
 import {
-  captureCmd, typeCmd, launchCmd, focusCmd, comboKey, videoCmd,
+  captureCmd, typeCmd, launchCmd, focusCmd, comboKey, videoCmd, ocrReadCmd,
   escapeAppleScript, escapePowerShell, escapeSendKeys,
 } from "../src/commands.ts";
 import { movePlan, clickPlan, dragPlan, scrollPlan } from "../src/plan.ts";
@@ -63,6 +63,17 @@ describe("capture", () => {
   });
   test("every supported OS builds a command", () => {
     for (const os of OSES) expect(captureCmd(os, "o.png").argv.length).toBeGreaterThan(0);
+  });
+});
+
+describe("ocr-read", () => {
+  test("macOS runs the Swift Vision bridge", () => {
+    expect(ocrReadCmd("macos", "/tmp/s.swift", "/tmp/x.png"))
+      .toEqual(["swift", "/tmp/s.swift", "/tmp/x.png"]);
+  });
+  test("the unbuilt platforms say they are unsupported", () => {
+    expect(() => ocrReadCmd("linux", "/tmp/s.swift", "/tmp/x.png")).toThrow(/unsupported on/);
+    expect(() => ocrReadCmd("windows", "/tmp/s.swift", "/tmp/x.png")).toThrow(/unsupported on/);
   });
 });
 
