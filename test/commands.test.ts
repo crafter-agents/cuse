@@ -142,7 +142,7 @@ describe("mouse plans", () => {
     if (w.kind === "exec") expect(w.argv.join(" ")).toContain("Point(10,20)");
   });
   test("click without coordinates does not invent a position", () => {
-    expect(clickPlan("macos", 1)).toEqual({ kind: "native", op: "click", x: undefined, y: undefined, count: 1 });
+    expect(clickPlan("macos", 1)).toEqual({ kind: "native", op: "click", x: undefined, y: undefined, count: 1, button: "left" });
     const l = clickPlan("linux", 1);
     if (l.kind === "exec-many") expect(l.argvs).toEqual([["xdotool", "click", "--repeat", "1", "1"]]);
   });
@@ -154,6 +154,20 @@ describe("mouse plans", () => {
     expect(clickPlan("macos", 2)).toMatchObject({ op: "click", count: 2 });
     const l = clickPlan("linux", 2);
     if (l.kind === "exec-many") expect(l.argvs.at(-1)).toEqual(["xdotool", "click", "--repeat", "2", "1"]);
+  });
+  test("non-default click buttons reach every platform plan", () => {
+    expect(clickPlan("macos", 1, undefined, undefined, "right")).toMatchObject({
+      op: "click", button: "right",
+    });
+    const linux = clickPlan("linux", 1, undefined, undefined, "middle");
+    if (linux.kind === "exec-many") {
+      expect(linux.argvs).toEqual([["xdotool", "click", "--repeat", "1", "2"]]);
+    }
+    const windows = clickPlan("windows", 1, undefined, undefined, "right");
+    if (windows.kind === "exec") {
+      expect(windows.argv.join(" ")).toContain("mouse_event(8,0,0,0,0)");
+      expect(windows.argv.join(" ")).toContain("mouse_event(16,0,0,0,0)");
+    }
   });
   test("macOS drag carries both points to the native backend", () => {
     expect(dragPlan("macos", 1, 2, 30, 40)).toEqual({

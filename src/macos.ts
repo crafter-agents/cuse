@@ -9,12 +9,15 @@
 // float aggregate travels in the same float registers as two separate doubles -
 // which is why the struct can be declared this way through FFI.
 import { dlopen, FFIType as T, type Pointer } from "bun:ffi";
+import type { MouseButton } from "./plan.ts";
 
 const CG_PATH = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
 const CF_PATH = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
 
-const LEFT_DOWN = 1, LEFT_UP = 2, LEFT_DRAGGED = 6; // CGEventType
+const LEFT_DOWN = 1, LEFT_UP = 2, RIGHT_DOWN = 3, RIGHT_UP = 4, LEFT_DRAGGED = 6;
+const OTHER_DOWN = 25, OTHER_UP = 26; // CGEventType
 const CLICK_STATE = 1;              // CGEventField.kCGMouseEventClickState
+const BUTTON_NUMBER = 3;            // CGEventField.kCGMouseEventButtonNumber
 const HID_TAP = 0;                  // CGEventTapLocation.kCGHIDEventTap
 const UNIT_LINE = 1;                // CGScrollEventUnit.kCGScrollEventUnitLine
 
@@ -49,21 +52,28 @@ export function warp(x: number, y: number): void {
   if (err !== 0) throw new Error(`CGWarpMouseCursorPosition failed (${err})`);
 }
 
-export function click(count: number, x?: number, y?: number): void {
+export function click(count: number, x?: number, y?: number,
+                      button: MouseButton = "left"): void {
   const { cg, cf } = syms();
   const at = x !== undefined && y !== undefined;
   if (at) warp(x!, y!);
+  const spec = {
+    left: { down: LEFT_DOWN, up: LEFT_UP, number: 0 },
+    right: { down: RIGHT_DOWN, up: RIGHT_UP, number: 1 },
+    middle: { down: OTHER_DOWN, up: OTHER_UP, number: 2 },
+  }[button];
 
   // With coordinates, build the event at that point. Without them, start from a
-  // plain event, which already carries the cursor's current location, and only
-  // change its type - so a bare `click` never has to invent a position.
+  // plain event, which already carries the cursor's current location, then set
+  // its type and button number, so a bare `click` never invents a position.
   const event = at
-    ? need(cg.CGEventCreateMouseEvent(null, LEFT_DOWN, x!, y!, 0), "mouse event")
+    ? need(cg.CGEventCreateMouseEvent(null, spec.down, x!, y!, spec.number), "mouse event")
     : need(cg.CGEventCreate(null), "event");
 
   for (let n = 1; n <= count; n++) {
-    for (const type of [LEFT_DOWN, LEFT_UP]) {
+    for (const type of [spec.down, spec.up]) {
       cg.CGEventSetType(event, type);
+      cg.CGEventSetIntegerValueField(event, BUTTON_NUMBER, BigInt(spec.number));
       // Click state is what makes the second click register as a double click.
       cg.CGEventSetIntegerValueField(event, CLICK_STATE, BigInt(n));
       cg.CGEventPost(HID_TAP, event);

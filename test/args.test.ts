@@ -44,6 +44,9 @@ describe("reading the options", () => {
   test("a point is a pair", () => {
     expect(parseArgs(["click", "--at=0.25,0.75"]).opts.at).toEqual([0.25, 0.75]);
   });
+  test("a click button is parsed as an action option", () => {
+    expect(parseArgs(["click", "--button=right"]).opts.button).toBe("right");
+  });
   test("--json is recognised but is not an option of the action", () => {
     const p = parseArgs(["os", "--json"]);
     expect(p.json).toBe(true);

@@ -6,18 +6,26 @@
 // still testable from any machine.
 import type { OS } from "./os.ts";
 
+export type MouseButton = "left" | "right" | "middle";
+
 export type Plan =
   | { kind: "exec"; argv: string[] }
   | { kind: "exec-many"; argvs: string[][] }
   | { kind: "native"; op: "warp"; x: number; y: number }
-  | { kind: "native"; op: "click"; x?: number; y?: number; count: number }
+  | { kind: "native"; op: "click"; x?: number; y?: number; count: number; button: MouseButton }
   | { kind: "native"; op: "drag"; fromX: number; fromY: number; toX: number; toY: number }
   | { kind: "native"; op: "scroll"; lines: number };
 
 const ps = (script: string) => ["powershell", "-NoProfile", "-Command", script];
 
 // Windows has no cursor-click cmdlet; mouse_event is the documented user32 call.
-const WIN_CLICK = (count: number, x?: number, y?: number) => ps(
+const WIN_BUTTON_FLAGS: Record<MouseButton, [number, number]> = {
+  left: [0x0002, 0x0004],
+  right: [0x0008, 0x0010],
+  middle: [0x0020, 0x0040],
+};
+
+const WIN_CLICK = (count: number, x?: number, y?: number, button: MouseButton = "left") => ps(
   // Load the assembly before using a type from it, and stop on error rather
   // than carrying on. Written the other way round, the cursor move referenced
   // System.Windows.Forms before Add-Type had loaded it: PowerShell reported a
@@ -27,7 +35,7 @@ const WIN_CLICK = (count: number, x?: number, y?: number) => ps(
   `Add-Type -AssemblyName System.Windows.Forms,System.Drawing;` +
   `Add-Type 'using System;using System.Runtime.InteropServices;public class M{[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,int e);}';` +
   (x !== undefined ? `[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(${x},${y});Start-Sleep -Milliseconds 60;` : "") +
-  Array.from({ length: count }, () => `[M]::mouse_event(2,0,0,0,0);Start-Sleep -Milliseconds 40;[M]::mouse_event(4,0,0,0,0);`).join("Start-Sleep -Milliseconds 60;"));
+  Array.from({ length: count }, () => `[M]::mouse_event(${WIN_BUTTON_FLAGS[button][0]},0,0,0,0);Start-Sleep -Milliseconds 40;[M]::mouse_event(${WIN_BUTTON_FLAGS[button][1]},0,0,0,0);`).join("Start-Sleep -Milliseconds 60;"));
 
 export function movePlan(os: OS, x: number, y: number): Plan {
   switch (os) {
@@ -41,16 +49,18 @@ export function movePlan(os: OS, x: number, y: number): Plan {
   }
 }
 
-export function clickPlan(os: OS, count: number, x?: number, y?: number): Plan {
+export function clickPlan(os: OS, count: number, x?: number, y?: number,
+                          button: MouseButton = "left"): Plan {
   switch (os) {
-    case "macos": return { kind: "native", op: "click", x, y, count };
+    case "macos": return { kind: "native", op: "click", x, y, count, button };
     case "linux": {
       const argvs: string[][] = [];
       if (x !== undefined) argvs.push(["xdotool", "mousemove", String(x), String(y)]);
-      argvs.push(["xdotool", "click", "--repeat", String(count), "1"]);
+      const number: Record<MouseButton, string> = { left: "1", middle: "2", right: "3" };
+      argvs.push(["xdotool", "click", "--repeat", String(count), number[button]]);
       return { kind: "exec-many", argvs };
     }
-    case "windows": return { kind: "exec", argv: WIN_CLICK(count, x, y) };
+    case "windows": return { kind: "exec", argv: WIN_CLICK(count, x, y, button) };
     default: throw new Error(`click unsupported on ${os}`);
   }
 }

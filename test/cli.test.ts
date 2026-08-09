@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { exitCodeFor, VERSION, type Result } from "../src/cli.ts";
+import { act, exitCodeFor, VERSION, type Result } from "../src/cli.ts";
 
 const r = (over: Partial<Result>): Result => ({ ok: false, action: "type", os: "macos", ...over });
 
@@ -8,6 +8,7 @@ describe("exit codes", () => {
   test("bad usage is 2, so a typo is not mistaken for a machine problem", () => {
     expect(exitCodeFor(r({ error: "unknown action 'clik'" }))).toBe(2);
     expect(exitCodeFor(r({ error: "diff needs two PNG paths" }))).toBe(2);
+    expect(exitCodeFor(r({ error: "invalid --button='side': expected left, right, or middle" }))).toBe(2);
   });
   test("a hang is 3, distinct from a plain failure", () => {
     expect(exitCodeFor(r({ error: "xdotool did not finish within 15000ms and was killed" }))).toBe(3);
@@ -22,4 +23,10 @@ describe("exit codes", () => {
     expect(exitCodeFor(r({ error: "osascript: no window matching 'Notepad'" }))).toBe(1);
   });
   test("the version is a real semver", () => expect(VERSION).toMatch(/^\d+\.\d+\.\d+$/));
+});
+
+test("click rejects an unknown button before dispatch", async () => {
+  const result = await act("click", [], { button: "side" });
+  expect(result).toMatchObject({ ok: false,
+    error: "invalid --button='side': expected left, right, or middle" });
 });
