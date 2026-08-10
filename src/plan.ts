@@ -14,7 +14,7 @@ export type Plan =
   | { kind: "native"; op: "warp"; x: number; y: number }
   | { kind: "native"; op: "click"; x?: number; y?: number; count: number; button: MouseButton; mods: string[] }
   | { kind: "native"; op: "drag"; fromX: number; fromY: number; toX: number; toY: number }
-  | { kind: "native"; op: "scroll"; lines: number };
+  | { kind: "native"; op: "scroll"; axis: "vertical" | "horizontal"; lines: number };
 
 const ps = (script: string) => ["powershell", "-NoProfile", "-Command", script];
 
@@ -101,18 +101,25 @@ export function dragPlan(os: OS, fromX: number, fromY: number, toX: number, toY:
   }
 }
 
-export function scrollPlan(os: OS, dir: "up" | "down", amount: number): Plan {
-  const lines = dir === "up" ? amount : -amount;
+export type ScrollDirection = "up" | "down" | "left" | "right";
+
+export function scrollPlan(os: OS, dir: ScrollDirection, amount: number): Plan {
+  const axis = dir === "up" || dir === "down" ? "vertical" : "horizontal";
+  const lines = dir === "up" || dir === "left" ? amount : -amount;
   switch (os) {
     // A real wheel event, not a Page Down impersonating one: it scrolls the view
     // under the cursor without needing a text caret or a focused document.
-    case "macos": return { kind: "native", op: "scroll", lines };
+    case "macos": return { kind: "native", op: "scroll", axis, lines };
     case "linux": return { kind: "exec-many", argvs:
-      Array.from({ length: amount }, () => ["xdotool", "click", dir === "up" ? "4" : "5"]) };
-    case "windows": return { kind: "exec-many", argvs:
-      Array.from({ length: amount }, () => ps(
-        `Add-Type -AssemblyName System.Windows.Forms;` +
-        `[System.Windows.Forms.SendKeys]::SendWait('{${dir === "up" ? "PGUP" : "PGDN"}}')`)) };
+      Array.from({ length: amount }, () => ["xdotool", "click",
+        ({ up: "4", down: "5", left: "6", right: "7" } as const)[dir]]) };
+    case "windows": {
+      if (axis === "horizontal") throw new Error(`scroll ${dir} unsupported on windows`);
+      return { kind: "exec-many", argvs:
+        Array.from({ length: amount }, () => ps(
+          `Add-Type -AssemblyName System.Windows.Forms;` +
+          `[System.Windows.Forms.SendKeys]::SendWait('{${dir === "up" ? "PGUP" : "PGDN"}}')`)) };
+    }
     default: throw new Error(`scroll unsupported on ${os}`);
   }
 }

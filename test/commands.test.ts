@@ -226,11 +226,20 @@ describe("mouse plans", () => {
     }
   });
   test("scroll direction maps to sign on macOS and to buttons on linux", () => {
-    expect(scrollPlan("macos", "up", 3)).toEqual({ kind: "native", op: "scroll", lines: 3 });
-    expect(scrollPlan("macos", "down", 3)).toEqual({ kind: "native", op: "scroll", lines: -3 });
+    expect(scrollPlan("macos", "up", 3)).toEqual({ kind: "native", op: "scroll", axis: "vertical", lines: 3 });
+    expect(scrollPlan("macos", "down", 3)).toEqual({ kind: "native", op: "scroll", axis: "vertical", lines: -3 });
+    expect(scrollPlan("macos", "left", 3)).toEqual({ kind: "native", op: "scroll", axis: "horizontal", lines: 3 });
+    expect(scrollPlan("macos", "right", 3)).toEqual({ kind: "native", op: "scroll", axis: "horizontal", lines: -3 });
     const up = scrollPlan("linux", "up", 2), down = scrollPlan("linux", "down", 2);
+    const left = scrollPlan("linux", "left", 2), right = scrollPlan("linux", "right", 2);
     if (up.kind === "exec-many") expect(up.argvs).toEqual([["xdotool", "click", "4"], ["xdotool", "click", "4"]]);
     if (down.kind === "exec-many") expect(down.argvs[0]).toEqual(["xdotool", "click", "5"]);
+    if (left.kind === "exec-many") expect(left.argvs).toEqual([["xdotool", "click", "6"], ["xdotool", "click", "6"]]);
+    if (right.kind === "exec-many") expect(right.argvs[0]).toEqual(["xdotool", "click", "7"]);
+  });
+  test("windows refuses horizontal scroll instead of emulating the wrong axis", () => {
+    expect(() => scrollPlan("windows", "left", 1)).toThrow("scroll left unsupported on windows");
+    expect(() => scrollPlan("windows", "right", 1)).toThrow("scroll right unsupported on windows");
   });
   test("every supported OS has a plan for every mouse action", () => {
     for (const os of OSES) {

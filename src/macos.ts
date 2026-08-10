@@ -28,6 +28,7 @@ const MODIFIER_FLAGS: Record<string, number> = {
 };
 
 let lib: ReturnType<typeof open> | null = null;
+let scroll2Lib: ReturnType<typeof openScroll2> | null = null;
 
 function open() {
   const cg = dlopen(CG_PATH, {
@@ -42,6 +43,14 @@ function open() {
   });
   const cf = dlopen(CF_PATH, { CFRelease: { args: [T.ptr], returns: T.void } });
   return { cg: cg.symbols, cf: cf.symbols };
+}
+
+// Bun FFI bindings have fixed arity, while this CoreGraphics function is
+// variadic. Load the same symbol separately for its two-wheel form.
+function openScroll2() {
+  return dlopen(CG_PATH, {
+    CGEventCreateScrollWheelEvent: { args: [T.ptr, T.u32, T.u32, T.i32, T.i32], returns: T.ptr },
+  }).symbols;
 }
 
 function syms() {
@@ -108,9 +117,12 @@ export function drag(fromX: number, fromY: number, toX: number, toY: number): vo
   }
 }
 
-export function scroll(lines: number): void {
+export function scroll(lines: number, axis: "vertical" | "horizontal" = "vertical"): void {
   const { cg, cf } = syms();
-  const event = need(cg.CGEventCreateScrollWheelEvent(null, UNIT_LINE, 1, lines), "scroll event");
+  const event = axis === "vertical"
+    ? need(cg.CGEventCreateScrollWheelEvent(null, UNIT_LINE, 1, lines), "scroll event")
+    : need((scroll2Lib ??= openScroll2()).CGEventCreateScrollWheelEvent(
+      null, UNIT_LINE, 2, 0, lines), "horizontal scroll event");
   cg.CGEventPost(HID_TAP, event);
   cf.CFRelease(event);
 }

@@ -92,7 +92,7 @@ async function execute(plan: Plan, run: (argv: string[]) => Promise<void>): Prom
       if (plan.op === "warp") return mac.warp(plan.x, plan.y);
       if (plan.op === "click") return mac.click(plan.count, plan.x, plan.y, plan.button, plan.mods);
       if (plan.op === "drag") return mac.drag(plan.fromX, plan.fromY, plan.toX, plan.toY);
-      return mac.scroll(plan.lines);
+      return mac.scroll(plan.lines, plan.axis);
     }
   }
 }
@@ -907,9 +907,13 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           ...(t ? { data: { x: t.x, y: t.y } } : {}) };
       }
       case "scroll": {
-        const dir = (args[0] as "up" | "down") ?? "down";
+        const dir = args[0] ?? "down";
+        if (!(["up", "down", "left", "right"] as const).includes(dir as "up" | "down" | "left" | "right")) {
+          return { ok: false, ...base,
+            error: `invalid scroll direction '${dir}': expected up, down, left, or right` };
+        }
         const amount = Number(args[1] ?? 3);
-        await execute(scrollPlan(os, dir, amount), run);
+        await execute(scrollPlan(os, dir as "up" | "down" | "left" | "right", amount), run);
         return { ok: true, ...base, detail: `scrolled ${dir} ${amount}` };
       }
 
@@ -1006,7 +1010,8 @@ Input
   move <x> <y>                 move the cursor
   click | dblclick [x] [y]     click; or aim with --window / --find
   drag <x1> <y1> <x2> <y2>     hold the button from one point to another
-  scroll <up|down> [amount]    scroll the view under the cursor
+  scroll <up|down|left|right> [amount]
+                               scroll the view under the cursor
   select-all | copy | paste    the platform's own chord for each
 
 Other
@@ -1044,7 +1049,7 @@ Exit codes
 export function exitCodeFor(r: Result): number {
   if (r.ok) return 0;
   const e = r.error ?? "";
-  if (/^unknown action|needs two PNG paths|^ocr-read needs|^fill (needs|coordinates need) |^invalid --button=|^invalid --modifiers=/.test(e)) return 2;
+  if (/^unknown action|needs two PNG paths|^ocr-read needs|^fill (needs|coordinates need) |^invalid --button=|^invalid --modifiers=|^invalid scroll direction /.test(e)) return 2;
   if (/did not finish within|ran out of time|never went quiet/.test(e)) return 3;
   if (/not found:|DISPLAY is unset|session is locked|unsupported (on|platform)/.test(e)) return 4;
   return 1;

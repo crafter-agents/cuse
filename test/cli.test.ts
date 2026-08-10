@@ -12,6 +12,7 @@ describe("exit codes", () => {
     expect(exitCodeFor(r({ error: "diff needs two PNG paths" }))).toBe(2);
     expect(exitCodeFor(r({ error: "invalid --button='side': expected left, right, or middle" }))).toBe(2);
     expect(exitCodeFor(r({ error: "invalid --modifiers='ctrl+bogus': unknown modifier 'bogus'" }))).toBe(2);
+    expect(exitCodeFor(r({ error: "invalid scroll direction 'sideways': expected up, down, left, or right" }))).toBe(2);
   });
   test("a hang is 3, distinct from a plain failure", () => {
     expect(exitCodeFor(r({ error: "xdotool did not finish within 15000ms and was killed" }))).toBe(3);
@@ -38,6 +39,13 @@ test("click rejects an unknown modifier before dispatch", async () => {
   const result = await act("click", [], { modifiers: "ctrl+bogus" });
   expect(result).toMatchObject({ ok: false,
     error: "invalid --modifiers='ctrl+bogus': unknown modifier 'bogus'" });
+});
+
+test("scroll rejects an unknown direction before dispatch", async () => {
+  const result = await act("scroll", ["sideways"], { force: true });
+  expect(result).toMatchObject({ ok: false,
+    error: "invalid scroll direction 'sideways': expected up, down, left, or right" });
+  expect(exitCodeFor(result)).toBe(2);
 });
 
 test("fill refuses to type without an aimed target", async () => {
