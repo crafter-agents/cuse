@@ -30,6 +30,12 @@ describe("scenario execution lifecycle", () => {
     ]));
 
     expect(result.status).toBe("passed");
+    expect(result.name).toBe("runner test");
+    expect(result.platform).toBe(
+      ({ darwin: "macos", linux: "linux", win32: "windows" } as Record<string, string>)[process.platform],
+    );
+    expect(Number.isFinite(result.durationMs)).toBe(true);
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
     expect(result.steps.map((step) => step.run?.stdout.trim())).toEqual(["first", "second"]);
     expect(result.steps.map((step) => step.status)).toEqual(["passed", "passed"]);
   });
@@ -63,7 +69,8 @@ describe("scenario execution lifecycle", () => {
 
     const result = await runScenario(input);
 
-    expect(result).toEqual({ status: "skipped", steps: [] });
+    expect(result).toMatchObject({ status: "skipped", name: "runner test", steps: [] });
+    expect(Number.isFinite(result.durationMs)).toBe(true);
   });
 
   test("cleanup failure takes precedence over a normal failure", async () => {

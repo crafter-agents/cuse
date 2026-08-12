@@ -23,6 +23,9 @@ export type ScenarioStepResult = {
 
 export type ScenarioRunResult = {
   status: ScenarioStatus;
+  name: string;
+  platform: ScenarioPlatform | undefined;
+  durationMs: number;
   steps: ScenarioStepResult[];
 };
 
@@ -257,9 +260,16 @@ async function runStep(
 }
 
 export async function runScenario(scenario: Scenario): Promise<ScenarioRunResult> {
+  const startedAt = Date.now();
   const platform = currentPlatform();
   if (scenario.platforms && (!platform || !scenario.platforms.includes(platform))) {
-    return { status: "skipped", steps: [] };
+    return {
+      status: "skipped",
+      name: scenario.name,
+      platform,
+      durationMs: Date.now() - startedAt,
+      steps: [],
+    };
   }
 
   const results: ScenarioStepResult[] = [];
@@ -284,5 +294,11 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioRunResult
     if (result.status !== "passed") cleanupFailed = true;
   }
 
-  return { status: cleanupFailed ? "cleanup_failed" : normalStatus, steps: results };
+  return {
+    status: cleanupFailed ? "cleanup_failed" : normalStatus,
+    name: scenario.name,
+    platform,
+    durationMs: Date.now() - startedAt,
+    steps: results,
+  };
 }

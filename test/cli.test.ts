@@ -17,6 +17,7 @@ describe("exit codes", () => {
   test("a hang is 3, distinct from a plain failure", () => {
     expect(exitCodeFor(r({ error: "xdotool did not finish within 15000ms and was killed" }))).toBe(3);
     expect(exitCodeFor(r({ error: "settle ran out of time after 4 checks" }))).toBe(3);
+    expect(exitCodeFor(r({ action: "scenario", data: { status: "timed_out" } }))).toBe(3);
   });
   test("a refusal is 4: the machine cannot do this, retrying will not help", () => {
     expect(exitCodeFor(r({ error: "`xdotool` not found: apt-get install -y xdotool" }))).toBe(4);
@@ -27,6 +28,61 @@ describe("exit codes", () => {
     expect(exitCodeFor(r({ error: "osascript: no window matching 'Notepad'" }))).toBe(1);
   });
   test("the version is a real semver", () => expect(VERSION).toMatch(/^\d+\.\d+\.\d+$/));
+});
+
+const scenarioPath = (name: string) =>
+  `${Bun.env.TMPDIR ?? "/tmp"}/cuse-${name}-${process.pid}-${Date.now()}-${Math.random()}.json`;
+
+test("scenario runs a passing file and returns structured data", async () => {
+  const path = scenarioPath("passing");
+  await Bun.write(path, JSON.stringify({
+    version: 1,
+    name: "passing CLI scenario",
+    vars: {},
+    defaultTimeoutMs: 1_000,
+    steps: [{ type: "assert", actual: "same", operator: "eq", expected: "same" }],
+  }));
+
+  const result = await act("scenario", [path]);
+
+  expect(result.ok).toBe(true);
+  expect(exitCodeFor(result)).toBe(0);
+  expect(result.data).toMatchObject({ name: "passing CLI scenario", status: "passed" });
+});
+
+test("scenario reports a failed assertion as a plain failure", async () => {
+  const path = scenarioPath("failing");
+  await Bun.write(path, JSON.stringify({
+    version: 1,
+    name: "failing CLI scenario",
+    vars: {},
+    defaultTimeoutMs: 1_000,
+    steps: [{ type: "assert", actual: 1, operator: "eq", expected: 2 }],
+  }));
+
+  const result = await act("scenario", [path]);
+
+  expect(result.ok).toBe(false);
+  expect(result.error).toStartWith("scenario failed: steps step 1:");
+  expect(exitCodeFor(result)).toBe(1);
+});
+
+test("scenario reports a missing file as bad usage", async () => {
+  const path = scenarioPath("missing");
+  const result = await act("scenario", [path]);
+
+  expect(result).toMatchObject({ ok: false, error: `scenario file not found: ${path}` });
+  expect(exitCodeFor(result)).toBe(2);
+});
+
+test("scenario rejects malformed JSON as bad usage", async () => {
+  const path = scenarioPath("malformed");
+  await Bun.write(path, "{not JSON");
+
+  const result = await act("scenario", [path]);
+
+  expect(result).toMatchObject({ ok: false, error: "scenario file must contain valid JSON" });
+  expect(exitCodeFor(result)).toBe(2);
 });
 
 test("click rejects an unknown button before dispatch", async () => {
