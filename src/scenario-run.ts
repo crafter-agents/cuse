@@ -26,6 +26,60 @@ export type ScenarioRunResult = {
   steps: ScenarioStepResult[];
 };
 
+type ScenarioContext = {
+  vars: Record<string, ScenarioValue>;
+  steps: Record<string, ScenarioValue>;
+};
+
+const INTERPOLATION = /\$\{(vars\.[A-Za-z_][\w-]*|steps\.[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\}/g;
+const WHOLE_INTERPOLATION = /^\$\{(vars\.[A-Za-z_][\w-]*|steps\.[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\}$/;
+
+function resolveReference(reference: string, context: ScenarioContext): ScenarioValue {
+  const [scope, name, ...path] = reference.split(".");
+  let value: ScenarioValue | undefined;
+  if (scope === "vars") {
+    value = Object.hasOwn(context.vars, name!) ? context.vars[name!] : undefined;
+  } else {
+    value = Object.hasOwn(context.steps, name!) ? context.steps[name!] : undefined;
+  }
+
+  if (value === undefined) throw new Error(`missing reference: ${reference}`);
+  for (const segment of path) {
+    if (value === null || Array.isArray(value) || typeof value !== "object" || !Object.hasOwn(value, segment)) {
+      throw new Error(`missing reference: ${reference}`);
+    }
+    value = value[segment];
+  }
+  return value;
+}
+
+function interpolationText(value: ScenarioValue): string {
+  if (typeof value === "string") return value;
+  if (value === null) return "null";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function resolveValue(value: ScenarioValue, context: ScenarioContext): ScenarioValue {
+  if (typeof value === "string") {
+    const whole = value.match(WHOLE_INTERPOLATION);
+    if (whole) return resolveReference(whole[1]!, context);
+    return value.replace(INTERPOLATION, (_, reference: string) =>
+      interpolationText(resolveReference(reference, context)));
+  }
+  if (Array.isArray(value)) return value.map((item) => resolveValue(item, context));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, resolveValue(child, context)]),
+    );
+  }
+  return value;
+}
+
+function resolveStep(step: ScenarioStep, context: ScenarioContext): ScenarioStep {
+  return resolveValue(step as unknown as ScenarioValue, context) as unknown as ScenarioStep;
+}
+
 function currentPlatform(): ScenarioPlatform | undefined {
   if (process.platform === "darwin") return "macos";
   if (process.platform === "linux") return "linux";
@@ -62,6 +116,10 @@ function assertPasses(step: AssertStep): boolean {
     case "lt": return orderedComparison(step.actual, step.expected, "lt");
     case "lte": return orderedComparison(step.actual, step.expected, "lte");
   }
+}
+
+function displayValue(value: ScenarioValue | undefined): string {
+  return value === undefined ? "undefined" : JSON.stringify(value);
 }
 
 function orderedComparison(
@@ -114,7 +172,8 @@ async function executeStep(
         status: passed ? "passed" : "failed",
         timedOut: false,
         attempts: 1,
-        message: passed ? undefined : `assertion ${step.operator} failed`,
+        message: passed ? undefined :
+          `assertion ${step.operator} failed: expected ${displayValue(step.expected)}, observed ${displayValue(step.actual)}`,
       };
     }
     case "cuse":
@@ -151,6 +210,52 @@ async function executeStep(
   }
 }
 
+// Saved values are stable, JSON-compatible summaries: exec saves its RunResult,
+// assert saves its resolved operands and verdict, cuse saves its implementation
+// status, and wait saves the same summary as its nested step.
+function savedValue(
+  step: ScenarioStep,
+  result: Omit<ScenarioStepResult, "phase" | "index" | "step">,
+): ScenarioValue {
+  switch (step.type) {
+    case "exec":
+      return result.run ?? {
+        code: -1,
+        stdout: "",
+        stderr: result.message ?? "command failed before producing a result",
+        timedOut: result.timedOut,
+      };
+    case "assert":
+      return { passed: result.status === "passed", actual: step.actual, expected: step.expected ?? null };
+    case "cuse":
+      return { status: "not_implemented" };
+    case "wait":
+      return savedValue(step.step, result);
+  }
+}
+
+async function runStep(
+  step: ScenarioStep,
+  timeoutMs: number,
+  context: ScenarioContext,
+): Promise<Omit<ScenarioStepResult, "phase" | "index" | "step">> {
+  let resolvedStep: ScenarioStep;
+  try {
+    resolvedStep = resolveStep(step, context);
+  } catch (error) {
+    return {
+      status: "failed",
+      timedOut: false,
+      attempts: 0,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  const result = await executeStep(resolvedStep, timeoutMs);
+  if (step.saveAs) context.steps[step.saveAs] = savedValue(resolvedStep, result);
+  return result;
+}
+
 export async function runScenario(scenario: Scenario): Promise<ScenarioRunResult> {
   const platform = currentPlatform();
   if (scenario.platforms && (!platform || !scenario.platforms.includes(platform))) {
@@ -158,11 +263,12 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioRunResult
   }
 
   const results: ScenarioStepResult[] = [];
+  const context: ScenarioContext = { vars: scenario.vars, steps: {} };
   let normalStatus: "passed" | "failed" | "timed_out" = "passed";
 
   for (let index = 0; index < scenario.steps.length; index++) {
     const step = scenario.steps[index]!;
-    const result = await executeStep(step, step.timeoutMs ?? scenario.defaultTimeoutMs!);
+    const result = await runStep(step, step.timeoutMs ?? scenario.defaultTimeoutMs!, context);
     results.push({ phase: "steps", index, step, ...result });
     if (result.status !== "passed") {
       normalStatus = result.status === "timed_out" ? "timed_out" : "failed";
@@ -173,7 +279,7 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioRunResult
   let cleanupFailed = false;
   for (let index = 0; index < (scenario.finally?.length ?? 0); index++) {
     const step = scenario.finally![index]!;
-    const result = await executeStep(step, step.timeoutMs ?? scenario.defaultTimeoutMs!);
+    const result = await runStep(step, step.timeoutMs ?? scenario.defaultTimeoutMs!, context);
     results.push({ phase: "finally", index, step, ...result });
     if (result.status !== "passed") cleanupFailed = true;
   }

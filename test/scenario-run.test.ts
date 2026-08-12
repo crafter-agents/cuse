@@ -113,3 +113,97 @@ describe("scenario execution lifecycle", () => {
     expect(waited.steps[0]!.attempts).toBeGreaterThan(1);
   });
 });
+
+describe("scenario variables and saved step results", () => {
+  test("reads saved exec stdout in a later assertion", async () => {
+    const result = await runScenario(scenario([
+      { ...exec("process.stdout.write('structured flow')"), saveAs: "command" },
+      { type: "assert", actual: "${steps.command.stdout}", operator: "eq", expected: "structured flow" },
+    ]));
+
+    expect(result.status).toBe("passed");
+    expect(result.steps.map((step) => step.status)).toEqual(["passed", "passed"]);
+  });
+
+  test("resolves scenario vars into step fields", async () => {
+    const input = scenario([
+      { type: "assert", actual: "hello ${vars.subject}", operator: "eq", expected: "hello world" },
+    ]);
+    input.vars = { subject: "world" };
+
+    const result = await runScenario(input);
+
+    expect(result.status).toBe("passed");
+  });
+
+  test("reports expected and observed values for failed assertions", async () => {
+    const result = await runScenario(scenario([
+      { type: "assert", actual: "observed literal", operator: "eq", expected: "expected literal" },
+    ]));
+
+    expect(result.status).toBe("failed");
+    expect(result.steps[0]!.message).toContain("expected literal");
+    expect(result.steps[0]!.message).toContain("observed literal");
+  });
+
+  test("fails unset vars without throwing from the runner", async () => {
+    const result = await runScenario(scenario([
+      { type: "assert", actual: "${vars.absent}", operator: "exists" },
+    ]));
+
+    expect(result.status).toBe("failed");
+    expect(result.steps[0]).toMatchObject({ status: "failed", message: "missing reference: vars.absent" });
+  });
+
+  test("fails references to steps that were never saved", async () => {
+    const result = await runScenario(scenario([
+      { type: "assert", actual: "${steps.never.stdout}", operator: "exists" },
+    ]));
+
+    expect(result.status).toBe("failed");
+    expect(result.steps[0]).toMatchObject({ status: "failed", message: "missing reference: steps.never.stdout" });
+  });
+
+  test("preserves whole-token numeric values from saved assertions", async () => {
+    const result = await runScenario(scenario([
+      { type: "assert", actual: 7, operator: "eq", expected: 7, saveAs: "measurement" },
+      { type: "assert", actual: "${steps.measurement.actual}", operator: "gt", expected: 6 },
+    ]));
+
+    expect(result.status).toBe("passed");
+  });
+
+  test("accumulates saved values through finally steps in execution order", async () => {
+    const result = await runScenario(scenario([
+      { ...exec("process.stdout.write('ready')"), saveAs: "setup" },
+    ], [
+      { type: "assert", actual: "${steps.setup.stdout}", operator: "eq", expected: "ready", saveAs: "checked" },
+      { type: "assert", actual: "${steps.checked.passed}", operator: "eq", expected: true },
+    ]));
+
+    expect(result.status).toBe("passed");
+    expect(result.steps.map((step) => step.status)).toEqual(["passed", "passed", "passed"]);
+  });
+
+  test("saves cuse status and delegates wait saves to its nested step", async () => {
+    const result = await runScenario(scenario([
+      { type: "cuse", action: "launch", args: ["Editor"], saveAs: "action" },
+    ], [
+      { type: "assert", actual: "${steps.action.status}", operator: "eq", expected: "not_implemented" },
+      {
+        type: "wait",
+        saveAs: "waited",
+        step: { type: "assert", actual: 3, operator: "eq", expected: 3 },
+      },
+      { type: "assert", actual: "${steps.waited.actual}", operator: "eq", expected: 3 },
+    ]));
+
+    expect(result.status).toBe("failed");
+    expect(result.steps.map((step) => step.status)).toEqual([
+      "not_implemented",
+      "passed",
+      "passed",
+      "passed",
+    ]);
+  });
+});
