@@ -186,3 +186,11 @@ export function parseScenario(input: unknown): ScenarioParseResult {
   if (interpolation) return interpolation;
   return { ok: true, scenario: input as Scenario };
 }
+
+export { runScenario } from "./scenario-run.ts";
+export type {
+  ScenarioRunResult,
+  ScenarioStatus,
+  ScenarioStepResult,
+  ScenarioStepStatus,
+} from "./scenario-run.ts";
