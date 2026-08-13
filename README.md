@@ -275,6 +275,91 @@ Twenty actions cost 298ms as separate processes and 21ms here. A line that fails
 comes back as a failed Result and the loop continues, because an agent recovers
 from a missing button and killing its tool over one is not help.
 
+## Declarative scenarios
+
+`run` and `serve` still need a script to own assertions, variables and
+cleanup. `cuse scenario <path>` reads a JSON document instead: one portable
+file that mixes cuse actions, raw commands, assertions and waits, with its own
+timeout and `finally` cleanup, so a reproduction case is data instead of a
+bash script.
+
+```json
+{
+  "version": 1,
+  "name": "readme example",
+  "vars": {},
+  "defaultTimeoutMs": 5000,
+  "steps": [
+    { "type": "exec", "argv": ["echo", "ok"], "saveAs": "echoed" },
+    { "type": "assert", "actual": "${steps.echoed.stdout}", "operator": "contains", "expected": "ok" }
+  ]
+}
+```
+
+```console
+$ cuse scenario example.json
+scenario: scenario readme example: passed in 2ms
+$ echo $?
+0
+```
+
+Four step types:
+
+- `cuse`: an existing cuse action, `{"type":"cuse","action":"click","args":["--element=Save"]}`.
+- `exec`: an argv array run without a shell in between, so a value that came
+  from an earlier step's output cannot smuggle in a `;` or `$(...)`,
+  `{"type":"exec","argv":["ls","-la"]}`.
+- `assert`: compares two values with `eq`, `ne`, `contains`, `exists`, `gt`,
+  `gte`, `lt` or `lte`, and reports both sides when it fails.
+- `wait`: retries a nested `cuse`, `exec` or `assert` step every
+  `intervalMs` (100ms by default) until it passes or the step's own timeout
+  runs out. A `wait` cannot nest another `wait`.
+
+`saveAs` on any step stores its result under `steps.<name>` for later steps.
+`${vars.x}` and `${steps.name.path}` interpolate into any string field of a
+later step, in a string, array or object; `${steps.echoed.stdout}` above
+reaches into the `exec` step's captured stdout. A whole-string reference like
+`"${steps.echoed}"` resolves to the referenced value itself, not a
+stringified copy; embedding it inside a longer string coerces it to text.
+
+Every step needs a `timeoutMs`, its own or the scenario's
+`defaultTimeoutMs`; there is no unbounded step. `platforms` restricts a
+scenario to `macos`, `linux` or `windows`, and a mismatched platform reports
+`skipped`, not a failure. `finally` steps always run, whether the main steps
+passed, failed or timed out, and a failure there reports `cleanup_failed`
+even when every main step passed.
+
+```json
+{
+  "version": 1,
+  "name": "readme fail example",
+  "vars": {},
+  "defaultTimeoutMs": 5000,
+  "steps": [
+    { "type": "assert", "actual": "no", "operator": "eq", "expected": "ok" }
+  ]
+}
+```
+
+```console
+$ cuse scenario fail-example.json --json
+{"ok":false,"action":"scenario","os":"macos","detail":"scenario readme fail example: failed in 0ms", ...}
+$ echo $?
+1
+```
+
+`--json` returns the full result: `status`
+(`passed`/`failed`/`timed_out`/`skipped`/`cleanup_failed`), `platform`,
+`durationMs` and every attempted step with its own status, so a failure
+mid-run still shows what ran before it. Exit codes: `0` passed, `3` timed
+out, `2` for a malformed scenario file or a missing path, `1` for every other
+non-passing status, including a skipped or cleanup-failed run.
+
+`scenarios/cuse-selftest.json` is the reference: it launches TextEdit, types
+into it and captures before/after screenshots, the same coverage
+`scenarios/cuse-selftest.sh` provides today. The shell script stays until the
+JSON scenario has a green run on macOS, Windows and Linux CI.
+
 ## The blank frame
 
 A display with nothing drawn on it still yields a correctly sized PNG. An agent

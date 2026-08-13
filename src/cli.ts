@@ -23,6 +23,7 @@ import { displaysCmd, parseDisplays, frameOrigin, coverageWarning, toScreenPoint
          desktopBounds, type Display } from "./display.ts";
 import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
 import { recognizeText } from "./ocr.ts";
+import { parseScenario, runScenario, type ScenarioValue } from "./scenario.ts";
 import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
          successDetail, type WaitTarget } from "./wait.ts";
 
@@ -64,6 +65,14 @@ export type Result = {
   ok: boolean; action: string; os: OS;
   detail?: string; error?: string; warn?: string; data?: unknown;
 };
+
+function isScenarioValue(value: unknown): value is ScenarioValue {
+  if (value === null || typeof value === "boolean" || typeof value === "number" ||
+      typeof value === "string") return true;
+  if (Array.isArray(value)) return value.every(isScenarioValue);
+  if (typeof value !== "object") return false;
+  return Object.values(value).every(isScenarioValue);
+}
 
 /**
  * Run a command under a deadline, and on failure report what the OS said.
@@ -485,7 +494,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
   // Fail before touching the machine, with the reason and the fix, not an opaque
   // exit code from a missing binary or an absent display.
-  if (!["os", "diff", "ocr-read"].includes(action)) {
+  if (!["os", "diff", "ocr-read", "scenario"].includes(action)) {
     const pre = preflight(os, action === "fill" ? "click" : action, probe);
     if (!pre.ok) return { ok: false, ...base, error: pre.reason };
   }
@@ -553,6 +562,58 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         return { ok: true, ...base,
           detail: `${ran.length} action${ran.length > 1 ? "s" : ""} in one process`,
           data: { ran, completed: ran.length, total: steps.length } };
+      }
+
+      case "scenario": {
+        const path = args[0];
+        if (!path) {
+          return { ok: false, ...base, error: "scenario needs a path to a scenario file" };
+        }
+
+        let contents: string;
+        try {
+          contents = await Bun.file(resolve(path)).text();
+        } catch {
+          return { ok: false, ...base, error: `scenario file not found: ${path}` };
+        }
+
+        let input: unknown;
+        try {
+          input = JSON.parse(contents);
+        } catch {
+          return { ok: false, ...base, error: "scenario file must contain valid JSON" };
+        }
+
+        const parsed = parseScenario(input);
+        if (!parsed.ok) {
+          return { ok: false, ...base,
+            error: `invalid scenario at ${parsed.error.path}: ${parsed.error.message}` };
+        }
+
+        const result = await runScenario(parsed.scenario, {
+          invokeCuse: async (action, args, options) => {
+            const invoked = await act(action, args, options as Options);
+            return {
+              ok: invoked.ok,
+              error: invoked.error,
+              detail: invoked.detail,
+              ...(isScenarioValue(invoked.data) ? { data: invoked.data } : {}),
+            };
+          },
+        });
+        const ok = result.status === "passed";
+        const failedStep = result.steps.find((step) => step.status !== "passed");
+        const error = failedStep
+          ? `scenario ${result.status}: ${failedStep.phase} step ${failedStep.index + 1}: ` +
+            (failedStep.message ?? failedStep.status)
+          : `scenario ${result.status}`;
+        return {
+          ok,
+          ...base,
+          detail: `scenario ${result.name}: ${result.status} in ${result.durationMs}ms`,
+          data: result,
+          ...(ok ? {} : { error }),
+        };
       }
 
       case "os": return { ok: true, ...base, detail: os };
@@ -1003,6 +1064,7 @@ Finding things
 Batching
   run '<json>'                 several actions in one process, in order
                                [["move",10,20],["click"]] or [{"action":"click"}]
+  scenario <path>              run a declarative JSON scenario file
 
 Input
   type <text>                  send text to the focused window
@@ -1048,9 +1110,11 @@ Exit codes
 
 /** Exit codes an agent can branch on without parsing prose. */
 export function exitCodeFor(r: Result): number {
+  if (r.action === "scenario" && r.data && typeof r.data === "object" &&
+      "status" in r.data && r.data.status === "timed_out") return 3;
   if (r.ok) return 0;
   const e = r.error ?? "";
-  if (/^unknown action|needs two PNG paths|^ocr-read needs|^fill (needs|coordinates need) |^invalid --button=|^invalid --modifiers=|^invalid scroll direction /.test(e)) return 2;
+  if (/^unknown action|needs two PNG paths|^ocr-read needs|^fill (needs|coordinates need) |^invalid --button=|^invalid --modifiers=|^invalid scroll direction |^scenario needs|^scenario file not found|^scenario file must contain valid JSON|^invalid scenario at /.test(e)) return 2;
   if (/did not finish within|ran out of time|never went quiet/.test(e)) return 3;
   if (/not found:|DISPLAY is unset|session is locked|unsupported (on|platform)/.test(e)) return 4;
   return 1;
