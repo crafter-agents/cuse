@@ -474,6 +474,11 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
     return { ok: false, ...base,
       error: `invalid --modifiers='${opts.modifiers}': unknown modifier '${invalidModifier}'` };
   }
+  if (action === "scroll" && args[0] !== undefined &&
+      !["up", "down", "left", "right"].includes(args[0])) {
+    return { ok: false, ...base,
+      error: `invalid scroll direction '${args[0]}': expected up, down, left, or right` };
+  }
   const { force = false, sameUnder = 1 } = opts;
   const timeoutMs = timeoutFor(action, opts.timeoutMs);
   const run = runner(action, timeoutMs);
@@ -908,10 +913,6 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       }
       case "scroll": {
         const dir = args[0] ?? "down";
-        if (!(["up", "down", "left", "right"] as const).includes(dir as "up" | "down" | "left" | "right")) {
-          return { ok: false, ...base,
-            error: `invalid scroll direction '${dir}': expected up, down, left, or right` };
-        }
         const amount = Number(args[1] ?? 3);
         await execute(scrollPlan(os, dir as "up" | "down" | "left" | "right", amount), run);
         return { ok: true, ...base, detail: `scrolled ${dir} ${amount}` };
