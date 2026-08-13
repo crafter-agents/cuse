@@ -156,6 +156,47 @@ test("ocr-read recognizes text through Vision or refuses an unsupported OS", asy
   }
 }, 30_000);
 
+test("inspect process finds a running process", async () => {
+  const result = await act("inspect", ["process"], { pid: process.pid });
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({ found: true, normalized: { pid: process.pid } });
+});
+
+test("inspect process requires a pid", async () => {
+  const result = await act("inspect", ["process"]);
+
+  expect(result).toMatchObject({ ok: false, error: expect.stringContaining("--pid") });
+});
+
+test("inspect port reports an unused port as not found", async () => {
+  const result = await act("inspect", ["port"], { port: 65_534 });
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({ found: false });
+});
+
+test("inspect file finds a regular file", async () => {
+  const result = await act("inspect", ["file", "package.json"]);
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({ found: true, normalized: { type: "file" } });
+});
+
+test("inspect file reports a nonexistent path as not found", async () => {
+  const result = await act("inspect", ["file", `missing-${process.pid}-${Date.now()}`]);
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({ found: false });
+});
+
+test("inspect requires a known noun", async () => {
+  expect(await act("inspect", [])).toMatchObject({ ok: false,
+    error: "inspect needs a noun: process, port, or file" });
+  expect(await act("inspect", ["service"])).toMatchObject({ ok: false,
+    error: "inspect needs a noun: process, port, or file" });
+});
+
 test("fill dispatches click, platform select-all, then type on every OS", async () => {
   for (const os of ["macos", "linux", "windows"] as OS[]) {
     const events: Array<{ kind: "plan"; value: Plan } | { kind: "run"; value: string[] }> = [];

@@ -26,6 +26,10 @@ import { recognizeText } from "./ocr.ts";
 import { parseScenario, runScenario, type ScenarioValue } from "./scenario.ts";
 import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
          successDetail, type WaitTarget } from "./wait.ts";
+import { probeProcess } from "./probes/process.ts";
+import { probePort } from "./probes/port.ts";
+import { probeFile } from "./probes/file.ts";
+import type { PortProtocol } from "./probes/types.ts";
 
 export type Options = {
   force?: boolean; sameUnder?: number; timeoutMs?: number;
@@ -59,6 +63,9 @@ export type Options = {
   video?: boolean;
   /** where to write it */
   out?: string;
+  pid?: number;
+  port?: number;
+  protocol?: string;
 };
 
 export type Result = {
@@ -494,7 +501,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
   // Fail before touching the machine, with the reason and the fix, not an opaque
   // exit code from a missing binary or an absent display.
-  if (!["os", "diff", "ocr-read", "scenario"].includes(action)) {
+  if (!["os", "diff", "ocr-read", "scenario", "inspect"].includes(action)) {
     const pre = preflight(os, action === "fill" ? "click" : action, probe);
     if (!pre.ok) return { ok: false, ...base, error: pre.reason };
   }
@@ -928,6 +935,48 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         return { ok: true, ...base,
           detail: result.lines.length ? `${result.lines.length} line(s) recognized` : "no text found",
           data: result };
+      }
+
+      case "inspect": {
+        const noun = args[0];
+        if (noun === "process") {
+          if (!Number.isSafeInteger(opts.pid) || opts.pid === undefined || opts.pid <= 0) {
+            return { ok: false, ...base, error: "inspect process needs --pid=<n>" };
+          }
+          const result = await probeProcess(opts.pid, os);
+          return { ok: true, ...base,
+            detail: result.found
+              ? `process ${result.normalized?.pid} found`
+              : `process not found or unavailable (${result.status})`,
+            data: result };
+        }
+        if (noun === "port") {
+          if (!Number.isSafeInteger(opts.port) || opts.port === undefined || opts.port < 0 || opts.port > 65_535) {
+            return { ok: false, ...base, error: "inspect port needs --port=<n>" };
+          }
+          const protocol = opts.protocol ?? "tcp";
+          if (protocol !== "tcp" && protocol !== "udp") {
+            return { ok: false, ...base,
+              error: `invalid --protocol='${protocol}': expected tcp or udp` };
+          }
+          const result = await probePort(opts.port, protocol as PortProtocol, os);
+          return { ok: true, ...base,
+            detail: result.found
+              ? `${protocol} port ${result.normalized?.port} found`
+              : `${protocol} port not found or unavailable (${result.status})`,
+            data: result };
+        }
+        if (noun === "file") {
+          const path = args[1];
+          if (!path) return { ok: false, ...base, error: "inspect file needs a path" };
+          const result = await probeFile(path, os);
+          return { ok: true, ...base,
+            detail: result.found
+              ? `file ${result.normalized?.path} found`
+              : `file not found or unavailable (${result.status})`,
+            data: result };
+        }
+        return { ok: false, ...base, error: "inspect needs a noun: process, port, or file" };
       }
 
       case "type": { await run(typeCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: "typed" }; }
