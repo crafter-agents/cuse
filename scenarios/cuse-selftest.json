@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "name": "cuse self-test on macOS",
+  "platforms": ["macos"],
+  "vars": {},
+  "defaultTimeoutMs": 15000,
+  "steps": [
+    {
+      "type": "cuse",
+      "action": "os",
+      "saveAs": "detectedOs"
+    },
+    {
+      "type": "assert",
+      "actual": "${steps.detectedOs.detail}",
+      "operator": "eq",
+      "expected": "macos"
+    },
+    {
+      "type": "cuse",
+      "action": "capture",
+      "args": ["before.png"]
+    },
+    {
+      "type": "cuse",
+      "action": "launch",
+      "args": ["TextEdit"]
+    },
+    {
+      "type": "cuse",
+      "action": "type",
+      "args": ["cuse made this cross-platform"]
+    },
+    {
+      "type": "cuse",
+      "action": "run",
+      "args": ["[[\"os\"],[\"os\"]]"]
+    },
+    {
+      "type": "cuse",
+      "action": "key",
+      "args": ["cmd+a"]
+    },
+    {
+      "type": "cuse",
+      "action": "capture",
+      "args": ["after.png"]
+    }
+  ]
+}
