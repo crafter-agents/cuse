@@ -10,6 +10,23 @@ import type {
 export type ScenarioStepStatus = "passed" | "failed" | "timed_out" | "not_implemented";
 export type ScenarioStatus = "passed" | "failed" | "timed_out" | "cleanup_failed" | "skipped";
 
+export type CuseInvocationResult = {
+  ok: boolean;
+  error?: string;
+  detail?: string;
+  data?: ScenarioValue;
+};
+
+export type CuseInvoker = (
+  action: string,
+  args: string[],
+  options?: Record<string, ScenarioValue>,
+) => Promise<CuseInvocationResult>;
+
+export type ScenarioRunOptions = {
+  invokeCuse?: CuseInvoker;
+};
+
 export type ScenarioStepResult = {
   phase: "steps" | "finally";
   index: number;
@@ -18,6 +35,7 @@ export type ScenarioStepResult = {
   timedOut: boolean;
   attempts: number;
   run?: RunResult;
+  cuse?: CuseInvocationResult;
   message?: string;
 };
 
@@ -148,6 +166,7 @@ function orderedComparison(
 async function executeStep(
   step: ScenarioStep,
   timeoutMs: number,
+  options: ScenarioRunOptions,
 ): Promise<Omit<ScenarioStepResult, "phase" | "index" | "step">> {
   switch (step.type) {
     case "exec": {
@@ -179,13 +198,36 @@ async function executeStep(
           `assertion ${step.operator} failed: expected ${displayValue(step.expected)}, observed ${displayValue(step.actual)}`,
       };
     }
-    case "cuse":
+    case "cuse": {
+      if (!options.invokeCuse) {
+        return {
+          status: "not_implemented",
+          timedOut: false,
+          attempts: 1,
+          message: "cuse step execution is not implemented",
+        };
+      }
+      let cuse: CuseInvocationResult;
+      try {
+        cuse = await options.invokeCuse(step.action, step.args ?? [], step.options);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          status: "failed",
+          timedOut: false,
+          attempts: 1,
+          cuse: { ok: false, error: message },
+          message,
+        };
+      }
       return {
-        status: "not_implemented",
+        status: cuse.ok ? "passed" : "failed",
         timedOut: false,
         attempts: 1,
-        message: "cuse step execution is not implemented",
+        cuse,
+        message: cuse.ok ? undefined : cuse.error ?? cuse.detail ?? "cuse action failed",
       };
+    }
     case "wait": {
       const deadline = Date.now() + timeoutMs;
       const intervalMs = step.intervalMs ?? 100;
@@ -194,7 +236,7 @@ async function executeStep(
         attempts++;
         const remaining = Math.max(1, deadline - Date.now());
         const nestedTimeout = Math.min(step.step.timeoutMs ?? timeoutMs, remaining);
-        const result = await executeStep(step.step, nestedTimeout);
+        const result = await executeStep(step.step, nestedTimeout, options);
         if (result.status === "passed" || result.status === "not_implemented") {
           return { ...result, attempts };
         }
@@ -214,8 +256,8 @@ async function executeStep(
 }
 
 // Saved values are stable, JSON-compatible summaries: exec saves its RunResult,
-// assert saves its resolved operands and verdict, cuse saves its implementation
-// status, and wait saves the same summary as its nested step.
+// assert saves its resolved operands and verdict, cuse saves its invocation
+// summary, and wait saves the same summary as its nested step.
 function savedValue(
   step: ScenarioStep,
   result: Omit<ScenarioStepResult, "phase" | "index" | "step">,
@@ -230,8 +272,12 @@ function savedValue(
       };
     case "assert":
       return { passed: result.status === "passed", actual: step.actual, expected: step.expected ?? null };
-    case "cuse":
-      return { status: "not_implemented" };
+    case "cuse": {
+      if (!result.cuse) return { status: "not_implemented" };
+      return Object.fromEntries(
+        Object.entries(result.cuse).filter(([, value]) => value !== undefined),
+      );
+    }
     case "wait":
       return savedValue(step.step, result);
   }
@@ -241,6 +287,7 @@ async function runStep(
   step: ScenarioStep,
   timeoutMs: number,
   context: ScenarioContext,
+  options: ScenarioRunOptions,
 ): Promise<Omit<ScenarioStepResult, "phase" | "index" | "step">> {
   let resolvedStep: ScenarioStep;
   try {
@@ -254,12 +301,15 @@ async function runStep(
     };
   }
 
-  const result = await executeStep(resolvedStep, timeoutMs);
+  const result = await executeStep(resolvedStep, timeoutMs, options);
   if (step.saveAs) context.steps[step.saveAs] = savedValue(resolvedStep, result);
   return result;
 }
 
-export async function runScenario(scenario: Scenario): Promise<ScenarioRunResult> {
+export async function runScenario(
+  scenario: Scenario,
+  options: ScenarioRunOptions = {},
+): Promise<ScenarioRunResult> {
   const startedAt = Date.now();
   const platform = currentPlatform();
   if (scenario.platforms && (!platform || !scenario.platforms.includes(platform))) {
@@ -278,7 +328,7 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioRunResult
 
   for (let index = 0; index < scenario.steps.length; index++) {
     const step = scenario.steps[index]!;
-    const result = await runStep(step, step.timeoutMs ?? scenario.defaultTimeoutMs!, context);
+    const result = await runStep(step, step.timeoutMs ?? scenario.defaultTimeoutMs!, context, options);
     results.push({ phase: "steps", index, step, ...result });
     if (result.status !== "passed") {
       normalStatus = result.status === "timed_out" ? "timed_out" : "failed";
@@ -289,7 +339,7 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioRunResult
   let cleanupFailed = false;
   for (let index = 0; index < (scenario.finally?.length ?? 0); index++) {
     const step = scenario.finally![index]!;
-    const result = await runStep(step, step.timeoutMs ?? scenario.defaultTimeoutMs!, context);
+    const result = await runStep(step, step.timeoutMs ?? scenario.defaultTimeoutMs!, context, options);
     results.push({ phase: "finally", index, step, ...result });
     if (result.status !== "passed") cleanupFailed = true;
   }

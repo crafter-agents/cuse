@@ -23,7 +23,7 @@ import { displaysCmd, parseDisplays, frameOrigin, coverageWarning, toScreenPoint
          desktopBounds, type Display } from "./display.ts";
 import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
 import { recognizeText } from "./ocr.ts";
-import { parseScenario, runScenario } from "./scenario.ts";
+import { parseScenario, runScenario, type ScenarioValue } from "./scenario.ts";
 import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
          successDetail, type WaitTarget } from "./wait.ts";
 
@@ -65,6 +65,14 @@ export type Result = {
   ok: boolean; action: string; os: OS;
   detail?: string; error?: string; warn?: string; data?: unknown;
 };
+
+function isScenarioValue(value: unknown): value is ScenarioValue {
+  if (value === null || typeof value === "boolean" || typeof value === "number" ||
+      typeof value === "string") return true;
+  if (Array.isArray(value)) return value.every(isScenarioValue);
+  if (typeof value !== "object") return false;
+  return Object.values(value).every(isScenarioValue);
+}
 
 /**
  * Run a command under a deadline, and on failure report what the OS said.
@@ -577,7 +585,17 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
             error: `invalid scenario at ${parsed.error.path}: ${parsed.error.message}` };
         }
 
-        const result = await runScenario(parsed.scenario);
+        const result = await runScenario(parsed.scenario, {
+          invokeCuse: async (action, args, options) => {
+            const invoked = await act(action, args, options as Options);
+            return {
+              ok: invoked.ok,
+              error: invoked.error,
+              detail: invoked.detail,
+              ...(isScenarioValue(invoked.data) ? { data: invoked.data } : {}),
+            };
+          },
+        });
         const ok = result.status === "passed";
         const failedStep = result.steps.find((step) => step.status !== "passed");
         const error = failedStep

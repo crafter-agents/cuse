@@ -122,6 +122,23 @@ describe("scenario execution lifecycle", () => {
 });
 
 describe("scenario variables and saved step results", () => {
+  test("invokes cuse actions and exposes saved results to later steps", async () => {
+    const calls: unknown[][] = [];
+    const result = await runScenario(scenario([
+      { type: "cuse", action: "os", args: ["current"], saveAs: "action" },
+      { type: "assert", actual: "${steps.action.data.platform}", operator: "eq", expected: "macos" },
+    ]), {
+      invokeCuse: async (action, args, options) => {
+        calls.push([action, args, options]);
+        return { ok: true, data: { platform: "macos" } };
+      },
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.steps.map((step) => step.status)).toEqual(["passed", "passed"]);
+    expect(calls).toEqual([["os", ["current"], undefined]]);
+  });
+
   test("reads saved exec stdout in a later assertion", async () => {
     const result = await runScenario(scenario([
       { ...exec("process.stdout.write('structured flow')"), saveAs: "command" },

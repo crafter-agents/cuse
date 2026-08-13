@@ -50,6 +50,25 @@ test("scenario runs a passing file and returns structured data", async () => {
   expect(result.data).toMatchObject({ name: "passing CLI scenario", status: "passed" });
 });
 
+test("scenario dispatches cuse steps through the real CLI action", async () => {
+  const path = scenarioPath("cuse-os");
+  await Bun.write(path, JSON.stringify({
+    version: 1,
+    name: "cuse CLI scenario",
+    vars: {},
+    defaultTimeoutMs: 1_000,
+    steps: [{ type: "cuse", action: "os", saveAs: "detected" }],
+  }));
+
+  const result = await act("scenario", [path]);
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({
+    status: "passed",
+    steps: [{ status: "passed", cuse: { ok: true } }],
+  });
+});
+
 test("scenario reports a failed assertion as a plain failure", async () => {
   const path = scenarioPath("failing");
   await Bun.write(path, JSON.stringify({
