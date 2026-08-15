@@ -26,6 +26,11 @@ import { recognizeText } from "./ocr.ts";
 import { parseScenario, runScenario, type ScenarioValue } from "./scenario.ts";
 import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
          successDetail, type WaitTarget } from "./wait.ts";
+import { probeProcess } from "./probes/process.ts";
+import { probePort } from "./probes/port.ts";
+import { probeFile } from "./probes/file.ts";
+import { probeScheduledTask } from "./probes/scheduled-task.ts";
+import type { PortProtocol } from "./probes/types.ts";
 
 export type Options = {
   force?: boolean; sameUnder?: number; timeoutMs?: number;
@@ -44,6 +49,8 @@ export type Options = {
   role?: string;
   /** which application's controls to look at */
   app?: string;
+  /** which named object (e.g. scheduled task) to inspect */
+  name?: string;
   /** mouse button used by click and dblclick */
   button?: string;
   /** modifier chord held during click and dblclick */
@@ -59,6 +66,9 @@ export type Options = {
   video?: boolean;
   /** where to write it */
   out?: string;
+  pid?: number;
+  port?: number;
+  protocol?: string;
 };
 
 export type Result = {
@@ -494,7 +504,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
   // Fail before touching the machine, with the reason and the fix, not an opaque
   // exit code from a missing binary or an absent display.
-  if (!["os", "diff", "ocr-read", "scenario"].includes(action)) {
+  if (!["os", "diff", "ocr-read", "scenario", "inspect"].includes(action)) {
     const pre = preflight(os, action === "fill" ? "click" : action, probe);
     if (!pre.ok) return { ok: false, ...base, error: pre.reason };
   }
@@ -795,25 +805,33 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         const gone = opts.gone ?? false;
         let looks = 0;
         let sample = "";
+        const beforeDeadline = async <T>(probe: Promise<T>): Promise<T> => {
+          const left = Math.max(0, deadline - Date.now());
+          if (left === 0) throw new Error("the wait deadline expired during the platform query");
+          return Promise.race([
+            probe,
+            Bun.sleep(left).then(() => { throw new Error("the wait deadline expired during the platform query"); }),
+          ]);
+        };
 
         for (;;) {
           looks++;
           let found = false;
           try {
             if (target.element || target.role) {
-              const { els } = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs,
-                                                 opts.depth, opts.limit);
+              const { els } = await beforeDeadline(
+                listElements(os, opts.app ?? opts.window ?? "", timeoutMs, opts.depth, opts.limit));
               found = pickElement(els, { name: target.element, role: target.role }) !== null;
               sample = describeMisses(els, { name: target.element, role: target.role }, 5);
             } else {
-              const wins = await listWindows(os, timeoutMs);
+              const wins = await beforeDeadline(listWindows(os, timeoutMs));
               found = pickWindow(wins, target.window!) !== null;
               // A dialog can hold the keyboard without being enumerable: on
               // Windows the "Select an app" chooser is frontmost and absent from
               // the window list, so waiting for it never ended. What has focus
               // is part of what is on screen.
               if (!found) {
-                const fr = await runWithTimeout(frontmostCmd(os), 5000);
+                const fr = await beforeDeadline(runWithTimeout(frontmostCmd(os), 5000));
                 const front = fr.code === 0 && !fr.timedOut ? parseFrontmost(fr.stdout) : "";
                 found = front !== "" && frontmostMatches(front, target.window!);
                 sample = [wins.map((w) => w.title).filter(Boolean).slice(0, 4).join(", "),
@@ -835,7 +853,8 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           }
           const gap = nextGap(deadline, Date.now(), gapMs);
           if (gap === 0) {
-            const blind = blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), !sample);
+            const blind = sample ? undefined
+              : blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), true);
             return { ok: false, ...base,
               error: timeoutReason(target, gone, elapsed, blind ?? sample),
               data: { waitedMs: elapsed, looks } };
@@ -928,6 +947,57 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         return { ok: true, ...base,
           detail: result.lines.length ? `${result.lines.length} line(s) recognized` : "no text found",
           data: result };
+      }
+
+      case "inspect": {
+        const noun = args[0];
+        if (noun === "process") {
+          if (!Number.isSafeInteger(opts.pid) || opts.pid === undefined || opts.pid <= 0) {
+            return { ok: false, ...base, error: "inspect process needs --pid=<n>" };
+          }
+          const result = await probeProcess(opts.pid, os);
+          return { ok: true, ...base,
+            detail: result.found
+              ? `process ${result.normalized?.pid} found`
+              : `process not found or unavailable (${result.status})`,
+            data: result };
+        }
+        if (noun === "port") {
+          if (!Number.isSafeInteger(opts.port) || opts.port === undefined || opts.port < 0 || opts.port > 65_535) {
+            return { ok: false, ...base, error: "inspect port needs --port=<n>" };
+          }
+          const protocol = opts.protocol ?? "tcp";
+          if (protocol !== "tcp" && protocol !== "udp") {
+            return { ok: false, ...base,
+              error: `invalid --protocol='${protocol}': expected tcp or udp` };
+          }
+          const result = await probePort(opts.port, protocol as PortProtocol, os);
+          return { ok: true, ...base,
+            detail: result.found
+              ? `${protocol} port ${result.normalized?.port} found`
+              : `${protocol} port not found or unavailable (${result.status})`,
+            data: result };
+        }
+        if (noun === "file") {
+          const path = args[1];
+          if (!path) return { ok: false, ...base, error: "inspect file needs a path" };
+          const result = await probeFile(path, os);
+          return { ok: true, ...base,
+            detail: result.found
+              ? `file ${result.normalized?.path} found`
+              : `file not found or unavailable (${result.status})`,
+            data: result };
+        }
+        if (noun === "scheduled-task") {
+          if (!opts.name) return { ok: false, ...base, error: "inspect scheduled-task needs --name=<n>" };
+          const result = await probeScheduledTask(opts.name, os);
+          return { ok: true, ...base,
+            detail: result.found
+              ? `scheduled task ${result.normalized?.name} found`
+              : `scheduled task not found or unavailable (${result.status})`,
+            data: result };
+        }
+        return { ok: false, ...base, error: "inspect needs a noun: process, port, file, or scheduled-task" };
       }
 
       case "type": { await run(typeCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: "typed" }; }
@@ -1135,7 +1205,21 @@ if (import.meta.main) {
     await serve({ app: opts.app, window: opts.window, timeoutMs: opts.timeoutMs, force: opts.force });
     process.exit(0);
   }
+  const waitWatchdog = action === "wait" ? setTimeout(() => {
+    const target: WaitTarget = { element: opts.element, role: opts.role, window: opts.window };
+    const budget = opts.timeoutMs ?? 30_000;
+    const result: Result = {
+      ok: false,
+      action: "wait",
+      os: detectOS(),
+      error: timeoutReason(target, opts.gone ?? false, budget),
+      data: { waitedMs: budget },
+    };
+    console.log(wantJson ? JSON.stringify(result) : `cuse: ${result.error}`);
+    process.exit(3);
+  }, (opts.timeoutMs ?? 30_000) + 100) : undefined;
   const r = await act(action, args, opts);
+  if (waitWatchdog !== undefined) clearTimeout(waitWatchdog);
   console.log(wantJson ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cuse: ${r.error}`);
   if (!wantJson && r.warn) console.warn(`cuse: warning: ${r.warn}`);
   process.exit(exitCodeFor(r));

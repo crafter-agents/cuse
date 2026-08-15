@@ -17,6 +17,11 @@
 //      cuse returns; it does not stay to collect what a wedged process might
 //      still write.
 
+import { closeSync, openSync, readFileSync } from "node:fs";
+import { spawn as nodeSpawn } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 export type RunResult = { code: number; stdout: string; stderr: string; timedOut: boolean };
 export type BytesResult = { code: number; stdout: Uint8Array; stderr: string; timedOut: boolean };
 
@@ -64,13 +69,90 @@ async function descendants(pid: number): Promise<number[]> {
 async function killTree(pid: number): Promise<void> {
   if (process.platform === "win32") {
     // taskkill /T is the only thing that reaches a Windows process tree.
-    try { Bun.spawn(["taskkill", "/PID", String(pid), "/T", "/F"], { stdout: "ignore", stderr: "ignore" }); } catch { /* gone */ }
+    try {
+      const killer = nodeSpawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        stdio: "ignore", windowsHide: true, detached: true,
+      });
+      killer.unref();
+    } catch { /* gone */ }
     return;
   }
   const kids = await descendants(pid);
   for (const p of [...kids, pid]) {
     try { process.kill(p, "SIGKILL"); } catch { /* already gone */ }
   }
+}
+
+type PipeRead<T> = { value: Promise<T>; cancel: () => void };
+
+function readPipe<T>(stream: ReadableStream<Uint8Array>, convert: (chunks: Uint8Array[]) => T): PipeRead<T> {
+  const reader = stream.getReader();
+  const value = (async (): Promise<T> => {
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const next = await reader.read();
+      if (next.done) return convert(chunks);
+      chunks.push(next.value);
+    }
+  })();
+  return {
+    value,
+    cancel: () => { void reader.cancel().catch(() => { /* already closed */ }); },
+  };
+}
+
+function joinBytes(chunks: Uint8Array[]): Uint8Array {
+  const length = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const joined = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return joined;
+}
+
+const asText = (chunks: Uint8Array[]): string => new TextDecoder().decode(joinBytes(chunks));
+
+async function runWindows(argv: string[], ms: number, bytes: false): Promise<RunResult>;
+async function runWindows(argv: string[], ms: number, bytes: true): Promise<BytesResult>;
+async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<RunResult | BytesResult> {
+  const id = crypto.randomUUID();
+  const stdoutPath = join(tmpdir(), `cuse-${id}.stdout`);
+  const stderrPath = join(tmpdir(), `cuse-${id}.stderr`);
+  const stdoutFd = openSync(stdoutPath, "w");
+  const stderrFd = openSync(stderrPath, "w");
+  // Bun's Windows subprocess handle can remain referenced after unref() when
+  // the child is stuck in UI Automation. Node's ChildProcess releases that
+  // handle predictably, while taskkill still provides whole-tree cleanup.
+  const proc = nodeSpawn(argv[0]!, argv.slice(1), {
+    stdio: ["ignore", stdoutFd, stderrFd],
+    windowsHide: true,
+  });
+  closeSync(stdoutFd);
+  closeSync(stderrFd);
+  let spawnError: Error | undefined;
+  let exitCode: number | undefined;
+  proc.once("error", (error) => { spawnError = error; });
+  proc.once("exit", (code) => { exitCode = code ?? -1; });
+  const deadline = Date.now() + ms;
+  while (exitCode === undefined && spawnError === undefined && Date.now() < deadline) {
+    await Bun.sleep(Math.min(20, Math.max(1, deadline - Date.now())));
+  }
+  if (spawnError) throw spawnError;
+  if (exitCode === undefined) {
+    proc.removeAllListeners();
+    proc.unref();
+    if (proc.pid !== undefined) await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+    return bytes
+      ? { code: -1, stdout: new Uint8Array(0), stderr: "", timedOut: true }
+      : { code: -1, stdout: "", stderr: "", timedOut: true };
+  }
+  const stdout = readFileSync(stdoutPath);
+  const stderr = readFileSync(stderrPath, "utf8");
+  return bytes
+    ? { code: exitCode, stdout: new Uint8Array(stdout), stderr, timedOut: false }
+    : { code: exitCode, stdout: stdout.toString("utf8"), stderr, timedOut: false };
 }
 
 /**
@@ -81,14 +163,14 @@ async function killTree(pid: number): Promise<void> {
  * that ignores signals cannot hold cuse open.
  */
 export async function runWithTimeout(argv: string[], ms: number): Promise<RunResult> {
+  if (process.platform === "win32") return runWindows(argv, ms, false);
   const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const stdout = readPipe(proc.stdout, asText);
+  const stderr = readPipe(proc.stderr, asText);
 
   const collect = (async (): Promise<RunResult> => {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    return { code: await proc.exited, stdout, stderr, timedOut: false };
+    const [out, err] = await Promise.all([stdout.value, stderr.value]);
+    return { code: await proc.exited, stdout: out, stderr: err, timedOut: false };
   })();
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -99,10 +181,14 @@ export async function runWithTimeout(argv: string[], ms: number): Promise<RunRes
   const result = await Promise.race([collect, expired]);
   clearTimeout(timer);
   if (result.timedOut) {
+    stdout.cancel();
+    stderr.cancel();
+    proc.unref();
     // Clean up the tree, but bounded: reaping must not become the new way to
     // hang. Without waiting at all, cuse exits first and leaves the grandchild
     // running - observed with a wrapper script holding a sleep.
     await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+    try { proc.kill(); } catch { /* gone */ }
   }
   return result;
 }
@@ -110,13 +196,13 @@ export async function runWithTimeout(argv: string[], ms: number): Promise<RunRes
 /** Same deadline, but keeping stdout as bytes - xwd writes a binary dump there,
  *  and reading it as text would quietly corrupt every pixel. */
 export async function runBytes(argv: string[], ms: number): Promise<BytesResult> {
+  if (process.platform === "win32") return runWindows(argv, ms, true);
   const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const stdout = readPipe(proc.stdout, joinBytes);
+  const stderr = readPipe(proc.stderr, asText);
   const collect = (async (): Promise<BytesResult> => {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).arrayBuffer().then((a) => new Uint8Array(a)),
-      new Response(proc.stderr).text(),
-    ]);
-    return { code: await proc.exited, stdout, stderr, timedOut: false };
+    const [out, err] = await Promise.all([stdout.value, stderr.value]);
+    return { code: await proc.exited, stdout: out, stderr: err, timedOut: false };
   })();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<BytesResult>((res) => {
@@ -124,7 +210,13 @@ export async function runBytes(argv: string[], ms: number): Promise<BytesResult>
   });
   const result = await Promise.race([collect, expired]);
   clearTimeout(timer);
-  if (result.timedOut) await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+  if (result.timedOut) {
+    stdout.cancel();
+    stderr.cancel();
+    proc.unref();
+    await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+    try { proc.kill(); } catch { /* gone */ }
+  }
   return result;
 }
 

@@ -1,6 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { act, exitCodeFor, fillTarget, VERSION, type Result } from "../src/cli.ts";
 import type { OS } from "../src/os.ts";
+import { detectOS } from "../src/os.ts";
 import type { Plan } from "../src/plan.ts";
 
 const r = (over: Partial<Result>): Result => ({ ok: false, action: "type", os: "macos", ...over });
@@ -155,6 +156,63 @@ test("ocr-read recognizes text through Vision or refuses an unsupported OS", asy
     expect(exitCodeFor(result)).toBe(4);
   }
 }, 30_000);
+
+test("inspect process finds a running process", async () => {
+  const result = await act("inspect", ["process"], { pid: process.pid });
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({ found: true, normalized: { pid: process.pid } });
+});
+
+test("inspect process requires a pid", async () => {
+  const result = await act("inspect", ["process"]);
+
+  expect(result).toMatchObject({ ok: false, error: expect.stringContaining("--pid") });
+});
+
+test("inspect port reports an unused port as not found", async () => {
+  const result = await act("inspect", ["port"], { port: 65_534 });
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({ found: false });
+});
+
+test("inspect file finds a regular file", async () => {
+  const result = await act("inspect", ["file", "package.json"]);
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({ found: true, normalized: { type: "file" } });
+});
+
+test("inspect file reports a nonexistent path as not found", async () => {
+  const result = await act("inspect", ["file", `missing-${process.pid}-${Date.now()}`]);
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({ found: false });
+});
+
+test("inspect scheduled-task requires a name", async () => {
+  const result = await act("inspect", ["scheduled-task"]);
+
+  expect(result).toMatchObject({ ok: false, error: expect.stringContaining("--name") });
+});
+
+test("inspect scheduled-task reports unavailable on a non-windows host", async () => {
+  const result = await act("inspect", ["scheduled-task"], { name: `cuse-missing-${process.pid}` });
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({
+    found: false,
+    status: detectOS() === "windows" ? "not-found" : "unavailable",
+  });
+});
+
+test("inspect requires a known noun", async () => {
+  expect(await act("inspect", [])).toMatchObject({ ok: false,
+    error: "inspect needs a noun: process, port, file, or scheduled-task" });
+  expect(await act("inspect", ["service"])).toMatchObject({ ok: false,
+    error: "inspect needs a noun: process, port, file, or scheduled-task" });
+});
 
 test("fill dispatches click, platform select-all, then type on every OS", async () => {
   for (const os of ["macos", "linux", "windows"] as OS[]) {
