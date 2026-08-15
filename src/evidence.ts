@@ -1,5 +1,10 @@
+import { appendFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import type { ScenarioStepEventSink } from "./scenario-run.ts";
+
 export const EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const REDACTED_VALUE = "[REDACTED]" as const;
+export const STEP_EVIDENCE_FILENAME = "steps.jsonl" as const;
 
 export const EVIDENCE_ENVIRONMENT_ALLOWLIST = [
   "CI",
@@ -101,4 +106,23 @@ export function createEvidenceManifest(input: EvidenceManifestInput): EvidenceMa
 
 export function serializeEvidenceManifest(manifest: EvidenceManifest): string {
   return JSON.stringify(sortJson(redactSensitiveValues(manifest)), null, 2);
+}
+
+export async function createStepEvidenceSink(
+  evidenceRoot: string,
+): Promise<ScenarioStepEventSink> {
+  await mkdir(evidenceRoot, { recursive: true });
+  const ledgerPath = join(evidenceRoot, STEP_EVIDENCE_FILENAME);
+  let pending = Promise.resolve();
+
+  return async (event) => {
+    const write = pending.then(() =>
+      appendFile(
+        ledgerPath,
+        `${JSON.stringify(sortJson(redactSensitiveValues(event)))}\n`,
+        "utf8",
+      ));
+    pending = write.then(() => undefined, () => undefined);
+    await write;
+  };
 }
