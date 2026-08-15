@@ -1205,7 +1205,21 @@ if (import.meta.main) {
     await serve({ app: opts.app, window: opts.window, timeoutMs: opts.timeoutMs, force: opts.force });
     process.exit(0);
   }
+  const waitWatchdog = action === "wait" ? setTimeout(() => {
+    const target: WaitTarget = { element: opts.element, role: opts.role, window: opts.window };
+    const budget = opts.timeoutMs ?? 30_000;
+    const result: Result = {
+      ok: false,
+      action: "wait",
+      os: detectOS(),
+      error: timeoutReason(target, opts.gone ?? false, budget),
+      data: { waitedMs: budget },
+    };
+    console.log(wantJson ? JSON.stringify(result) : `cuse: ${result.error}`);
+    process.exit(3);
+  }, (opts.timeoutMs ?? 30_000) + 100) : undefined;
   const r = await act(action, args, opts);
+  if (waitWatchdog !== undefined) clearTimeout(waitWatchdog);
   console.log(wantJson ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cuse: ${r.error}`);
   if (!wantJson && r.warn) console.warn(`cuse: warning: ${r.warn}`);
   process.exit(exitCodeFor(r));
