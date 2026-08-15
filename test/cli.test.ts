@@ -190,11 +190,24 @@ test("inspect file reports a nonexistent path as not found", async () => {
   expect(result.data).toMatchObject({ found: false });
 });
 
+test("inspect scheduled-task requires a name", async () => {
+  const result = await act("inspect", ["scheduled-task"]);
+
+  expect(result).toMatchObject({ ok: false, error: expect.stringContaining("--name") });
+});
+
+test("inspect scheduled-task reports unavailable on a non-windows host", async () => {
+  const result = await act("inspect", ["scheduled-task"], { name: "Portless Proxy" });
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({ found: false, status: "unavailable" });
+});
+
 test("inspect requires a known noun", async () => {
   expect(await act("inspect", [])).toMatchObject({ ok: false,
-    error: "inspect needs a noun: process, port, or file" });
+    error: "inspect needs a noun: process, port, file, or scheduled-task" });
   expect(await act("inspect", ["service"])).toMatchObject({ ok: false,
-    error: "inspect needs a noun: process, port, or file" });
+    error: "inspect needs a noun: process, port, file, or scheduled-task" });
 });
 
 test("fill dispatches click, platform select-all, then type on every OS", async () => {

@@ -29,6 +29,7 @@ import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
 import { probeProcess } from "./probes/process.ts";
 import { probePort } from "./probes/port.ts";
 import { probeFile } from "./probes/file.ts";
+import { probeScheduledTask } from "./probes/scheduled-task.ts";
 import type { PortProtocol } from "./probes/types.ts";
 
 export type Options = {
@@ -48,6 +49,8 @@ export type Options = {
   role?: string;
   /** which application's controls to look at */
   app?: string;
+  /** which named object (e.g. scheduled task) to inspect */
+  name?: string;
   /** mouse button used by click and dblclick */
   button?: string;
   /** modifier chord held during click and dblclick */
@@ -976,7 +979,16 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
               : `file not found or unavailable (${result.status})`,
             data: result };
         }
-        return { ok: false, ...base, error: "inspect needs a noun: process, port, or file" };
+        if (noun === "scheduled-task") {
+          if (!opts.name) return { ok: false, ...base, error: "inspect scheduled-task needs --name=<n>" };
+          const result = await probeScheduledTask(opts.name, os);
+          return { ok: true, ...base,
+            detail: result.found
+              ? `scheduled task ${result.normalized?.name} found`
+              : `scheduled task not found or unavailable (${result.status})`,
+            data: result };
+        }
+        return { ok: false, ...base, error: "inspect needs a noun: process, port, file, or scheduled-task" };
       }
 
       case "type": { await run(typeCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: "typed" }; }
