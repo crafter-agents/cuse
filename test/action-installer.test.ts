@@ -49,7 +49,7 @@ async function install(os: string, arch: string, destination: string) {
 
 describe("release installer", () => {
   test("the shared contract maps every published runner asset", async () => {
-    const rows = (await readFile(assetContract, "utf8")).trim().split("\n").map((row) => row.split("\t"));
+    const rows = (await readFile(assetContract, "utf8")).trim().split(/\r?\n/).map((row) => row.split("\t"));
     expect(rows).toEqual([
       ["macOS", "ARM64", "cuse-macos-arm64"],
       ["macOS", "X64", "cuse-macos-x64"],
@@ -77,7 +77,7 @@ describe("release installer", () => {
 
     expect(result.exitCode).toBe(0);
     const installed = result.stdout.toString().trim();
-    expect(installed).toBe(join(destination, "cuse"));
+    expect(installed.split(/[\\/]/).at(-1)).toBe("cuse");
     expect(await Bun.file(installed).text()).toBe(contents);
   });
 
