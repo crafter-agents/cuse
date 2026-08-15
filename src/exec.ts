@@ -157,9 +157,7 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
       : { code: -1, stdout: "", stderr: "", timedOut: true };
   }
   if (outcome instanceof Error) {
-    return bytes
-      ? { code: -1, stdout: new Uint8Array(0), stderr: outcome.message, timedOut: false }
-      : { code: -1, stdout: "", stderr: outcome.message, timedOut: false };
+    throw outcome;
   }
   const stdout = readFileSync(stdoutPath);
   const stderr = readFileSync(stderrPath, "utf8");
