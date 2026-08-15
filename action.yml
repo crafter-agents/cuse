@@ -1,9 +1,9 @@
-name: Set up cuse
-description: Prepare the runner and install a verified cuse release
+name: Run cuse scenario
+description: Install cuse and run a checked-in scenario with structured outputs
 
 inputs:
   scenario:
-    description: Path to the checked-in scenario to inspect before execution
+    description: Path to the checked-in scenario to execute
     required: true
   version:
     description: Released cuse version to install
@@ -17,11 +17,21 @@ inputs:
     description: Whether to install Linux AT-SPI accessibility support (true or false)
     required: false
     default: "false"
+  working-directory:
+    description: Repository-relative directory from which to run the scenario
+    required: false
+    default: "."
 
 outputs:
   executable-path:
     description: Absolute path to the verified cuse executable
     value: ${{ steps.install-unix.outputs.path || steps.install-windows.outputs.path }}
+  verdict:
+    description: Structured scenario verdict
+    value: ${{ steps.execute-unix.outputs.verdict || steps.execute-windows.outputs.verdict }}
+  result-json:
+    description: Complete structured scenario result
+    value: ${{ steps.execute-unix.outputs.result-json || steps.execute-windows.outputs.result-json }}
 
 runs:
   using: composite
@@ -68,3 +78,53 @@ runs:
       run: |
         $path = & "${env:GITHUB_ACTION_PATH}/scripts/action/install.ps1" $env:CUSE_VERSION $env:RUNNER_OS $env:RUNNER_ARCH "${env:RUNNER_TEMP}/cuse"
         "path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+    - id: execute-unix
+      name: Execute scenario
+      if: runner.os != 'Windows'
+      continue-on-error: true
+      shell: bash
+      env:
+        CUSE_EXECUTABLE: ${{ steps.install-unix.outputs.path }}
+        CUSE_SCENARIO: ${{ inputs.scenario }}
+        CUSE_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        "${GITHUB_ACTION_PATH}/scripts/action/execute.sh" \
+          "${CUSE_EXECUTABLE}" "${CUSE_SCENARIO}" \
+          "${CUSE_WORKING_DIRECTORY}" "${GITHUB_OUTPUT}"
+
+    - id: execute-windows
+      name: Execute scenario
+      if: runner.os == 'Windows'
+      continue-on-error: true
+      shell: pwsh
+      env:
+        CUSE_EXECUTABLE: ${{ steps.install-windows.outputs.path }}
+        CUSE_SCENARIO: ${{ inputs.scenario }}
+        CUSE_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        & "${env:GITHUB_ACTION_PATH}/scripts/action/execute.ps1" $env:CUSE_EXECUTABLE $env:CUSE_SCENARIO $env:CUSE_WORKING_DIRECTORY $env:GITHUB_OUTPUT
+
+    - name: Preserve scenario exit code
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        CUSE_EXIT_CODE: ${{ steps.execute-unix.outputs.exit-code }}
+      run: |
+        [[ "${CUSE_EXIT_CODE}" =~ ^[0-9]+$ ]] || {
+          echo "cuse execution adapter did not report an exit code" >&2
+          exit 4
+        }
+        exit "${CUSE_EXIT_CODE}"
+
+    - name: Preserve scenario exit code
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        CUSE_EXIT_CODE: ${{ steps.execute-windows.outputs.exit-code }}
+      run: |
+        if ($env:CUSE_EXIT_CODE -notmatch '^\d+$') {
+          Write-Error "cuse execution adapter did not report an exit code"
+          exit 4
+        }
+        exit [int]$env:CUSE_EXIT_CODE
