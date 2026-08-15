@@ -78,7 +78,7 @@ describe("release installer", () => {
     expect(result.exitCode).toBe(0);
     const installed = result.stdout.toString().trim();
     expect(installed.split(/[\\/]/).at(-1)).toBe("cuse");
-    expect(await Bun.file(installed).text()).toBe(contents);
+    expect(await Bun.file(join(destination, "cuse")).text()).toBe(contents);
   });
 
   test("a checksum mismatch leaves no executable", async () => {
