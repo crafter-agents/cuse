@@ -21,6 +21,10 @@ inputs:
     description: Repository-relative directory from which to run the scenario
     required: false
     default: "."
+  evidence-name:
+    description: Portable name for the prepared evidence directory
+    required: false
+    default: cuse-evidence
 
 outputs:
   executable-path:
@@ -32,6 +36,9 @@ outputs:
   result-json:
     description: Complete structured scenario result
     value: ${{ steps.execute-unix.outputs.result-json || steps.execute-windows.outputs.result-json }}
+  evidence-path:
+    description: Absolute path to the prepared evidence directory
+    value: ${{ steps.evidence-unix.outputs.evidence-path || steps.evidence-windows.outputs.evidence-path }}
 
 runs:
   using: composite
@@ -104,6 +111,33 @@ runs:
         CUSE_WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         & "${env:GITHUB_ACTION_PATH}/scripts/action/execute.ps1" $env:CUSE_EXECUTABLE $env:CUSE_SCENARIO $env:CUSE_WORKING_DIRECTORY $env:GITHUB_OUTPUT
+
+    - id: evidence-unix
+      name: Prepare scenario evidence and summary
+      if: always() && runner.os != 'Windows'
+      shell: bash
+      env:
+        CUSE_EVIDENCE_NAME: ${{ inputs.evidence-name }}
+        CUSE_RESULT_JSON: ${{ steps.execute-unix.outputs.result-json }}
+        CUSE_EXIT_CODE: ${{ steps.execute-unix.outputs.exit-code }}
+      run: |
+        node "${GITHUB_ACTION_PATH}/scripts/action/prepare-evidence.mjs" \
+          "${RUNNER_TEMP}" "${CUSE_EVIDENCE_NAME}" "${CUSE_RESULT_JSON}" \
+          "${CUSE_EXIT_CODE}" "${GITHUB_OUTPUT}" "${GITHUB_STEP_SUMMARY}"
+
+    - id: evidence-windows
+      name: Prepare scenario evidence and summary
+      if: always() && runner.os == 'Windows'
+      shell: pwsh
+      env:
+        CUSE_EVIDENCE_NAME: ${{ inputs.evidence-name }}
+        CUSE_RESULT_JSON: ${{ steps.execute-windows.outputs.result-json }}
+        CUSE_EXIT_CODE: ${{ steps.execute-windows.outputs.exit-code }}
+      run: |
+        & node "${env:GITHUB_ACTION_PATH}/scripts/action/prepare-evidence.mjs" `
+          ([string]$env:RUNNER_TEMP) ([string]$env:CUSE_EVIDENCE_NAME) `
+          ([string]$env:CUSE_RESULT_JSON) ([string]$env:CUSE_EXIT_CODE) `
+          ([string]$env:GITHUB_OUTPUT) ([string]$env:GITHUB_STEP_SUMMARY)
 
     - name: Preserve scenario exit code
       if: runner.os != 'Windows'
