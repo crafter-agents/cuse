@@ -1,0 +1,5 @@
+macOS	ARM64	cuse-macos-arm64
+macOS	X64	cuse-macos-x64
+Linux	ARM64	cuse-linux-arm64
+Linux	X64	cuse-linux-x64
+Windows	X64	cuse-windows-x64.exe

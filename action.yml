@@ -1,0 +1,36 @@
+name: Install cuse
+description: Download and verify a released cuse executable for the current runner
+
+inputs:
+  version:
+    description: Released cuse version to install
+    required: false
+    default: v0.1.0
+
+outputs:
+  executable-path:
+    description: Absolute path to the verified cuse executable
+    value: ${{ steps.install-unix.outputs.path || steps.install-windows.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - id: install-unix
+      name: Download and verify cuse
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        CUSE_VERSION: ${{ inputs.version }}
+      run: |
+        path="$("${GITHUB_ACTION_PATH}/scripts/action/install.sh" "${CUSE_VERSION}" "${RUNNER_OS}" "${RUNNER_ARCH}" "${RUNNER_TEMP}/cuse")"
+        echo "path=${path}" >> "${GITHUB_OUTPUT}"
+
+    - id: install-windows
+      name: Download and verify cuse
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        CUSE_VERSION: ${{ inputs.version }}
+      run: |
+        $path = & "${env:GITHUB_ACTION_PATH}/scripts/action/install.ps1" $env:CUSE_VERSION $env:RUNNER_OS $env:RUNNER_ARCH "${env:RUNNER_TEMP}/cuse"
+        "path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
