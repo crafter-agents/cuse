@@ -4,7 +4,7 @@ import type { OS } from "../os.ts";
 import { PROBE_SCHEMA_VERSION, type ProcessProbeResult } from "./types.ts";
 
 const TIMEOUT_MS = 5_000;
-const WINDOWS_TIMEOUT_MS = 10_000;
+const WINDOWS_TIMEOUT_MS = 20_000;
 
 function source(platform: OS): string {
   return platform === "windows" ? "powershell" : "ps";

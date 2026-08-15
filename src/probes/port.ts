@@ -7,6 +7,7 @@ import {
 } from "./types.ts";
 
 const TIMEOUT_MS = 5_000;
+const WINDOWS_TIMEOUT_MS = 10_000;
 
 function source(platform: OS): string {
   return platform === "windows" ? "powershell" : "lsof";
@@ -63,9 +64,9 @@ if ($null -eq $endpoint) { exit 0 }
     try {
       const result = await runWithTimeout(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-        TIMEOUT_MS,
+        WINDOWS_TIMEOUT_MS,
       );
-      if (result.timedOut) return unavailable(platform, `powershell did not finish within ${TIMEOUT_MS}ms`);
+      if (result.timedOut) return unavailable(platform, `powershell did not finish within ${WINDOWS_TIMEOUT_MS}ms`);
       if (result.code !== 0) {
         const details = result.stderr.trim();
         return unavailable(platform, details ? `powershell: ${details}` : `powershell exited ${result.code}`);
