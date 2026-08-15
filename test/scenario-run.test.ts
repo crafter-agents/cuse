@@ -6,6 +6,7 @@ import {
   type ScenarioPlatform,
   type ScenarioStep,
 } from "../src/scenario.ts";
+import type { ScenarioStepEvent } from "../src/scenario-run.ts";
 
 const scenario = (steps: ScenarioStep[], cleanup: ScenarioStep[] = []): Scenario => ({
   version: SCENARIO_SCHEMA_VERSION,
@@ -23,6 +24,61 @@ const exec = (script: string, timeoutMs?: number): ScenarioStep => ({
 });
 
 describe("scenario execution lifecycle", () => {
+  test("emits ordered events for a normal failure followed by cleanup", async () => {
+    const events: ScenarioStepEvent[] = [];
+    const result = await runScenario(scenario([
+      exec("process.exit(7)"),
+      exec("console.log('not reached')"),
+    ], [exec("console.log('cleanup')")]), {
+      onStepEvent: (event) => events.push(event),
+    });
+
+    expect(events.map((event) => [event.type, event.phase, event.index])).toEqual([
+      ["start", "steps", 0],
+      ["terminal", "steps", 0],
+      ["start", "finally", 0],
+      ["terminal", "finally", 0],
+    ]);
+    expect(events.filter((event) => event.type === "terminal").map((event) => event.result))
+      .toEqual(result.steps);
+  });
+
+  test("retains partial command output in a timed-out terminal event", async () => {
+    const events: ScenarioStepEvent[] = [];
+    const result = await runScenario(scenario([{
+      type: "wait",
+      timeoutMs: 100,
+      intervalMs: 100,
+      step: exec("process.stdout.write('partial output'); process.exit(1)"),
+    }]), {
+      onStepEvent: (event) => events.push(event),
+    });
+
+    expect(result.status).toBe("timed_out");
+    expect(events).toHaveLength(2);
+    expect(events[1]).toMatchObject({
+      type: "terminal",
+      phase: "steps",
+      index: 0,
+      result: {
+        status: "timed_out",
+        timedOut: true,
+        run: { stdout: "partial output" },
+      },
+    });
+  });
+
+  test("returns unchanged results when the event sink is omitted", async () => {
+    const input = scenario([
+      exec("console.log('normal')"),
+    ], [exec("console.log('cleanup')")]);
+
+    const implicit = await runScenario(input);
+    const explicit = await runScenario(input, {});
+
+    expect(explicit).toEqual({ ...implicit, durationMs: explicit.durationMs });
+  });
+
   test("executes successful steps in declared order", async () => {
     const result = await runScenario(scenario([
       exec("console.log('first')"),

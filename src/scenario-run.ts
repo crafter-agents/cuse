@@ -23,10 +23,6 @@ export type CuseInvoker = (
   options?: Record<string, ScenarioValue>,
 ) => Promise<CuseInvocationResult>;
 
-export type ScenarioRunOptions = {
-  invokeCuse?: CuseInvoker;
-};
-
 export type ScenarioStepResult = {
   phase: "steps" | "finally";
   index: number;
@@ -37,6 +33,27 @@ export type ScenarioStepResult = {
   run?: RunResult;
   cuse?: CuseInvocationResult;
   message?: string;
+};
+
+export type ScenarioStepEvent =
+  | {
+    type: "start";
+    phase: ScenarioStepResult["phase"];
+    index: number;
+    step: ScenarioStep;
+  }
+  | {
+    type: "terminal";
+    phase: ScenarioStepResult["phase"];
+    index: number;
+    result: ScenarioStepResult;
+  };
+
+export type ScenarioStepEventSink = (event: ScenarioStepEvent) => void | Promise<void>;
+
+export type ScenarioRunOptions = {
+  invokeCuse?: CuseInvoker;
+  onStepEvent?: ScenarioStepEventSink;
 };
 
 export type ScenarioRunResult = {
@@ -250,6 +267,15 @@ async function executeStep(
           };
         }
         await Bun.sleep(Math.min(intervalMs, Math.max(0, deadline - Date.now())));
+        if (Date.now() >= deadline) {
+          return {
+            ...result,
+            status: "timed_out",
+            timedOut: true,
+            attempts,
+            message: "wait step timed out",
+          };
+        }
       }
     }
   }
@@ -306,6 +332,21 @@ async function runStep(
   return result;
 }
 
+async function attemptStep(
+  phase: ScenarioStepResult["phase"],
+  index: number,
+  step: ScenarioStep,
+  timeoutMs: number,
+  context: ScenarioContext,
+  options: ScenarioRunOptions,
+): Promise<ScenarioStepResult> {
+  await options.onStepEvent?.({ type: "start", phase, index, step });
+  const execution = await runStep(step, timeoutMs, context, options);
+  const result: ScenarioStepResult = { phase, index, step, ...execution };
+  await options.onStepEvent?.({ type: "terminal", phase, index, result });
+  return result;
+}
+
 export async function runScenario(
   scenario: Scenario,
   options: ScenarioRunOptions = {},
@@ -328,8 +369,15 @@ export async function runScenario(
 
   for (let index = 0; index < scenario.steps.length; index++) {
     const step = scenario.steps[index]!;
-    const result = await runStep(step, step.timeoutMs ?? scenario.defaultTimeoutMs!, context, options);
-    results.push({ phase: "steps", index, step, ...result });
+    const result = await attemptStep(
+      "steps",
+      index,
+      step,
+      step.timeoutMs ?? scenario.defaultTimeoutMs!,
+      context,
+      options,
+    );
+    results.push(result);
     if (result.status !== "passed") {
       normalStatus = result.status === "timed_out" ? "timed_out" : "failed";
       break;
@@ -339,8 +387,15 @@ export async function runScenario(
   let cleanupFailed = false;
   for (let index = 0; index < (scenario.finally?.length ?? 0); index++) {
     const step = scenario.finally![index]!;
-    const result = await runStep(step, step.timeoutMs ?? scenario.defaultTimeoutMs!, context, options);
-    results.push({ phase: "finally", index, step, ...result });
+    const result = await attemptStep(
+      "finally",
+      index,
+      step,
+      step.timeoutMs ?? scenario.defaultTimeoutMs!,
+      context,
+      options,
+    );
+    results.push(result);
     if (result.status !== "passed") cleanupFailed = true;
   }
 
