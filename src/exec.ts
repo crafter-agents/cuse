@@ -17,6 +17,10 @@
 //      cuse returns; it does not stay to collect what a wedged process might
 //      still write.
 
+import { unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 export type RunResult = { code: number; stdout: string; stderr: string; timedOut: boolean };
 export type BytesResult = { code: number; stdout: Uint8Array; stderr: string; timedOut: boolean };
 
@@ -117,6 +121,41 @@ function joinBytes(chunks: Uint8Array[]): Uint8Array {
 
 const asText = (chunks: Uint8Array[]): string => new TextDecoder().decode(joinBytes(chunks));
 
+async function runWindows(argv: string[], ms: number, bytes: false): Promise<RunResult>;
+async function runWindows(argv: string[], ms: number, bytes: true): Promise<BytesResult>;
+async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<RunResult | BytesResult> {
+  const id = crypto.randomUUID();
+  const stdoutPath = join(tmpdir(), `cuse-${id}.stdout`);
+  const stderrPath = join(tmpdir(), `cuse-${id}.stderr`);
+  const proc = Bun.spawn(argv, {
+    stdout: Bun.file(stdoutPath), stderr: Bun.file(stderrPath), stdin: "ignore",
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), ms);
+  });
+  const outcome = await Promise.race([proc.exited, expired]);
+  clearTimeout(timer);
+  try {
+    if (outcome === "timeout") {
+      proc.unref();
+      await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+      try { proc.kill(); } catch { /* gone */ }
+      return bytes
+        ? { code: -1, stdout: new Uint8Array(0), stderr: "", timedOut: true }
+        : { code: -1, stdout: "", stderr: "", timedOut: true };
+    }
+    const stdoutFile = Bun.file(stdoutPath);
+    const stderr = await Bun.file(stderrPath).text();
+    return bytes
+      ? { code: outcome, stdout: new Uint8Array(await stdoutFile.arrayBuffer()), stderr, timedOut: false }
+      : { code: outcome, stdout: await stdoutFile.text(), stderr, timedOut: false };
+  } finally {
+    try { unlinkSync(stdoutPath); } catch { /* already gone */ }
+    try { unlinkSync(stderrPath); } catch { /* already gone */ }
+  }
+}
+
 /**
  * Spawn argv and wait, but never longer than `ms`.
  *
@@ -125,6 +164,7 @@ const asText = (chunks: Uint8Array[]): string => new TextDecoder().decode(joinBy
  * that ignores signals cannot hold cuse open.
  */
 export async function runWithTimeout(argv: string[], ms: number): Promise<RunResult> {
+  if (process.platform === "win32") return runWindows(argv, ms, false);
   const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const stdout = readPipe(proc.stdout, asText);
   const stderr = readPipe(proc.stderr, asText);
@@ -157,6 +197,7 @@ export async function runWithTimeout(argv: string[], ms: number): Promise<RunRes
 /** Same deadline, but keeping stdout as bytes - xwd writes a binary dump there,
  *  and reading it as text would quietly corrupt every pixel. */
 export async function runBytes(argv: string[], ms: number): Promise<BytesResult> {
+  if (process.platform === "win32") return runWindows(argv, ms, true);
   const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const stdout = readPipe(proc.stdout, joinBytes);
   const stderr = readPipe(proc.stderr, asText);
