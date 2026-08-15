@@ -139,9 +139,9 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
   });
   closeSync(stdoutFd);
   closeSync(stderrFd);
-  const exited = new Promise<number>((resolve) => {
+  const exited = new Promise<number | Error>((resolve) => {
     proc.once("close", (code) => resolve(code ?? -1));
-    proc.once("error", () => resolve(-1));
+    proc.once("error", resolve);
   });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<"timeout">((resolve) => {
@@ -155,6 +155,11 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
     return bytes
       ? { code: -1, stdout: new Uint8Array(0), stderr: "", timedOut: true }
       : { code: -1, stdout: "", stderr: "", timedOut: true };
+  }
+  if (outcome instanceof Error) {
+    return bytes
+      ? { code: -1, stdout: new Uint8Array(0), stderr: outcome.message, timedOut: false }
+      : { code: -1, stdout: "", stderr: outcome.message, timedOut: false };
   }
   const stdout = readFileSync(stdoutPath);
   const stderr = readFileSync(stderrPath, "utf8");
