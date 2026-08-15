@@ -132,13 +132,16 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
   closeSync(stdoutFd);
   closeSync(stderrFd);
   let spawnError: Error | undefined;
+  let exitCode: number | undefined;
   proc.once("error", (error) => { spawnError = error; });
+  proc.once("exit", (code) => { exitCode = code ?? -1; });
   const deadline = Date.now() + ms;
-  while (proc.exitCode === null && spawnError === undefined && Date.now() < deadline) {
+  while (exitCode === undefined && spawnError === undefined && Date.now() < deadline) {
     await Bun.sleep(Math.min(20, Math.max(1, deadline - Date.now())));
   }
   if (spawnError) throw spawnError;
-  if (proc.exitCode === null) {
+  if (exitCode === undefined) {
+    proc.removeAllListeners();
     proc.unref();
     if (proc.pid !== undefined) await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
     return bytes
@@ -148,8 +151,8 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
   const stdout = readFileSync(stdoutPath);
   const stderr = readFileSync(stderrPath, "utf8");
   return bytes
-    ? { code: proc.exitCode, stdout: new Uint8Array(stdout), stderr, timedOut: false }
-    : { code: proc.exitCode, stdout: stdout.toString("utf8"), stderr, timedOut: false };
+    ? { code: exitCode, stdout: new Uint8Array(stdout), stderr, timedOut: false }
+    : { code: exitCode, stdout: stdout.toString("utf8"), stderr, timedOut: false };
 }
 
 /**
