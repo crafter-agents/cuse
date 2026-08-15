@@ -15,6 +15,17 @@ describe("deadlines", () => {
     // The point of the deadline: we are back in well under the sleep.
     expect(Date.now() - started).toBeLessThan(5000);
   });
+  test.skipIf(process.platform !== "win32")("a Windows descendant holding output pipes cannot extend the deadline", async () => {
+    const started = Date.now();
+    const r = await runWithTimeout([
+      "powershell", "-NoProfile", "-NonInteractive", "-Command",
+      "Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep 30' -NoNewWindow; Start-Sleep 30",
+    ], 300);
+    expect(r.timedOut).toBe(true);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toBe("");
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
   test("the timeout is explained as a hang, not as an exit code", async () => {
     const r = await runWithTimeout(["sleep", "30"], 300);
     const msg = explainFailure(["sleep"], r, 300)!;

@@ -64,7 +64,19 @@ async function descendants(pid: number): Promise<number[]> {
 async function killTree(pid: number): Promise<void> {
   if (process.platform === "win32") {
     // taskkill /T is the only thing that reaches a Windows process tree.
-    try { Bun.spawn(["taskkill", "/PID", String(pid), "/T", "/F"], { stdout: "ignore", stderr: "ignore" }); } catch { /* gone */ }
+    try {
+      const killer = Bun.spawn(["taskkill", "/PID", String(pid), "/T", "/F"], {
+        stdin: "ignore", stdout: "ignore", stderr: "ignore",
+      });
+      const finished = await Promise.race([
+        killer.exited.then(() => true),
+        Bun.sleep(1500).then(() => false),
+      ]);
+      if (!finished) {
+        try { killer.kill(); } catch { /* gone */ }
+        try { process.kill(pid); } catch { /* gone */ }
+      }
+    } catch { /* gone */ }
     return;
   }
   const kids = await descendants(pid);
@@ -72,6 +84,37 @@ async function killTree(pid: number): Promise<void> {
     try { process.kill(p, "SIGKILL"); } catch { /* already gone */ }
   }
 }
+
+type PipeRead<T> = { value: Promise<T>; cancel: () => Promise<void> };
+
+function readPipe<T>(stream: ReadableStream<Uint8Array>, convert: (chunks: Uint8Array[]) => T): PipeRead<T> {
+  const reader = stream.getReader();
+  const value = (async (): Promise<T> => {
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const next = await reader.read();
+      if (next.done) return convert(chunks);
+      chunks.push(next.value);
+    }
+  })();
+  return {
+    value,
+    cancel: async () => { try { await reader.cancel(); } catch { /* already closed */ } },
+  };
+}
+
+function joinBytes(chunks: Uint8Array[]): Uint8Array {
+  const length = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const joined = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return joined;
+}
+
+const asText = (chunks: Uint8Array[]): string => new TextDecoder().decode(joinBytes(chunks));
 
 /**
  * Spawn argv and wait, but never longer than `ms`.
@@ -82,13 +125,12 @@ async function killTree(pid: number): Promise<void> {
  */
 export async function runWithTimeout(argv: string[], ms: number): Promise<RunResult> {
   const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const stdout = readPipe(proc.stdout, asText);
+  const stderr = readPipe(proc.stderr, asText);
 
   const collect = (async (): Promise<RunResult> => {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    return { code: await proc.exited, stdout, stderr, timedOut: false };
+    const [out, err] = await Promise.all([stdout.value, stderr.value]);
+    return { code: await proc.exited, stdout: out, stderr: err, timedOut: false };
   })();
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -99,6 +141,7 @@ export async function runWithTimeout(argv: string[], ms: number): Promise<RunRes
   const result = await Promise.race([collect, expired]);
   clearTimeout(timer);
   if (result.timedOut) {
+    await Promise.all([stdout.cancel(), stderr.cancel()]);
     // Clean up the tree, but bounded: reaping must not become the new way to
     // hang. Without waiting at all, cuse exits first and leaves the grandchild
     // running - observed with a wrapper script holding a sleep.
@@ -111,12 +154,11 @@ export async function runWithTimeout(argv: string[], ms: number): Promise<RunRes
  *  and reading it as text would quietly corrupt every pixel. */
 export async function runBytes(argv: string[], ms: number): Promise<BytesResult> {
   const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const stdout = readPipe(proc.stdout, joinBytes);
+  const stderr = readPipe(proc.stderr, asText);
   const collect = (async (): Promise<BytesResult> => {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).arrayBuffer().then((a) => new Uint8Array(a)),
-      new Response(proc.stderr).text(),
-    ]);
-    return { code: await proc.exited, stdout, stderr, timedOut: false };
+    const [out, err] = await Promise.all([stdout.value, stderr.value]);
+    return { code: await proc.exited, stdout: out, stderr: err, timedOut: false };
   })();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<BytesResult>((res) => {
@@ -124,7 +166,10 @@ export async function runBytes(argv: string[], ms: number): Promise<BytesResult>
   });
   const result = await Promise.race([collect, expired]);
   clearTimeout(timer);
-  if (result.timedOut) await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+  if (result.timedOut) {
+    await Promise.all([stdout.cancel(), stderr.cancel()]);
+    await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+  }
   return result;
 }
 
