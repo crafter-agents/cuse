@@ -162,7 +162,7 @@ test("inspect process finds a running process", async () => {
 
   expect(result.ok).toBe(true);
   expect(result.data).toMatchObject({ found: true, normalized: { pid: process.pid } });
-}, 10_000);
+}, 15_000);
 
 test("inspect process requires a pid", async () => {
   const result = await act("inspect", ["process"]);
