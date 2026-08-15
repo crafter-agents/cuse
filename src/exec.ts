@@ -85,7 +85,7 @@ async function killTree(pid: number): Promise<void> {
   }
 }
 
-type PipeRead<T> = { value: Promise<T>; cancel: () => Promise<void> };
+type PipeRead<T> = { value: Promise<T>; cancel: () => void };
 
 function readPipe<T>(stream: ReadableStream<Uint8Array>, convert: (chunks: Uint8Array[]) => T): PipeRead<T> {
   const reader = stream.getReader();
@@ -99,7 +99,7 @@ function readPipe<T>(stream: ReadableStream<Uint8Array>, convert: (chunks: Uint8
   })();
   return {
     value,
-    cancel: async () => { try { await reader.cancel(); } catch { /* already closed */ } },
+    cancel: () => { void reader.cancel().catch(() => { /* already closed */ }); },
   };
 }
 
@@ -141,7 +141,8 @@ export async function runWithTimeout(argv: string[], ms: number): Promise<RunRes
   const result = await Promise.race([collect, expired]);
   clearTimeout(timer);
   if (result.timedOut) {
-    await Promise.all([stdout.cancel(), stderr.cancel()]);
+    stdout.cancel();
+    stderr.cancel();
     // Clean up the tree, but bounded: reaping must not become the new way to
     // hang. Without waiting at all, cuse exits first and leaves the grandchild
     // running - observed with a wrapper script holding a sleep.
@@ -167,7 +168,8 @@ export async function runBytes(argv: string[], ms: number): Promise<BytesResult>
   const result = await Promise.race([collect, expired]);
   clearTimeout(timer);
   if (result.timedOut) {
-    await Promise.all([stdout.cancel(), stderr.cancel()]);
+    stdout.cancel();
+    stderr.cancel();
     await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
   }
   return result;
