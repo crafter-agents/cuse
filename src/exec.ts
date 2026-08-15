@@ -40,12 +40,6 @@ export const TIMEOUTS: Record<string, number> = {
   elements: 30_000,
 };
 
-async function pollExit(proc: { exitCode: number | null }, ms: number): Promise<number | null> {
-  const deadline = Date.now() + ms;
-  while (proc.exitCode === null && Date.now() < deadline) await Bun.sleep(10);
-  return proc.exitCode;
-}
-
 export function timeoutFor(action: string, override?: number): number {
   if (override !== undefined && override > 0) return override;
   return TIMEOUTS[action] ?? DEFAULT_TIMEOUT_MS;
@@ -78,9 +72,13 @@ async function killTree(pid: number): Promise<void> {
       const killer = Bun.spawn(["taskkill", "/PID", String(pid), "/T", "/F"], {
         stdin: "ignore", stdout: "ignore", stderr: "ignore",
       });
-      killer.unref();
-      if (await pollExit(killer, 1500) === null) {
+      const finished = await Promise.race([
+        killer.exited.then(() => true),
+        Bun.sleep(1500).then(() => false),
+      ]);
+      if (!finished) {
         try { killer.kill(); } catch { /* gone */ }
+        killer.unref();
         try { process.kill(pid); } catch { /* gone */ }
       }
     } catch { /* gone */ }
@@ -134,9 +132,14 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
   const proc = Bun.spawn(argv, { stdout: stdoutFd, stderr: stderrFd, stdin: "ignore" });
   closeSync(stdoutFd);
   closeSync(stderrFd);
-  proc.unref();
-  const outcome = await pollExit(proc, ms);
-  if (outcome === null) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), ms);
+  });
+  const outcome = await Promise.race([proc.exited, expired]);
+  clearTimeout(timer);
+  if (outcome === "timeout") {
+    proc.unref();
     await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
     try { proc.kill(); } catch { /* gone */ }
     return bytes
