@@ -131,31 +131,25 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
   });
   closeSync(stdoutFd);
   closeSync(stderrFd);
-  const exited = new Promise<number | Error>((resolve) => {
-    proc.once("close", (code) => resolve(code ?? -1));
-    proc.once("error", resolve);
-  });
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<"timeout">((resolve) => {
-    timer = setTimeout(() => resolve("timeout"), ms);
-  });
-  const outcome = await Promise.race([exited, expired]);
-  clearTimeout(timer);
-  if (outcome === "timeout") {
+  let spawnError: Error | undefined;
+  proc.once("error", (error) => { spawnError = error; });
+  const deadline = Date.now() + ms;
+  while (proc.exitCode === null && spawnError === undefined && Date.now() < deadline) {
+    await Bun.sleep(Math.min(20, Math.max(1, deadline - Date.now())));
+  }
+  if (spawnError) throw spawnError;
+  if (proc.exitCode === null) {
     proc.unref();
     if (proc.pid !== undefined) await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
     return bytes
       ? { code: -1, stdout: new Uint8Array(0), stderr: "", timedOut: true }
       : { code: -1, stdout: "", stderr: "", timedOut: true };
   }
-  if (outcome instanceof Error) {
-    throw outcome;
-  }
   const stdout = readFileSync(stdoutPath);
   const stderr = readFileSync(stderrPath, "utf8");
   return bytes
-    ? { code: outcome, stdout: new Uint8Array(stdout), stderr, timedOut: false }
-    : { code: outcome, stdout: stdout.toString("utf8"), stderr, timedOut: false };
+    ? { code: proc.exitCode, stdout: new Uint8Array(stdout), stderr, timedOut: false }
+    : { code: proc.exitCode, stdout: stdout.toString("utf8"), stderr, timedOut: false };
 }
 
 /**
