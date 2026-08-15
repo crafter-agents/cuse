@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "name": "Action Portless-style TCP listener fixture",
+  "platforms": ["linux"],
+  "vars": { "port": 47653 },
+  "defaultTimeoutMs": 15000,
+  "steps": [
+    {
+      "type": "exec",
+      "argv": ["bash", "scenarios/fixtures/action-portless-listener.sh", "start", "47653"],
+      "saveAs": "listener"
+    },
+    {
+      "type": "cuse",
+      "action": "inspect",
+      "args": ["port"],
+      "options": { "port": "${vars.port}", "protocol": "tcp" },
+      "saveAs": "port"
+    },
+    {
+      "type": "assert",
+      "actual": "${steps.port.data.normalized.state}",
+      "operator": "eq",
+      "expected": "LISTEN"
+    }
+  ],
+  "finally": [
+    {
+      "type": "exec",
+      "argv": ["bash", "scenarios/fixtures/action-portless-listener.sh", "stop"]
+    }
+  ]
+}

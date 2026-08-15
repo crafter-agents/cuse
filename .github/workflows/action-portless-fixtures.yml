@@ -1,0 +1,76 @@
+name: Action Portless-style fixtures
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - action.yml
+      - scripts/action/**
+      - test/action-*.test.ts
+      - scenarios/action-portless-*.json
+      - scenarios/fixtures/action-portless-*.sh
+      - .github/workflows/action-portless-fixtures.yml
+
+permissions:
+  contents: read
+
+jobs:
+  fixture:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows scheduled task
+            os: windows-latest
+            scenario: scenarios/action-portless-windows.json
+          - name: Linux TCP listener
+            os: ubuntu-latest
+            scenario: scenarios/action-portless-linux.json
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+      - name: Build current cuse executable
+        shell: bash
+        run: |
+          bun run build
+          chmod +x dist/cuse 2>/dev/null || true
+      - name: Install Linux socket inspection dependency
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sudo timeout 120s apt-get install -y -qq --no-install-recommends lsof
+      - id: binary
+        name: Resolve built executable name
+        shell: pwsh
+        run: |
+          $path = if (Test-Path "dist/cuse.exe") { "dist/cuse.exe" } else { "dist/cuse" }
+          if (-not (Test-Path $path -PathType Leaf)) { throw "bun build did not produce dist/cuse" }
+          "path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - id: cuse
+        name: Run fixture through the reusable Action
+        uses: ./
+        with:
+          scenario: ${{ matrix.scenario }}
+          executable-path: ${{ steps.binary.outputs.path }}
+          evidence-name: action-portless-${{ runner.os }}
+      - name: Clean up Linux listener
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: bash scenarios/fixtures/action-portless-listener.sh stop
+      - name: Clean up Windows scheduled tasks
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ScheduledTask -TaskName "cuse-action-*" -ErrorAction SilentlyContinue |
+            Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
+      - name: Upload prepared evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: action-portless-${{ runner.os }}
+          path: ${{ steps.cuse.outputs.evidence-path }}
+          if-no-files-found: warn

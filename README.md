@@ -79,6 +79,10 @@ untrusted pull requests. The Action prepares evidence and writes the job
 summary; artifact upload stays at workflow level so its failure behavior is
 visible to the consumer.
 
+By default, the Action downloads the requested release and verifies its
+checksum. Repository CI may set `executable-path` to an executable built from
+the checked-out source; this explicit test seam skips the release download.
+
 Named `cuse` rather than `cu` because `cu(1)` from UUCP already ships with macOS
 and most Linux distributions, and shadowing it would be a nasty surprise for
 anyone who actually uses it.

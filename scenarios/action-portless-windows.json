@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "name": "Action Portless-style scheduled task fixture",
+  "platforms": ["windows"],
+  "vars": {},
+  "defaultTimeoutMs": 15000,
+  "steps": [
+    {
+      "type": "exec",
+      "argv": [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$name = 'cuse-action-' + [Guid]::NewGuid().ToString('N'); $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '/c exit 0'; $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 7); Register-ScheduledTask -TaskName $name -Action $action -Settings $settings -Description 'Disposable cuse Action fixture' -Force | Out-Null; [Console]::Write($name)"
+      ],
+      "saveAs": "createdTask"
+    },
+    {
+      "type": "cuse",
+      "action": "inspect",
+      "args": ["scheduled-task"],
+      "options": { "name": "${steps.createdTask.stdout}" },
+      "saveAs": "task"
+    },
+    {
+      "type": "assert",
+      "actual": "${steps.task.data.normalized.executionTimeLimit}",
+      "operator": "eq",
+      "expected": "PT7M"
+    }
+  ],
+  "finally": [
+    {
+      "type": "exec",
+      "argv": [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$name = '${steps.createdTask.stdout}'; if ($name) { Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue }"
+      ]
+    }
+  ]
+}
