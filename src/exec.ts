@@ -17,6 +17,7 @@
 //      cuse returns; it does not stay to collect what a wedged process might
 //      still write.
 
+import { closeSync, openSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -128,9 +129,11 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
   const id = crypto.randomUUID();
   const stdoutPath = join(tmpdir(), `cuse-${id}.stdout`);
   const stderrPath = join(tmpdir(), `cuse-${id}.stderr`);
-  const proc = Bun.spawn(argv, {
-    stdout: Bun.file(stdoutPath), stderr: Bun.file(stderrPath), stdin: "ignore",
-  });
+  const stdoutFd = openSync(stdoutPath, "w");
+  const stderrFd = openSync(stderrPath, "w");
+  const proc = Bun.spawn(argv, { stdout: stdoutFd, stderr: stderrFd, stdin: "ignore" });
+  closeSync(stdoutFd);
+  closeSync(stderrFd);
   proc.unref();
   const outcome = await pollExit(proc, ms);
   if (outcome === null) {
