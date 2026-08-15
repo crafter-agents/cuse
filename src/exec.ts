@@ -149,6 +149,7 @@ export async function runWithTimeout(argv: string[], ms: number): Promise<RunRes
     // hang. Without waiting at all, cuse exits first and leaves the grandchild
     // running - observed with a wrapper script holding a sleep.
     await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+    try { proc.kill(); } catch { /* gone */ }
   }
   return result;
 }
@@ -174,6 +175,7 @@ export async function runBytes(argv: string[], ms: number): Promise<BytesResult>
     stderr.cancel();
     proc.unref();
     await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+    try { proc.kill(); } catch { /* gone */ }
   }
   return result;
 }
