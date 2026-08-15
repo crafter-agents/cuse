@@ -17,7 +17,7 @@
 //      cuse returns; it does not stay to collect what a wedged process might
 //      still write.
 
-import { closeSync, openSync } from "node:fs";
+import { closeSync, openSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -146,11 +146,11 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
       ? { code: -1, stdout: new Uint8Array(0), stderr: "", timedOut: true }
       : { code: -1, stdout: "", stderr: "", timedOut: true };
   }
-  const stdoutFile = Bun.file(stdoutPath);
-  const stderr = await Bun.file(stderrPath).text();
+  const stdout = readFileSync(stdoutPath);
+  const stderr = readFileSync(stderrPath, "utf8");
   return bytes
-    ? { code: outcome, stdout: new Uint8Array(await stdoutFile.arrayBuffer()), stderr, timedOut: false }
-    : { code: outcome, stdout: await stdoutFile.text(), stderr, timedOut: false };
+    ? { code: outcome, stdout: new Uint8Array(stdout), stderr, timedOut: false }
+    : { code: outcome, stdout: stdout.toString("utf8"), stderr, timedOut: false };
 }
 
 /**
