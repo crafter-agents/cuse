@@ -805,25 +805,33 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         const gone = opts.gone ?? false;
         let looks = 0;
         let sample = "";
+        const beforeDeadline = async <T>(probe: Promise<T>): Promise<T> => {
+          const left = Math.max(0, deadline - Date.now());
+          if (left === 0) throw new Error("the wait deadline expired during the platform query");
+          return Promise.race([
+            probe,
+            Bun.sleep(left).then(() => { throw new Error("the wait deadline expired during the platform query"); }),
+          ]);
+        };
 
         for (;;) {
           looks++;
           let found = false;
           try {
             if (target.element || target.role) {
-              const { els } = await listElements(os, opts.app ?? opts.window ?? "", timeoutMs,
-                                                 opts.depth, opts.limit);
+              const { els } = await beforeDeadline(
+                listElements(os, opts.app ?? opts.window ?? "", timeoutMs, opts.depth, opts.limit));
               found = pickElement(els, { name: target.element, role: target.role }) !== null;
               sample = describeMisses(els, { name: target.element, role: target.role }, 5);
             } else {
-              const wins = await listWindows(os, timeoutMs);
+              const wins = await beforeDeadline(listWindows(os, timeoutMs));
               found = pickWindow(wins, target.window!) !== null;
               // A dialog can hold the keyboard without being enumerable: on
               // Windows the "Select an app" chooser is frontmost and absent from
               // the window list, so waiting for it never ended. What has focus
               // is part of what is on screen.
               if (!found) {
-                const fr = await runWithTimeout(frontmostCmd(os), 5000);
+                const fr = await beforeDeadline(runWithTimeout(frontmostCmd(os), 5000));
                 const front = fr.code === 0 && !fr.timedOut ? parseFrontmost(fr.stdout) : "";
                 found = front !== "" && frontmostMatches(front, target.window!);
                 sample = [wins.map((w) => w.title).filter(Boolean).slice(0, 4).join(", "),
@@ -845,7 +853,8 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           }
           const gap = nextGap(deadline, Date.now(), gapMs);
           if (gap === 0) {
-            const blind = blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), !sample);
+            const blind = sample ? undefined
+              : blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), true);
             return { ok: false, ...base,
               error: timeoutReason(target, gone, elapsed, blind ?? sample),
               data: { waitedMs: elapsed, looks } };
