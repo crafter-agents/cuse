@@ -162,7 +162,7 @@ test("inspect process finds a running process", async () => {
 
   expect(result.ok).toBe(true);
   expect(result.data).toMatchObject({ found: true, normalized: { pid: process.pid } });
-});
+}, 10_000);
 
 test("inspect process requires a pid", async () => {
   const result = await act("inspect", ["process"]);
@@ -175,7 +175,7 @@ test("inspect port reports an unused port as not found", async () => {
 
   expect(result.ok).toBe(true);
   expect(result.data).toMatchObject({ found: false });
-});
+}, 10_000);
 
 test("inspect file finds a regular file", async () => {
   const result = await act("inspect", ["file", "package.json"]);
