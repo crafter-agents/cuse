@@ -134,8 +134,9 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
   });
   proc.unref();
   const outcome = await pollExit(proc, ms);
+  const timedOut = outcome === null;
   try {
-    if (outcome === null) {
+    if (timedOut) {
       await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
       try { proc.kill(); } catch { /* gone */ }
       return bytes
@@ -148,8 +149,10 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
       ? { code: outcome, stdout: new Uint8Array(await stdoutFile.arrayBuffer()), stderr, timedOut: false }
       : { code: outcome, stdout: await stdoutFile.text(), stderr, timedOut: false };
   } finally {
-    try { unlinkSync(stdoutPath); } catch { /* already gone */ }
-    try { unlinkSync(stderrPath); } catch { /* already gone */ }
+    if (!timedOut) {
+      try { unlinkSync(stdoutPath); } catch { /* already gone */ }
+      try { unlinkSync(stderrPath); } catch { /* already gone */ }
+    }
   }
 }
 
