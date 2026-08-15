@@ -74,6 +74,7 @@ async function killTree(pid: number): Promise<void> {
       ]);
       if (!finished) {
         try { killer.kill(); } catch { /* gone */ }
+        killer.unref();
         try { process.kill(pid); } catch { /* gone */ }
       }
     } catch { /* gone */ }
@@ -143,6 +144,7 @@ export async function runWithTimeout(argv: string[], ms: number): Promise<RunRes
   if (result.timedOut) {
     stdout.cancel();
     stderr.cancel();
+    proc.unref();
     // Clean up the tree, but bounded: reaping must not become the new way to
     // hang. Without waiting at all, cuse exits first and leaves the grandchild
     // running - observed with a wrapper script holding a sleep.
@@ -170,6 +172,7 @@ export async function runBytes(argv: string[], ms: number): Promise<BytesResult>
   if (result.timedOut) {
     stdout.cancel();
     stderr.cancel();
+    proc.unref();
     await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
   }
   return result;
