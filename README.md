@@ -51,6 +51,34 @@ bun install
 bun run build          # standalone binary at dist/cuse, no runtime needed
 ```
 
+## GitHub Action
+
+Run a checked-in scenario, then upload the prepared evidence in a companion
+step. The upload uses `if: always()` so failed and timed-out scenarios still
+retain their result bundle. Keep the scenario step's default failure behavior:
+its original nonzero exit code remains the job result.
+
+```yaml
+- id: cuse
+  uses: crafter-agents/cuse@main
+  with:
+    scenario: scenarios/smoke.json
+    evidence-name: smoke-${{ runner.os }}
+
+- name: Upload cuse evidence
+  if: always()
+  uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+  with:
+    name: cuse-smoke-${{ runner.os }}
+    path: ${{ steps.cuse.outputs.evidence-path }}
+    if-no-files-found: error
+```
+
+Do not provide repository secrets to scenarios that can be changed by
+untrusted pull requests. The Action prepares evidence and writes the job
+summary; artifact upload stays at workflow level so its failure behavior is
+visible to the consumer.
+
 Named `cuse` rather than `cu` because `cu(1)` from UUCP already ships with macOS
 and most Linux distributions, and shadowing it would be a nasty surprise for
 anyone who actually uses it.
