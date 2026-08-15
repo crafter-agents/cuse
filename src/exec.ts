@@ -71,18 +71,9 @@ async function killTree(pid: number): Promise<void> {
     // taskkill /T is the only thing that reaches a Windows process tree.
     try {
       const killer = nodeSpawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-        stdio: "ignore", windowsHide: true,
+        stdio: "ignore", windowsHide: true, detached: true,
       });
-      const finished = await Promise.race([
-        new Promise<boolean>((resolve) => {
-          killer.once("close", () => resolve(true));
-          killer.once("error", () => resolve(true));
-        }),
-        Bun.sleep(1500).then(() => false),
-      ]);
-      if (!finished) {
-        killer.unref();
-      }
+      killer.unref();
     } catch { /* gone */ }
     return;
   }
