@@ -17,7 +17,6 @@
 //      cuse returns; it does not stay to collect what a wedged process might
 //      still write.
 
-import { unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -134,26 +133,18 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
   });
   proc.unref();
   const outcome = await pollExit(proc, ms);
-  const timedOut = outcome === null;
-  try {
-    if (timedOut) {
-      await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
-      try { proc.kill(); } catch { /* gone */ }
-      return bytes
-        ? { code: -1, stdout: new Uint8Array(0), stderr: "", timedOut: true }
-        : { code: -1, stdout: "", stderr: "", timedOut: true };
-    }
-    const stdoutFile = Bun.file(stdoutPath);
-    const stderr = await Bun.file(stderrPath).text();
+  if (outcome === null) {
+    await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+    try { proc.kill(); } catch { /* gone */ }
     return bytes
-      ? { code: outcome, stdout: new Uint8Array(await stdoutFile.arrayBuffer()), stderr, timedOut: false }
-      : { code: outcome, stdout: await stdoutFile.text(), stderr, timedOut: false };
-  } finally {
-    if (!timedOut) {
-      try { unlinkSync(stdoutPath); } catch { /* already gone */ }
-      try { unlinkSync(stderrPath); } catch { /* already gone */ }
-    }
+      ? { code: -1, stdout: new Uint8Array(0), stderr: "", timedOut: true }
+      : { code: -1, stdout: "", stderr: "", timedOut: true };
   }
+  const stdoutFile = Bun.file(stdoutPath);
+  const stderr = await Bun.file(stderrPath).text();
+  return bytes
+    ? { code: outcome, stdout: new Uint8Array(await stdoutFile.arrayBuffer()), stderr, timedOut: false }
+    : { code: outcome, stdout: await stdoutFile.text(), stderr, timedOut: false };
 }
 
 /**
