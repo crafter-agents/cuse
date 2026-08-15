@@ -1,11 +1,22 @@
-name: Install cuse
-description: Download and verify a released cuse executable for the current runner
+name: Set up cuse
+description: Prepare the runner and install a verified cuse release
 
 inputs:
+  scenario:
+    description: Path to the checked-in scenario to inspect before execution
+    required: true
   version:
     description: Released cuse version to install
     required: false
     default: v0.1.0
+  linux-display:
+    description: Linux display preparation mode (automatic, always, or never)
+    required: false
+    default: automatic
+  linux-accessibility:
+    description: Whether to install Linux AT-SPI accessibility support (true or false)
+    required: false
+    default: "false"
 
 outputs:
   executable-path:
@@ -15,6 +26,29 @@ outputs:
 runs:
   using: composite
   steps:
+    - id: prepare-unix
+      name: Prepare runner platform
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        CUSE_SCENARIO: ${{ inputs.scenario }}
+        CUSE_LINUX_DISPLAY: ${{ inputs.linux-display }}
+        CUSE_LINUX_ACCESSIBILITY: ${{ inputs.linux-accessibility }}
+      run: |
+        "${GITHUB_ACTION_PATH}/scripts/action/prepare-platform.sh" \
+          "${RUNNER_OS}" "${CUSE_SCENARIO}" "${CUSE_LINUX_DISPLAY}" \
+          "${CUSE_LINUX_ACCESSIBILITY}" "${GITHUB_ENV}"
+
+    - id: prepare-windows
+      name: Prepare runner platform
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        CUSE_LINUX_DISPLAY: ${{ inputs.linux-display }}
+        CUSE_LINUX_ACCESSIBILITY: ${{ inputs.linux-accessibility }}
+      run: |
+        & "${env:GITHUB_ACTION_PATH}/scripts/action/prepare-windows.ps1" $env:CUSE_LINUX_DISPLAY $env:CUSE_LINUX_ACCESSIBILITY
+
     - id: install-unix
       name: Download and verify cuse
       if: runner.os != 'Windows'
