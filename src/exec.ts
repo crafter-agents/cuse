@@ -18,6 +18,7 @@
 //      still write.
 
 import { closeSync, openSync, readFileSync } from "node:fs";
+import { spawn as nodeSpawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -129,19 +130,28 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
   const stderrPath = join(tmpdir(), `cuse-${id}.stderr`);
   const stdoutFd = openSync(stdoutPath, "w");
   const stderrFd = openSync(stderrPath, "w");
-  const proc = Bun.spawn(argv, { stdout: stdoutFd, stderr: stderrFd, stdin: "ignore" });
+  // Bun's Windows subprocess handle can remain referenced after unref() when
+  // the child is stuck in UI Automation. Node's ChildProcess releases that
+  // handle predictably, while taskkill still provides whole-tree cleanup.
+  const proc = nodeSpawn(argv[0]!, argv.slice(1), {
+    stdio: ["ignore", stdoutFd, stderrFd],
+    windowsHide: true,
+  });
   closeSync(stdoutFd);
   closeSync(stderrFd);
+  const exited = new Promise<number>((resolve) => {
+    proc.once("close", (code) => resolve(code ?? -1));
+    proc.once("error", () => resolve(-1));
+  });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<"timeout">((resolve) => {
     timer = setTimeout(() => resolve("timeout"), ms);
   });
-  const outcome = await Promise.race([proc.exited, expired]);
+  const outcome = await Promise.race([exited, expired]);
   clearTimeout(timer);
   if (outcome === "timeout") {
     proc.unref();
-    await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
-    try { proc.kill(); } catch { /* gone */ }
+    if (proc.pid !== undefined) await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
     return bytes
       ? { code: -1, stdout: new Uint8Array(0), stderr: "", timedOut: true }
       : { code: -1, stdout: "", stderr: "", timedOut: true };
