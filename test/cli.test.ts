@@ -1,6 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { act, exitCodeFor, fillTarget, VERSION, type Result } from "../src/cli.ts";
 import type { OS } from "../src/os.ts";
+import { detectOS } from "../src/os.ts";
 import type { Plan } from "../src/plan.ts";
 
 const r = (over: Partial<Result>): Result => ({ ok: false, action: "type", os: "macos", ...over });
@@ -197,10 +198,13 @@ test("inspect scheduled-task requires a name", async () => {
 });
 
 test("inspect scheduled-task reports unavailable on a non-windows host", async () => {
-  const result = await act("inspect", ["scheduled-task"], { name: "Portless Proxy" });
+  const result = await act("inspect", ["scheduled-task"], { name: `cuse-missing-${process.pid}` });
 
   expect(result.ok).toBe(true);
-  expect(result.data).toMatchObject({ found: false, status: "unavailable" });
+  expect(result.data).toMatchObject({
+    found: false,
+    status: detectOS() === "windows" ? "not-found" : "unavailable",
+  });
 });
 
 test("inspect requires a known noun", async () => {

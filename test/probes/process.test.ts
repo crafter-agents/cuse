@@ -24,7 +24,7 @@ describe("process probe", () => {
   });
 
   test("reports unsupported platforms as unavailable", async () => {
-    const result = await probeProcess(process.pid, "windows");
+    const result = await probeProcess(process.pid, "unknown");
 
     expect(result.status).toBe("unavailable");
     expect(result.found).toBe(false);

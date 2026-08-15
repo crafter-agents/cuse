@@ -3,15 +3,18 @@ import { runWithTimeout } from "../exec.ts";
 import type { OS } from "../os.ts";
 import { PROBE_SCHEMA_VERSION, type ProcessProbeResult } from "./types.ts";
 
-const SOURCE = "ps";
 const TIMEOUT_MS = 5_000;
+
+function source(platform: OS): string {
+  return platform === "windows" ? "powershell" : "ps";
+}
 
 function unavailable(platform: OS, warning: string): ProcessProbeResult {
   return {
     version: PROBE_SCHEMA_VERSION,
     noun: "process",
     platform,
-    source: SOURCE,
+    source: source(platform),
     status: "unavailable",
     found: false,
     normalized: null,
@@ -24,11 +27,71 @@ export async function probeProcess(pid: number, platform: OS): Promise<ProcessPr
     version: PROBE_SCHEMA_VERSION,
     noun: "process" as const,
     platform,
-    source: SOURCE,
+    source: source(platform),
   };
 
-  if (platform !== "macos" && platform !== "linux") {
+  if (platform !== "macos" && platform !== "linux" && platform !== "windows") {
     return unavailable(platform, `process inspection is unavailable on ${platform}`);
+  }
+
+  if (platform === "windows") {
+    const script = `
+$process = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = ${pid}" | Select-Object -First 1
+if ($null -eq $process) { exit 0 }
+$ownerResult = Invoke-CimMethod -InputObject $process -MethodName GetOwner -ErrorAction SilentlyContinue
+$owner = if ($null -ne $ownerResult -and $ownerResult.ReturnValue -eq 0) {
+  if ([string]::IsNullOrEmpty($ownerResult.Domain)) { [string]$ownerResult.User } else { "$($ownerResult.Domain)\\$($ownerResult.User)" }
+} else { $null }
+[PSCustomObject]@{
+  pid = [int]$process.ProcessId
+  name = [string]$process.Name
+  executable = if ($null -eq $process.ExecutablePath) { $null } else { [string]$process.ExecutablePath }
+  owner = $owner
+  session = if ($null -eq $process.SessionId) { $null } else { [string]$process.SessionId }
+} | ConvertTo-Json -Compress
+`;
+
+    try {
+      const result = await runWithTimeout(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+        TIMEOUT_MS,
+      );
+      if (result.timedOut) return unavailable(platform, `powershell did not finish within ${TIMEOUT_MS}ms`);
+      if (result.code !== 0) {
+        const details = result.stderr.trim();
+        return unavailable(platform, details ? `powershell: ${details}` : `powershell exited ${result.code}`);
+      }
+      if (result.stdout.trim() === "") {
+        return { ...envelope, status: "not-found", found: false, normalized: null, warnings: [] };
+      }
+
+      const value: unknown = JSON.parse(result.stdout);
+      if (
+        typeof value !== "object" || value === null
+        || !("pid" in value) || value.pid !== pid
+        || !("name" in value) || typeof value.name !== "string" || value.name === ""
+        || !("executable" in value) || (value.executable !== null && typeof value.executable !== "string")
+        || !("owner" in value) || (value.owner !== null && typeof value.owner !== "string")
+        || !("session" in value) || (value.session !== null && typeof value.session !== "string")
+      ) return unavailable(platform, "powershell returned an unexpected process record");
+
+      return {
+        ...envelope,
+        status: "found",
+        found: true,
+        normalized: {
+          pid: value.pid,
+          name: value.name,
+          executable: value.executable,
+          owner: value.owner,
+          session: value.session,
+        },
+        warnings: [],
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return unavailable(platform, message);
+    }
   }
 
   const argv = ["ps", "-p", String(pid), "-o", "pid=", "-o", "comm=", "-o", "user=", "-o", "sess="];

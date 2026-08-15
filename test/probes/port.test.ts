@@ -34,7 +34,7 @@ describe("port probe", () => {
   });
 
   test("reports unsupported platforms as unavailable", async () => {
-    const result = await probePort(80, "tcp", "windows");
+    const result = await probePort(80, "tcp", "unknown");
 
     expect(result.status).toBe("unavailable");
     expect(result.found).toBe(false);

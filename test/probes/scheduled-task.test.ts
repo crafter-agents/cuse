@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { detectOS } from "../../src/os.ts";
 import {
   parseScheduledTaskJson,
   probeScheduledTask,
@@ -62,7 +61,7 @@ describe("scheduled-task probe", () => {
   });
 
   test("reports unsupported hosts as unavailable", async () => {
-    const result = await probeScheduledTask("anything", detectOS());
+    const result = await probeScheduledTask("anything", "unknown");
 
     expect(result.status).toBe("unavailable");
     expect(result.found).toBe(false);

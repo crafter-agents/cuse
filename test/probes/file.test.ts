@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { detectOS } from "../../src/os.ts";
 import { probeFile } from "../../src/probes/file.ts";
 
 describe("file probe", () => {
@@ -58,12 +59,17 @@ describe("file probe", () => {
     expect(result.normalized).toBeNull();
   });
 
-  test("reports a path with a non-directory component as unavailable", async () => {
-    const result = await probeFile(join(filePath, "nested"), "linux");
+  test("classifies a path with a non-directory component by host", async () => {
+    const platform = detectOS();
+    const result = await probeFile(join(filePath, "nested"), platform);
 
-    expect(result.status).toBe("unavailable");
-    expect(result.found).toBe(false);
-    expect(result.normalized).toBeNull();
-    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result).toMatchObject(platform === "windows"
+      ? { status: "not-found", found: false, normalized: null, warnings: [] }
+      : {
+        status: "unavailable",
+        found: false,
+        normalized: null,
+        warnings: [expect.stringMatching(/^ENOTDIR:/)],
+      });
   });
 });
