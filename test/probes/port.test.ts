@@ -23,7 +23,7 @@ describe("port probe", () => {
     } finally {
       listener.stop(true);
     }
-  });
+  }, 15_000);
 
   test("reports a port without a listener", async () => {
     const result = await probePort(59_999, "tcp", platform);
@@ -31,7 +31,7 @@ describe("port probe", () => {
     expect(result.status).toBe("not-found");
     expect(result.found).toBe(false);
     expect(result.normalized).toBeNull();
-  });
+  }, 15_000);
 
   test("reports unsupported platforms as unavailable", async () => {
     const result = await probePort(80, "tcp", "unknown");

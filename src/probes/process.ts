@@ -4,6 +4,7 @@ import type { OS } from "../os.ts";
 import { PROBE_SCHEMA_VERSION, type ProcessProbeResult } from "./types.ts";
 
 const TIMEOUT_MS = 5_000;
+const WINDOWS_TIMEOUT_MS = 20_000;
 
 function source(platform: OS): string {
   return platform === "windows" ? "powershell" : "ps";
@@ -54,9 +55,9 @@ $owner = if ($null -ne $ownerResult -and $ownerResult.ReturnValue -eq 0) {
     try {
       const result = await runWithTimeout(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-        TIMEOUT_MS,
+        WINDOWS_TIMEOUT_MS,
       );
-      if (result.timedOut) return unavailable(platform, `powershell did not finish within ${TIMEOUT_MS}ms`);
+      if (result.timedOut) return unavailable(platform, `powershell did not finish within ${WINDOWS_TIMEOUT_MS}ms`);
       if (result.code !== 0) {
         const details = result.stderr.trim();
         return unavailable(platform, details ? `powershell: ${details}` : `powershell exited ${result.code}`);

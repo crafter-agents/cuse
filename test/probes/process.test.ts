@@ -13,7 +13,7 @@ describe("process probe", () => {
     expect(result.status).toBe("found");
     expect(result.normalized?.pid).toBe(process.pid);
     expect(parseProbeResult(result).ok).toBe(true);
-  });
+  }, 25_000);
 
   test("reports a missing process", async () => {
     const result = await probeProcess(999_999, platform);
@@ -21,7 +21,7 @@ describe("process probe", () => {
     expect(result.status).toBe("not-found");
     expect(result.found).toBe(false);
     expect(result.normalized).toBeNull();
-  });
+  }, 25_000);
 
   test("reports unsupported platforms as unavailable", async () => {
     const result = await probeProcess(process.pid, "unknown");
