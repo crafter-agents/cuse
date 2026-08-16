@@ -24,6 +24,7 @@ import { displaysCmd, parseDisplays, frameOrigin, coverageWarning, toScreenPoint
 import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
 import { recognizeText } from "./ocr.ts";
 import { parseScenario, runScenario, type ScenarioValue } from "./scenario.ts";
+import { runComparison, type ComparisonManifest } from "./compare-run.ts";
 import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
          successDetail, type WaitTarget } from "./wait.ts";
 import { probeProcess } from "./probes/process.ts";
@@ -505,7 +506,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
   // Fail before touching the machine, with the reason and the fix, not an opaque
   // exit code from a missing binary or an absent display.
-  if (!["os", "diff", "ocr-read", "scenario", "inspect"].includes(action)) {
+  if (!["os", "diff", "ocr-read", "scenario", "compare", "inspect"].includes(action)) {
     const pre = preflight(os, action === "fill" ? "click" : action, probe);
     if (!pre.ok) return { ok: false, ...base, error: pre.reason };
   }
@@ -625,6 +626,90 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           data: result,
           ...(ok ? {} : { error }),
         };
+      }
+
+      case "compare": {
+        const path = args[0];
+        if (!path) {
+          return { ok: false, ...base, error: "compare needs a path to a comparison manifest" };
+        }
+
+        let contents: string;
+        try {
+          contents = await Bun.file(resolve(path)).text();
+        } catch {
+          return { ok: false, ...base, error: `comparison manifest not found: ${path}` };
+        }
+
+        let input: unknown;
+        try {
+          input = JSON.parse(contents);
+        } catch {
+          return { ok: false, ...base, error: "comparison manifest must contain valid JSON" };
+        }
+        if (typeof input !== "object" || input === null || Array.isArray(input)) {
+          return { ok: false, ...base, error: "comparison manifest must be an object" };
+        }
+        const manifestInput = input as Record<string, unknown>;
+        const validSetup = (value: unknown): boolean => {
+          if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+          const setup = value as Record<string, unknown>;
+          return Array.isArray(setup.argv) && setup.argv.every((arg) => typeof arg === "string") &&
+            typeof setup.cwd === "string";
+        };
+        if (typeof manifestInput.scenario !== "string") {
+          return { ok: false, ...base, error: "comparison manifest scenario must be a string" };
+        }
+        if (!validSetup(manifestInput.baseline)) {
+          return { ok: false, ...base, error: "comparison manifest baseline needs string argv and cwd" };
+        }
+        if (!validSetup(manifestInput.candidate)) {
+          return { ok: false, ...base, error: "comparison manifest candidate needs string argv and cwd" };
+        }
+        if (manifestInput.fields !== undefined &&
+            (!Array.isArray(manifestInput.fields) ||
+             !manifestInput.fields.every((field) => typeof field === "string"))) {
+          return { ok: false, ...base, error: "comparison manifest fields must be an array of strings" };
+        }
+        const manifest = manifestInput as ComparisonManifest;
+
+        let scenarioContents: string;
+        try {
+          scenarioContents = await Bun.file(resolve(manifest.scenario)).text();
+        } catch {
+          return { ok: false, ...base, error: `scenario file not found: ${manifest.scenario}` };
+        }
+
+        let scenarioInput: unknown;
+        try {
+          scenarioInput = JSON.parse(scenarioContents);
+        } catch {
+          return { ok: false, ...base, error: "scenario file must contain valid JSON" };
+        }
+        const parsed = parseScenario(scenarioInput);
+        if (!parsed.ok) {
+          return { ok: false, ...base,
+            error: `invalid scenario at ${parsed.error.path}: ${parsed.error.message}` };
+        }
+
+        const runSide = async () => runScenario(parsed.scenario, {
+          invokeCuse: async (action, args, options) => {
+            const invoked = await act(action, args, options as Options);
+            return {
+              ok: invoked.ok,
+              error: invoked.error,
+              detail: invoked.detail,
+              ...(isScenarioValue(invoked.data) ? { data: invoked.data } : {}),
+            };
+          },
+        });
+        const { report } = await runComparison(manifest, {
+          baseline: runSide,
+          candidate: runSide,
+        });
+        const ok = report.verdict.kind !== "baseline_or_candidate_setup_failed" &&
+          report.verdict.kind !== "inconclusive_missing_evidence";
+        return { ok, ...base, detail: report.headline, data: report };
       }
 
       case "os": return { ok: true, ...base, detail: os };
