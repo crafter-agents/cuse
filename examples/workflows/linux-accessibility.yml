@@ -1,0 +1,31 @@
+name: Run accessible cuse scenario on Linux
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scenario:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: cuse
+        uses: crafter-agents/cuse@main
+        with:
+          scenario: scenarios/smoke.json
+          evidence-name: smoke-${{ runner.os }}-accessibility
+          linux-display: always
+          # AT-SPI accessibility support is opt-in because it requires extra setup.
+          linux-accessibility: true
+
+      - name: Upload cuse evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cuse-smoke-${{ runner.os }}-accessibility
+          path: ${{ steps.cuse.outputs.evidence-path }}
+          if-no-files-found: error

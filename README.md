@@ -79,6 +79,12 @@ untrusted pull requests. The Action prepares evidence and writes the job
 summary; artifact upload stays at workflow level so its failure behavior is
 visible to the consumer.
 
+Complete consumer workflows are available for each supported setup:
+
+- [`examples/workflows/minimal.yml`](examples/workflows/minimal.yml) demonstrates default usage on Ubuntu.
+- [`examples/workflows/windows.yml`](examples/workflows/windows.yml) demonstrates the same scenario on a Windows runner.
+- [`examples/workflows/linux-accessibility.yml`](examples/workflows/linux-accessibility.yml) demonstrates opt-in Linux AT-SPI accessibility support.
+
 By default, the Action downloads the requested release and verifies its
 checksum. Repository CI may set `executable-path` to an executable built from
 the checked-out source; this explicit test seam skips the release download.
