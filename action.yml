@@ -9,6 +9,10 @@ inputs:
     description: Released cuse version to install
     required: false
     default: v0.1.0
+  executable-path:
+    description: Explicit cuse executable for repository CI; skips release download when set
+    required: false
+    default: ""
   linux-display:
     description: Linux display preparation mode (automatic, always, or never)
     required: false
@@ -28,8 +32,8 @@ inputs:
 
 outputs:
   executable-path:
-    description: Absolute path to the verified cuse executable
-    value: ${{ steps.install-unix.outputs.path || steps.install-windows.outputs.path }}
+    description: Absolute path to the selected cuse executable
+    value: ${{ steps.select-unix.outputs.path || steps.select-windows.outputs.path }}
   verdict:
     description: Structured scenario verdict
     value: ${{ steps.execute-unix.outputs.verdict || steps.execute-windows.outputs.verdict }}
@@ -68,7 +72,7 @@ runs:
 
     - id: install-unix
       name: Download and verify cuse
-      if: runner.os != 'Windows'
+      if: runner.os != 'Windows' && inputs.executable-path == ''
       shell: bash
       env:
         CUSE_VERSION: ${{ inputs.version }}
@@ -78,12 +82,36 @@ runs:
 
     - id: install-windows
       name: Download and verify cuse
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && inputs.executable-path == ''
       shell: pwsh
       env:
         CUSE_VERSION: ${{ inputs.version }}
       run: |
         $path = & "${env:GITHUB_ACTION_PATH}/scripts/action/install.ps1" $env:CUSE_VERSION $env:RUNNER_OS $env:RUNNER_ARCH "${env:RUNNER_TEMP}/cuse"
+        "path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+    - id: select-unix
+      name: Select cuse executable
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        CUSE_EXECUTABLE_OVERRIDE: ${{ inputs.executable-path }}
+        CUSE_INSTALLED_EXECUTABLE: ${{ steps.install-unix.outputs.path }}
+      run: |
+        path="$("${GITHUB_ACTION_PATH}/scripts/action/select-executable.sh" \
+          "${CUSE_EXECUTABLE_OVERRIDE}" "${CUSE_INSTALLED_EXECUTABLE}" "${GITHUB_WORKSPACE}")"
+        echo "path=${path}" >> "${GITHUB_OUTPUT}"
+
+    - id: select-windows
+      name: Select cuse executable
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        CUSE_EXECUTABLE_OVERRIDE: ${{ inputs.executable-path }}
+        CUSE_INSTALLED_EXECUTABLE: ${{ steps.install-windows.outputs.path }}
+      run: |
+        $path = & "${env:GITHUB_ACTION_PATH}/scripts/action/select-executable.ps1" `
+          $env:CUSE_EXECUTABLE_OVERRIDE $env:CUSE_INSTALLED_EXECUTABLE $env:GITHUB_WORKSPACE
         "path=$path" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
     - id: execute-unix
@@ -92,7 +120,7 @@ runs:
       continue-on-error: true
       shell: bash
       env:
-        CUSE_EXECUTABLE: ${{ steps.install-unix.outputs.path }}
+        CUSE_EXECUTABLE: ${{ steps.select-unix.outputs.path }}
         CUSE_SCENARIO: ${{ inputs.scenario }}
         CUSE_WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
@@ -106,7 +134,7 @@ runs:
       continue-on-error: true
       shell: pwsh
       env:
-        CUSE_EXECUTABLE: ${{ steps.install-windows.outputs.path }}
+        CUSE_EXECUTABLE: ${{ steps.select-windows.outputs.path }}
         CUSE_SCENARIO: ${{ inputs.scenario }}
         CUSE_WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
