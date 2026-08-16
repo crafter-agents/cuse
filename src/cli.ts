@@ -30,6 +30,7 @@ import { probeProcess } from "./probes/process.ts";
 import { probePort } from "./probes/port.ts";
 import { probeFile } from "./probes/file.ts";
 import { probeScheduledTask } from "./probes/scheduled-task.ts";
+import { probeService } from "./probes/service.ts";
 import type { PortProtocol } from "./probes/types.ts";
 
 export type Options = {
@@ -951,6 +952,9 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
       case "inspect": {
         const noun = args[0];
+        if (!noun) {
+          return { ok: false, ...base, error: "inspect needs a noun: process, port, file, service, or scheduled-task" };
+        }
         if (noun === "process") {
           if (!Number.isSafeInteger(opts.pid) || opts.pid === undefined || opts.pid <= 0) {
             return { ok: false, ...base, error: "inspect process needs --pid=<n>" };
@@ -997,7 +1001,16 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
               : `scheduled task not found or unavailable (${result.status})`,
             data: result };
         }
-        return { ok: false, ...base, error: "inspect needs a noun: process, port, file, or scheduled-task" };
+        if (noun === "service") {
+          if (!opts.name) return { ok: false, ...base, error: "inspect service needs --name=<n>" };
+          const result = await probeService(opts.name, os);
+          return { ok: true, ...base,
+            detail: result.found
+              ? `service ${result.normalized?.name} found`
+              : `service not found or unavailable (${result.status})`,
+            data: result };
+        }
+        return { ok: false, ...base, error: "inspect needs a noun: process, port, file, service, or scheduled-task" };
       }
 
       case "type": { await run(typeCmd(os, args[0] ?? "")); return { ok: true, ...base, detail: "typed" }; }

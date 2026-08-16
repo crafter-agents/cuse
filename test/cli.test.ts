@@ -207,11 +207,27 @@ test("inspect scheduled-task reports unavailable on a non-windows host", async (
   });
 }, 10_000);
 
+test("inspect service requires a name", async () => {
+  const result = await act("inspect", ["service"]);
+
+  expect(result).toMatchObject({ ok: false, error: expect.stringContaining("--name") });
+});
+
+test("inspect service reports its host-appropriate status for a missing name", async () => {
+  const result = await act("inspect", ["service"], { name: `cuse-missing-${process.pid}` });
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({
+    found: false,
+    status: detectOS() === "windows" ? "unavailable" : "not-found",
+  });
+}, 10_000);
+
 test("inspect requires a known noun", async () => {
   expect(await act("inspect", [])).toMatchObject({ ok: false,
-    error: "inspect needs a noun: process, port, file, or scheduled-task" });
-  expect(await act("inspect", ["service"])).toMatchObject({ ok: false,
-    error: "inspect needs a noun: process, port, file, or scheduled-task" });
+    error: "inspect needs a noun: process, port, file, service, or scheduled-task" });
+  expect(await act("inspect", ["bogus-noun"])).toMatchObject({ ok: false,
+    error: "inspect needs a noun: process, port, file, service, or scheduled-task" });
 });
 
 test("fill dispatches click, platform select-all, then type on every OS", async () => {
