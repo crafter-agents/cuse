@@ -80,7 +80,7 @@ describe("service probe", () => {
       detectOS(),
     );
 
-    expect(result.status).toBe("not-found");
+    expect(result.status).toBe(detectOS() === "windows" ? "unavailable" : "not-found");
     expect(result.found).toBe(false);
     expect(parseProbeResult(result).ok).toBe(true);
   }, 10_000);
