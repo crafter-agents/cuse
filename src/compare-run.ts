@@ -31,12 +31,13 @@ export async function runComparison(
   setupTimeoutMs?: number,
 ): Promise<{ report: ComparisonReport; dirs: ComparisonRunDirs }> {
   const dirs = await createComparisonRunDirs();
-  const baselineSetup = await runSetup(manifest.baseline, setupTimeoutMs);
-  const candidateSetup = await runSetup(manifest.candidate, setupTimeoutMs);
 
+  const baselineSetup = await runSetup(manifest.baseline, setupTimeoutMs);
   const baselineInput: ComparisonInput = "ok" in baselineSetup
     ? await runners.baseline(dirs.baseline)
     : baselineSetup;
+
+  const candidateSetup = await runSetup(manifest.candidate, setupTimeoutMs);
   const candidateInput: ComparisonInput = "ok" in candidateSetup
     ? await runners.candidate(dirs.candidate)
     : candidateSetup;

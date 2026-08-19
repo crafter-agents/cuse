@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { cleanupComparisonRunDirs } from "../src/compare-isolation.ts";
 import { runComparison } from "../src/compare-run.ts";
 import { buildComparisonReport } from "../src/compare-report.ts";
@@ -93,6 +96,46 @@ describe("comparison run orchestration", () => {
       });
     } finally {
       await cleanupComparisonRunDirs(run.dirs);
+    }
+  });
+
+  test("runs each side's own setup immediately before its own run, not before the other side's run", async () => {
+    const order: string[] = [];
+    const scratch = await mkdtemp(join(tmpdir(), "cuse-compare-order-test-"));
+    const stateFile = join(scratch, "state.txt");
+    const baselineSetup = {
+      argv: ["sh", "-c", `echo baseline > ${stateFile}`],
+      cwd: scratch,
+    };
+    const candidateSetup = {
+      argv: ["sh", "-c", `echo candidate > ${stateFile}`],
+      cwd: scratch,
+    };
+
+    try {
+      const run = await runComparison(
+        { scenario: "scenario.json", baseline: baselineSetup, candidate: candidateSetup },
+        {
+          baseline: async () => {
+            order.push("run:baseline");
+            // If candidate's setup had already run (the bug), this would read "candidate".
+            const observed = (await readFile(stateFile, "utf8")).trim();
+            expect(observed).toBe("baseline");
+            return result("failed");
+          },
+          candidate: async () => {
+            order.push("run:candidate");
+            const observed = (await readFile(stateFile, "utf8")).trim();
+            expect(observed).toBe("candidate");
+            return result("passed");
+          },
+        },
+      );
+
+      expect(order).toEqual(["run:baseline", "run:candidate"]);
+      await cleanupComparisonRunDirs(run.dirs);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
     }
   });
 
