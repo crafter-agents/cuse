@@ -263,6 +263,7 @@ async function macElements(app: string, timeoutMs: number,
     selected: e.selected,
     expanded: e.expanded,
     automationId: e.automationId,
+    checked: e.checked,
     processId: target.pid,
   })) };
 }
