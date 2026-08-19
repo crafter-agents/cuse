@@ -133,6 +133,40 @@ describe("parsing what they print", () => {
   });
 });
 
+describe("trailing key=value tokens carry semantic properties", () => {
+  test("a row with trailing tokens parses exactly those properties, correctly typed", () => {
+    const [e] = parseElements(
+      "AXCheckBox\tSubscribe\t10\t20\t80\t24\tchecked=true\tvalue=on\tprocessId=4242\n");
+    expect(e).toMatchObject({
+      role: "checkbox", rawRole: "AXCheckBox", name: "Subscribe",
+      x: 10, y: 20, width: 80, height: 24,
+      checked: true, value: "on", processId: 4242,
+    });
+    expect(e!.enabled).toBeUndefined();
+    expect(e!.selected).toBeUndefined();
+    expect(e!.expanded).toBeUndefined();
+    expect(e!.focused).toBeUndefined();
+    expect(e!.automationId).toBeUndefined();
+  });
+  test("the plain six-field line leaves every semantic property undefined, not false", () => {
+    const [e] = parseElements("AXButton\tSave\t10\t20\t80\t24\n");
+    expect(e!.value).toBeUndefined();
+    expect(e!.enabled).toBeUndefined();
+    expect(e!.selected).toBeUndefined();
+    expect(e!.checked).toBeUndefined();
+    expect(e!.expanded).toBeUndefined();
+    expect(e!.focused).toBeUndefined();
+    expect(e!.automationId).toBeUndefined();
+    expect(e!.processId).toBeUndefined();
+    expect(JSON.stringify(e)).not.toContain("checked");
+  });
+  test("an unrecognized token is ignored, not thrown and not carried over", () => {
+    const [e] = parseElements("AXButton\tSave\t10\t20\t80\t24\tsomethingNew=whatever\n");
+    expect(e).toMatchObject({ role: "button", name: "Save", x: 10, y: 20, width: 80, height: 24 });
+    expect((e as Record<string, unknown>).somethingNew).toBeUndefined();
+  });
+});
+
 describe("choosing the control the agent meant", () => {
   const els = [
     el({ name: "Save", role: "group", width: 400, height: 300 }),

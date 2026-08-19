@@ -15,6 +15,17 @@ export type Element = {
   rawRole: string;   // what the platform called it, kept for reporting
   name: string;
   x: number; y: number; width: number; height: number;
+  // Richer accessibility state, present only where the backend can report it.
+  // Absent when unknown - never coerced to false, "" or 0, since a backend
+  // that cannot see whether a checkbox is checked does not get to guess.
+  value?: string;
+  enabled?: boolean;
+  selected?: boolean;
+  checked?: boolean;
+  expanded?: boolean;
+  focused?: boolean;
+  automationId?: string;
+  processId?: number;
 };
 
 export type Selector = { name?: string; role?: string };
@@ -340,7 +351,11 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
 }
 
 /**
- * Tab-separated: role, name, x, y, width, height.
+ * Tab-separated: role, name, x, y, width, height, then zero or more
+ * `key=value` tokens carrying the semantic properties a backend can report
+ * (see `Element`). The fixed six fields parse exactly as before; trailing
+ * tokens are optional and backward compatible, so an older wire format with
+ * no tokens still parses.
  *
  * The platform is optional and only settles the words two of them disagree on;
  * without it the reading is the common one.
@@ -350,17 +365,40 @@ export function parseElements(text: string, os?: OS): Element[] {
   for (const line of text.split("\n")) {
     const f = line.split("\t");
     if (f.length < 6) continue;
+    const props: string[] = [];
+    while (f.length > 6 && f[f.length - 1]!.includes("=")) {
+      props.unshift(f.pop()!);
+    }
     const nums = f.slice(-4).map((v) => Number(v.trim()));
     if (nums.some((n) => !Number.isFinite(n))) continue;
     const [x, y, width, height] = nums as [number, number, number, number];
     if (width <= 0 || height <= 0) continue;
     const rawRole = f[0]!.trim();
-    out.push({
+    const el: Element = {
       rawRole,
       role: normalizeRole(rawRole, os),
       name: f.slice(1, f.length - 4).join(" ").trim(),
       x, y, width, height,
-    });
+    };
+    for (const token of props) {
+      const eq = token.indexOf("=");
+      if (eq < 0) continue;
+      const key = token.slice(0, eq);
+      const value = token.slice(eq + 1);
+      switch (key) {
+        case "value": el.value = value; break;
+        case "automationId": el.automationId = value; break;
+        case "processId": el.processId = Number(value); break;
+        case "enabled": el.enabled = value === "true"; break;
+        case "selected": el.selected = value === "true"; break;
+        case "checked": el.checked = value === "true"; break;
+        case "expanded": el.expanded = value === "true"; break;
+        case "focused": el.focused = value === "true"; break;
+        // Anything else is a token this parser does not know yet: ignored,
+        // not thrown, so a newer backend does not break an older cuse.
+      }
+    }
+    out.push(el);
   }
   return out;
 }
