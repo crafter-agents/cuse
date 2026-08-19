@@ -257,6 +257,10 @@ async function macElements(app: string, timeoutMs: number,
     name: e.name,
     x: Math.round(e.x), y: Math.round(e.y),
     width: Math.round(e.width), height: Math.round(e.height),
+    value: e.value,
+    enabled: e.enabled,
+    focused: e.focused,
+    processId: target.pid,
   })) };
 }
 

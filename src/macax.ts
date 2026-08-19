@@ -52,6 +52,8 @@ function open() {
     CFArrayGetTypeID: { args: [], returns: T.u64 },
     CFGetTypeID: { args: [T.u64], returns: T.u64 },
     CFRelease: { args: [T.u64], returns: T.void },
+    CFBooleanGetTypeID: { args: [], returns: T.u64 },
+    CFBooleanGetValue: { args: [T.u64], returns: T.bool },
   });
   return { ax: ax.symbols, cf: cf.symbols };
 }
@@ -60,7 +62,10 @@ type Syms = ReturnType<typeof open>;
 let lib: Syms | null = null;
 const syms = (): Syms => (lib ??= open());
 
-export type Raw = { role: string; name: string; x: number; y: number; width: number; height: number };
+export type Raw = {
+  role: string; name: string; x: number; y: number; width: number; height: number;
+  value?: string; enabled?: boolean; focused?: boolean;
+};
 
 /**
  * What came back, and whether it is all of it.
@@ -131,10 +136,18 @@ export function elementsOfPid(pid: number, limit = 300, maxDepth = 12,
     return [pair[0]!, pair[1]!];
   };
 
+  const BOOL_ID = cf.CFBooleanGetTypeID();
+  // Type-checked like `toStr`, for the same reason: a backend that cannot
+  // answer AXEnabled or AXFocused must come back undefined, never false.
+  const axBool = (v: bigint): boolean | undefined => {
+    if (!v || cf.CFGetTypeID(v) !== BOOL_ID) return undefined;
+    return cf.CFBooleanGetValue(v);
+  };
+
   // One message per element instead of six. A control's name lives under
   // whichever of these it happens to use: a button has a title, an image has a
   // description, a text area has only its contents.
-  const ATTRS = ["AXRole", "AXTitle", "AXDescription", "AXValue", "AXPosition", "AXSize"];
+  const ATTRS = ["AXRole", "AXTitle", "AXDescription", "AXValue", "AXPosition", "AXSize", "AXEnabled", "AXFocused"];
   const attrHandles = new BigUint64Array(ATTRS.map(cfstr));
   const attrArray = cf.CFArrayCreate(0n, ptr(attrHandles), BigInt(ATTRS.length), 0n);
   const many = new BigUint64Array(1);
@@ -161,8 +174,16 @@ export function elementsOfPid(pid: number, limit = 300, maxDepth = 12,
       const name = toStr(at(1)) || toStr(at(2)) || toStr(at(3));
       const pos = axPair(at(4), POINT);
       const size = axPair(at(5), SIZE);
+      const enabled = axBool(at(6));
+      const focused = axBool(at(7));
+      const value = toStr(at(3)) || undefined;
       if (pos && size && size[0] > 0 && size[1] > 0) {
-        rows.push({ role, name, x: pos[0], y: pos[1], width: size[0], height: size[1] });
+        rows.push({
+          role, name, x: pos[0], y: pos[1], width: size[0], height: size[1],
+          ...(value !== undefined ? { value } : {}),
+          ...(enabled !== undefined ? { enabled } : {}),
+          ...(focused !== undefined ? { focused } : {}),
+        });
       }
       cf.CFRelease(arr);
     }
