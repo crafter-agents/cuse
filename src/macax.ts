@@ -54,6 +54,8 @@ function open() {
     CFRelease: { args: [T.u64], returns: T.void },
     CFBooleanGetTypeID: { args: [], returns: T.u64 },
     CFBooleanGetValue: { args: [T.u64], returns: T.bool },
+    CFNumberGetTypeID: { args: [], returns: T.u64 },
+    CFNumberGetValue: { args: [T.u64, T.i64, T.ptr], returns: T.bool },
   });
   return { ax: ax.symbols, cf: cf.symbols };
 }
@@ -66,6 +68,7 @@ export type Raw = {
   role: string; name: string; x: number; y: number; width: number; height: number;
   value?: string; enabled?: boolean; focused?: boolean;
   selected?: boolean; expanded?: boolean; automationId?: string;
+  checked?: boolean;
 };
 
 /**
@@ -145,6 +148,24 @@ export function elementsOfPid(pid: number, limit = 300, maxDepth = 12,
     return cf.CFBooleanGetValue(v);
   };
 
+  const NUMBER_ID = cf.CFNumberGetTypeID();
+  const SINT32 = 3; // kCFNumberSInt32Type
+  const num = new Int32Array(1);
+  const numPtr = ptr(num);
+  // AXCheckBox and AXRadioButton report their state as a CFNumber, not the
+  // CFBoolean other controls use: an NSButton's `state` is 0/1/2 for
+  // off/on/mixed. Type-checked like `axBool`, so a control whose AXValue is
+  // some other CFNumber (a slider, say) or no number at all also comes back
+  // undefined rather than a guessed boolean. 2 (mixed) is deliberately left
+  // undefined too: collapsing a tri-state checkbox into true or false would be
+  // exactly the "missing state reported as false" issue #35 rules out.
+  const axNumber = (v: bigint): boolean | undefined => {
+    if (!v || cf.CFGetTypeID(v) !== NUMBER_ID) return undefined;
+    if (!cf.CFNumberGetValue(v, SINT32, numPtr)) return undefined;
+    const n = num[0];
+    return n === 0 ? false : n === 1 ? true : undefined;
+  };
+
   // One message per element instead of six. A control's name lives under
   // whichever of these it happens to use: a button has a title, an image has a
   // description, a text area has only its contents.
@@ -188,6 +209,9 @@ export function elementsOfPid(pid: number, limit = 300, maxDepth = 12,
       const selected = axBool(at(8));
       const expanded = axBool(at(9));
       const automationId = toStr(at(10)) || undefined;
+      // Same handle as `value` above, read a second way: AXValue is a string
+      // on most controls but a CFNumber on a checkbox or radio button.
+      const checked = axNumber(at(3));
       if (pos && size && size[0] > 0 && size[1] > 0) {
         rows.push({
           role, name, x: pos[0], y: pos[1], width: size[0], height: size[1],
@@ -197,6 +221,7 @@ export function elementsOfPid(pid: number, limit = 300, maxDepth = 12,
           ...(selected !== undefined ? { selected } : {}),
           ...(expanded !== undefined ? { expanded } : {}),
           ...(automationId !== undefined ? { automationId } : {}),
+          ...(checked !== undefined ? { checked } : {}),
         });
       }
       cf.CFRelease(arr);
