@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { cleanupComparisonRunDirs } from "../src/compare-isolation.ts";
 import { runComparison } from "../src/compare-run.ts";
 import { buildComparisonReport } from "../src/compare-report.ts";
@@ -103,12 +103,16 @@ describe("comparison run orchestration", () => {
     const order: string[] = [];
     const scratch = await mkdtemp(join(tmpdir(), "cuse-compare-order-test-"));
     const stateFile = join(scratch, "state.txt");
+    // sh -c strips unquoted backslashes, so a raw Windows path mangles into
+    // a flattened filename. Use a posix-slash version for the shell command
+    // only; every readFile below keeps the native-separator stateFile path.
+    const shPath = stateFile.split(sep).join("/");
     const baselineSetup = {
-      argv: ["sh", "-c", `echo baseline > ${stateFile}`],
+      argv: ["sh", "-c", `echo baseline > ${shPath}`],
       cwd: scratch,
     };
     const candidateSetup = {
-      argv: ["sh", "-c", `echo candidate > ${stateFile}`],
+      argv: ["sh", "-c", `echo candidate > ${shPath}`],
       cwd: scratch,
     };
 
