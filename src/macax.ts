@@ -65,6 +65,7 @@ const syms = (): Syms => (lib ??= open());
 export type Raw = {
   role: string; name: string; x: number; y: number; width: number; height: number;
   value?: string; enabled?: boolean; focused?: boolean;
+  selected?: boolean; expanded?: boolean; automationId?: string;
 };
 
 /**
@@ -147,7 +148,14 @@ export function elementsOfPid(pid: number, limit = 300, maxDepth = 12,
   // One message per element instead of six. A control's name lives under
   // whichever of these it happens to use: a button has a title, an image has a
   // description, a text area has only its contents.
-  const ATTRS = ["AXRole", "AXTitle", "AXDescription", "AXValue", "AXPosition", "AXSize", "AXEnabled", "AXFocused"];
+  // AXSelected/AXExpanded/AXIdentifier ride along the same call: a tab or list
+  // row's selection state, an outline row's disclosure state, and a UI test
+  // identifier are each a single direct attribute read, same shape as
+  // AXEnabled/AXFocused above.
+  const ATTRS = [
+    "AXRole", "AXTitle", "AXDescription", "AXValue", "AXPosition", "AXSize", "AXEnabled", "AXFocused",
+    "AXSelected", "AXExpanded", "AXIdentifier",
+  ];
   const attrHandles = new BigUint64Array(ATTRS.map(cfstr));
   const attrArray = cf.CFArrayCreate(0n, ptr(attrHandles), BigInt(ATTRS.length), 0n);
   const many = new BigUint64Array(1);
@@ -177,12 +185,18 @@ export function elementsOfPid(pid: number, limit = 300, maxDepth = 12,
       const enabled = axBool(at(6));
       const focused = axBool(at(7));
       const value = toStr(at(3)) || undefined;
+      const selected = axBool(at(8));
+      const expanded = axBool(at(9));
+      const automationId = toStr(at(10)) || undefined;
       if (pos && size && size[0] > 0 && size[1] > 0) {
         rows.push({
           role, name, x: pos[0], y: pos[1], width: size[0], height: size[1],
           ...(value !== undefined ? { value } : {}),
           ...(enabled !== undefined ? { enabled } : {}),
           ...(focused !== undefined ? { focused } : {}),
+          ...(selected !== undefined ? { selected } : {}),
+          ...(expanded !== undefined ? { expanded } : {}),
+          ...(automationId !== undefined ? { automationId } : {}),
         });
       }
       cf.CFRelease(arr);

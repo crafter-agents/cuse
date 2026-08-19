@@ -260,6 +260,9 @@ async function macElements(app: string, timeoutMs: number,
     value: e.value,
     enabled: e.enabled,
     focused: e.focused,
+    selected: e.selected,
+    expanded: e.expanded,
+    automationId: e.automationId,
     processId: target.pid,
   })) };
 }
