@@ -340,6 +340,20 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "        return tokens\n" +
       "    except Exception:\n" +
       "        return []\n" +
+      // Text covers entries and fields, while Value is the fallback for range
+      // widgets. Flatten tabs and newlines so content cannot shift the fixed
+      // columns in the tab-separated wire format.
+      "def value_token(node):\n" +
+      "    try:\n" +
+      "        value = node.queryText().getText(0, -1)\n" +
+      "        if value:\n" +
+      "            return ['value=' + value.replace('\\t', ' ').replace('\\n', ' ')]\n" +
+      "    except Exception:\n" +
+      "        pass\n" +
+      "    try:\n" +
+      "        return ['value=' + str(node.queryValue().currentValue)]\n" +
+      "    except Exception:\n" +
+      "        return []\n" +
       "TOPLEVEL = ('frame', 'window', 'dialog', 'alert', 'file chooser')\n" +
       "n = 0\n" +
       "def walk(node, ox, oy, depth):\n" +
@@ -362,7 +376,7 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "        if ext.width > 0:\n" +
       "            print('\\t'.join([node.getRoleName(), node.name or '',\n" +
       "                  str(ox + ext.x), str(oy + ext.y), str(ext.width), str(ext.height)] +\n" +
-      "                  state_tokens(node)))\n" +
+      "                  state_tokens(node) + value_token(node)))\n" +
       "            n += 1\n" +
       "    for child in node:\n" +
       "        if child is not None:\n" +
