@@ -313,18 +313,31 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "    if len(bysize) == 1:\n" +
       "        return bysize[0][1], bysize[0][2]\n" +
       "    return None\n" +
-      // enabled and focused are the two properties AT-SPI defines as
-      // unconditional boolean state bits on every accessible object; no role
-      // check is needed to know whether they apply, unlike selected/checked/
-      // expanded (role-conditional) or value (needs a separate interface).
+      // enabled and focused are unconditional AT-SPI state bits. The other
+      // states below are meaningful only for specific roles, so unsupported
+      // properties are omitted instead of being reported as false.
       // getState() itself can still fail on a node whose accessible
       // interface does not support it, so this degrades to no tokens rather
       // than raising: missing state is never reported as false.
+      "SELECTED_ROLES = (pyatspi.ROLE_LIST_ITEM, pyatspi.ROLE_PAGE_TAB,\n" +
+      "                  pyatspi.ROLE_TABLE_ROW, pyatspi.ROLE_TREE_ITEM)\n" +
+      "CHECKED_ROLES = (pyatspi.ROLE_CHECK_BOX, pyatspi.ROLE_TOGGLE_BUTTON,\n" +
+      "                 pyatspi.ROLE_CHECK_MENU_ITEM, pyatspi.ROLE_RADIO_BUTTON,\n" +
+      "                 pyatspi.ROLE_RADIO_MENU_ITEM)\n" +
+      "EXPANDED_ROLES = (pyatspi.ROLE_TREE_ITEM, pyatspi.ROLE_COMBO_BOX)\n" +
       "def state_tokens(node):\n" +
       "    try:\n" +
       "        states = node.getState()\n" +
-      "        return ['enabled=%s' % ('true' if states.contains(pyatspi.STATE_ENABLED) else 'false'),\n" +
-      "                'focused=%s' % ('true' if states.contains(pyatspi.STATE_FOCUSED) else 'false')]\n" +
+      "        role = node.getRole()\n" +
+      "        tokens = ['enabled=%s' % ('true' if states.contains(pyatspi.STATE_ENABLED) else 'false'),\n" +
+      "                  'focused=%s' % ('true' if states.contains(pyatspi.STATE_FOCUSED) else 'false')]\n" +
+      "        if role in SELECTED_ROLES:\n" +
+      "            tokens.append('selected=%s' % ('true' if states.contains(pyatspi.STATE_SELECTED) else 'false'))\n" +
+      "        if role in CHECKED_ROLES:\n" +
+      "            tokens.append('checked=%s' % ('true' if states.contains(pyatspi.STATE_CHECKED) else 'false'))\n" +
+      "        if role in EXPANDED_ROLES:\n" +
+      "            tokens.append('expanded=%s' % ('true' if states.contains(pyatspi.STATE_EXPANDED) else 'false'))\n" +
+      "        return tokens\n" +
       "    except Exception:\n" +
       "        return []\n" +
       "TOPLEVEL = ('frame', 'window', 'dialog', 'alert', 'file chooser')\n" +

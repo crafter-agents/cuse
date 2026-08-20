@@ -98,6 +98,16 @@ describe("asking each platform", () => {
     expect(c).toContain("STATE_ENABLED");
     expect(c).toContain("STATE_FOCUSED");
   });
+  test("linux emits role-gated selected, checked and expanded state tokens", () => {
+    const c = elementsCmd("linux", "xterm").join(" ");
+    expect(c).toContain("STATE_SELECTED");
+    expect(c).toContain("STATE_CHECKED");
+    expect(c).toContain("STATE_EXPANDED");
+    expect(c).toContain("role in SELECTED_ROLES");
+    expect(c).toContain("ROLE_LIST_ITEM");
+    expect(c).toContain("ROLE_CHECK_BOX");
+    expect(c).toContain("ROLE_TREE_ITEM");
+  });
   test("every backend is capped, so a huge tree cannot hang the caller", () => {
     for (const os of ["macos", "linux", "windows"] as OS[]) {
       expect(elementsCmd(os, "x", 42).join(" ")).toContain("42");
