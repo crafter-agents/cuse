@@ -113,6 +113,11 @@ describe("asking each platform", () => {
     expect(c).toContain("queryText");
     expect(c).toContain("queryValue");
   });
+  test("linux reads accessible and process IDs", () => {
+    const c = elementsCmd("linux", "xterm").join(" ");
+    expect(c).toContain("get_accessible_id");
+    expect(c).toContain("get_process_id");
+  });
   test("every backend is capped, so a huge tree cannot hang the caller", () => {
     for (const os of ["macos", "linux", "windows"] as OS[]) {
       expect(elementsCmd(os, "x", 42).join(" ")).toContain("42");
