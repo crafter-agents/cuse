@@ -245,9 +245,19 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "try{$h=$e.Current.NativeWindowHandle;" +
       "if($h -ne 0){$sb=New-Object System.Text.StringBuilder 256;" +
       "[void][CuseWin]::GetClassName([IntPtr]$h,$sb,256);$cls=$sb.ToString()}}catch{}" +
-      "Write-Output ((@(\"$t|$cls\",$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height," +
+      "$toks=@(\"$t|$cls\",$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height," +
       "\"enabled=$(if($e.Current.IsEnabled){'true'}else{'false'})\"," +
-      "\"focused=$(if($e.Current.HasKeyboardFocus){'true'}else{'false'})\")) -join \"`t\");" +
+      "\"focused=$(if($e.Current.HasKeyboardFocus){'true'}else{'false'})\");" +
+      "$sp=$null;if($e.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPatternIdentifiers]::Pattern,[ref]$sp)){" +
+      "$sp=[System.Windows.Automation.SelectionItemPattern]$sp;" +
+      "$toks+=\"selected=$(if($sp.Current.IsSelected){'true'}else{'false'})\"};" +
+      "$tp=$null;if($e.TryGetCurrentPattern([System.Windows.Automation.TogglePatternIdentifiers]::Pattern,[ref]$tp)){" +
+      "$tp=[System.Windows.Automation.TogglePattern]$tp;" +
+      "$toks+=\"checked=$(if($tp.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On){'true'}else{'false'})\"};" +
+      "$ep=$null;if($e.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePatternIdentifiers]::Pattern,[ref]$ep)){" +
+      "$ep=[System.Windows.Automation.ExpandCollapsePattern]$ep;" +
+      "$toks+=\"expanded=$(if($ep.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded){'true'}else{'false'})\"};" +
+      "Write-Output ($toks -join \"`t\");" +
       "$n++}}");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not
