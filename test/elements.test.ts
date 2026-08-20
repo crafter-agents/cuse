@@ -93,6 +93,15 @@ describe("asking each platform", () => {
     expect(c).toContain("IsEnabled");
     expect(c).toContain("HasKeyboardFocus");
   });
+  test("windows emits pattern-gated selected, checked and expanded state tokens", () => {
+    const c = elementsCmd("windows", "CU_TARGET").join(" ");
+    expect(c).toContain("SelectionItemPatternIdentifiers");
+    expect(c).toContain("TogglePatternIdentifiers");
+    expect(c).toContain("ExpandCollapsePatternIdentifiers");
+    expect(c).toContain("IsSelected");
+    expect(c).toContain("ToggleState");
+    expect(c).toContain("ExpandCollapseState");
+  });
   test("linux names what is missing instead of returning nothing", () => {
     const c = elementsCmd("linux", "xterm").join(" ");
     expect(c).toContain("pyatspi");
