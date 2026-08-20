@@ -114,9 +114,9 @@ function joinBytes(chunks: Uint8Array[]): Uint8Array {
 
 const asText = (chunks: Uint8Array[]): string => new TextDecoder().decode(joinBytes(chunks));
 
-async function runWindows(argv: string[], ms: number, bytes: false): Promise<RunResult>;
-async function runWindows(argv: string[], ms: number, bytes: true): Promise<BytesResult>;
-async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<RunResult | BytesResult> {
+async function runWindows(argv: string[], ms: number, bytes: false, cwd?: string): Promise<RunResult>;
+async function runWindows(argv: string[], ms: number, bytes: true, cwd?: string): Promise<BytesResult>;
+async function runWindows(argv: string[], ms: number, bytes: boolean, cwd?: string): Promise<RunResult | BytesResult> {
   const id = crypto.randomUUID();
   const stdoutPath = join(tmpdir(), `cuse-${id}.stdout`);
   const stderrPath = join(tmpdir(), `cuse-${id}.stderr`);
@@ -128,6 +128,7 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
   const proc = nodeSpawn(argv[0]!, argv.slice(1), {
     stdio: ["ignore", stdoutFd, stderrFd],
     windowsHide: true,
+    cwd,
   });
   closeSync(stdoutFd);
   closeSync(stderrFd);
@@ -162,9 +163,18 @@ async function runWindows(argv: string[], ms: number, bytes: boolean): Promise<R
  * child is doing. The kill happens in the background so that even a process
  * that ignores signals cannot hold cuse open.
  */
-export async function runWithTimeout(argv: string[], ms: number): Promise<RunResult> {
-  if (process.platform === "win32") return runWindows(argv, ms, false);
-  const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+export async function runWithTimeout(
+  argv: string[],
+  ms: number,
+  opts?: { cwd?: string },
+): Promise<RunResult> {
+  if (process.platform === "win32") return runWindows(argv, ms, false, opts?.cwd);
+  const proc = Bun.spawn(argv, {
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    cwd: opts?.cwd,
+  });
   const stdout = readPipe(proc.stdout, asText);
   const stderr = readPipe(proc.stderr, asText);
 
@@ -196,7 +206,7 @@ export async function runWithTimeout(argv: string[], ms: number): Promise<RunRes
 /** Same deadline, but keeping stdout as bytes - xwd writes a binary dump there,
  *  and reading it as text would quietly corrupt every pixel. */
 export async function runBytes(argv: string[], ms: number): Promise<BytesResult> {
-  if (process.platform === "win32") return runWindows(argv, ms, true);
+  if (process.platform === "win32") return runWindows(argv, ms, true, undefined);
   const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const stdout = readPipe(proc.stdout, joinBytes);
   const stderr = readPipe(proc.stderr, asText);

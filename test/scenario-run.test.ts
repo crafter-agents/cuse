@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   runScenario,
   SCENARIO_SCHEMA_VERSION,
@@ -17,10 +20,11 @@ const scenario = (steps: ScenarioStep[], cleanup: ScenarioStep[] = []): Scenario
   finally: cleanup,
 });
 
-const exec = (script: string, timeoutMs?: number): ScenarioStep => ({
+const exec = (script: string, timeoutMs?: number, cwd?: string): ScenarioStep => ({
   type: "exec",
   argv: [process.execPath, "-e", script],
   timeoutMs,
+  cwd,
 });
 
 describe("scenario execution lifecycle", () => {
@@ -94,6 +98,16 @@ describe("scenario execution lifecycle", () => {
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
     expect(result.steps.map((step) => step.run?.stdout.trim())).toEqual(["first", "second"]);
     expect(result.steps.map((step) => step.status)).toEqual(["passed", "passed"]);
+  });
+
+  test("executes a command in its declared working directory", async () => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "cuse-scenario-cwd-")));
+    const result = await runScenario(scenario([
+      exec("console.log(process.cwd())", undefined, cwd),
+    ]));
+
+    expect(result.status).toBe("passed");
+    expect(result.steps[0]!.run?.stdout.trim()).toBe(cwd);
   });
 
   test("stops after a required failure and runs every cleanup step", async () => {

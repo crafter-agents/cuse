@@ -1,4 +1,7 @@
 import { test, expect, describe } from "bun:test";
+import { mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runWithTimeout, explainFailure, timeoutFor, DEFAULT_TIMEOUT_MS } from "../src/exec.ts";
 
 describe("deadlines", () => {
@@ -7,6 +10,16 @@ describe("deadlines", () => {
     expect(r.code).toBe(0);
     expect(r.timedOut).toBe(false);
     expect(r.stdout.trim()).toBe("hi");
+  });
+  test("a command runs in the requested working directory", async () => {
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "cuse-exec-cwd-")));
+    const r = await runWithTimeout(
+      [process.execPath, "-e", "console.log(process.cwd())"],
+      5000,
+      { cwd },
+    );
+    expect(r.code).toBe(0);
+    expect(r.stdout.trim()).toBe(cwd);
   });
   test("a hung command is killed rather than waited on", async () => {
     const started = Date.now();
