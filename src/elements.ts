@@ -313,6 +313,20 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "    if len(bysize) == 1:\n" +
       "        return bysize[0][1], bysize[0][2]\n" +
       "    return None\n" +
+      // enabled and focused are the two properties AT-SPI defines as
+      // unconditional boolean state bits on every accessible object; no role
+      // check is needed to know whether they apply, unlike selected/checked/
+      // expanded (role-conditional) or value (needs a separate interface).
+      // getState() itself can still fail on a node whose accessible
+      // interface does not support it, so this degrades to no tokens rather
+      // than raising: missing state is never reported as false.
+      "def state_tokens(node):\n" +
+      "    try:\n" +
+      "        states = node.getState()\n" +
+      "        return ['enabled=%s' % ('true' if states.contains(pyatspi.STATE_ENABLED) else 'false'),\n" +
+      "                'focused=%s' % ('true' if states.contains(pyatspi.STATE_FOCUSED) else 'false')]\n" +
+      "    except Exception:\n" +
+      "        return []\n" +
       "TOPLEVEL = ('frame', 'window', 'dialog', 'alert', 'file chooser')\n" +
       "n = 0\n" +
       "def walk(node, ox, oy, depth):\n" +
@@ -334,7 +348,8 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "            ox, oy = found\n" +
       "        if ext.width > 0:\n" +
       "            print('\\t'.join([node.getRoleName(), node.name or '',\n" +
-      "                  str(ox + ext.x), str(oy + ext.y), str(ext.width), str(ext.height)]))\n" +
+      "                  str(ox + ext.x), str(oy + ext.y), str(ext.width), str(ext.height)] +\n" +
+      "                  state_tokens(node)))\n" +
       "            n += 1\n" +
       "    for child in node:\n" +
       "        if child is not None:\n" +
