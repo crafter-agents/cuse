@@ -189,7 +189,7 @@ async function executeStep(
     case "exec": {
       let run: RunResult;
       try {
-        run = await runWithTimeout(step.argv, timeoutMs);
+        run = await runWithTimeout(step.argv, timeoutMs, { cwd: step.cwd });
       } catch (error) {
         return {
           status: "failed",
