@@ -354,6 +354,24 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "        return ['value=' + str(node.queryValue().currentValue)]\n" +
       "    except Exception:\n" +
       "        return []\n" +
+      // Accessible IDs are optional, and process IDs use a non-positive value
+      // when AT-SPI cannot resolve the owning process. Guard each lookup
+      // independently so one unsupported property does not hide the other.
+      "def id_tokens(node):\n" +
+      "    tokens = []\n" +
+      "    try:\n" +
+      "        accessible_id = node.get_accessible_id()\n" +
+      "        if accessible_id:\n" +
+      "            tokens.append('automationId=' + accessible_id.replace('\\t', ' ').replace('\\n', ' '))\n" +
+      "    except Exception:\n" +
+      "        pass\n" +
+      "    try:\n" +
+      "        process_id = node.get_process_id()\n" +
+      "        if process_id > 0:\n" +
+      "            tokens.append('processId=%d' % process_id)\n" +
+      "    except Exception:\n" +
+      "        pass\n" +
+      "    return tokens\n" +
       "TOPLEVEL = ('frame', 'window', 'dialog', 'alert', 'file chooser')\n" +
       "n = 0\n" +
       "def walk(node, ox, oy, depth):\n" +
@@ -376,7 +394,7 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "        if ext.width > 0:\n" +
       "            print('\\t'.join([node.getRoleName(), node.name or '',\n" +
       "                  str(ox + ext.x), str(oy + ext.y), str(ext.width), str(ext.height)] +\n" +
-      "                  state_tokens(node) + value_token(node)))\n" +
+      "                  state_tokens(node) + value_token(node) + id_tokens(node)))\n" +
       "            n += 1\n" +
       "    for child in node:\n" +
       "        if child is not None:\n" +
