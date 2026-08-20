@@ -108,6 +108,11 @@ describe("asking each platform", () => {
     expect(c).toContain("ROLE_CHECK_BOX");
     expect(c).toContain("ROLE_TREE_ITEM");
   });
+  test("linux reads values from text and range interfaces", () => {
+    const c = elementsCmd("linux", "xterm").join(" ");
+    expect(c).toContain("queryText");
+    expect(c).toContain("queryValue");
+  });
   test("every backend is capped, so a huge tree cannot hang the caller", () => {
     for (const os of ["macos", "linux", "windows"] as OS[]) {
       expect(elementsCmd(os, "x", 42).join(" ")).toContain("42");
