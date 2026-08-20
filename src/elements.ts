@@ -245,7 +245,9 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "try{$h=$e.Current.NativeWindowHandle;" +
       "if($h -ne 0){$sb=New-Object System.Text.StringBuilder 256;" +
       "[void][CuseWin]::GetClassName([IntPtr]$h,$sb,256);$cls=$sb.ToString()}}catch{}" +
-      "Write-Output ((@(\"$t|$cls\",$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height)) -join \"`t\");" +
+      "Write-Output ((@(\"$t|$cls\",$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height," +
+      "\"enabled=$(if($e.Current.IsEnabled){'true'}else{'false'})\"," +
+      "\"focused=$(if($e.Current.HasKeyboardFocus){'true'}else{'false'})\")) -join \"`t\");" +
       "$n++}}");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not
