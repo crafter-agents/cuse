@@ -88,6 +88,11 @@ describe("asking each platform", () => {
     expect(c).toContain("Descendants");
     expect(c).toContain("BoundingRectangle");
   });
+  test("windows emits enabled and focused state tokens", () => {
+    const c = elementsCmd("windows", "CU_TARGET").join(" ");
+    expect(c).toContain("IsEnabled");
+    expect(c).toContain("HasKeyboardFocus");
+  });
   test("linux names what is missing instead of returning nothing", () => {
     const c = elementsCmd("linux", "xterm").join(" ");
     expect(c).toContain("pyatspi");
