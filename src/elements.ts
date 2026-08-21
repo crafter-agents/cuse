@@ -231,12 +231,12 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$root=[System.Windows.Automation.AutomationElement]::RootElement;" +
       "$all=$root.FindAll('Children',[System.Windows.Automation.Condition]::TrueCondition);" +
       `$app='${app.replace(/'/g, "''")}';` +
-      "$n=0;$raw=0;$hidden=0;$errors=0;" +
+      "$n=0;$raw=0;$hidden=0;$errors=0;$firstError='';" +
       "foreach($w in $all){" +
       "if($app -and $w.Current.Name -notlike \"*$app*\"){continue}" +
       "$walker=[System.Windows.Automation.TreeWalker]::RawViewWalker;" +
       "function Walk-CuseTree($parent){" +
-      "try{$e=$walker.GetFirstChild($parent)}catch{$script:errors++;$e=$null};" +
+      "try{$e=$walker.GetFirstChild($parent)}catch{$script:errors++;if(-not $script:firstError){$script:firstError=$_.Exception.Message};$e=$null};" +
       "while($null -ne $e){" +
       "$script:raw++;" +
       `if($script:n -lt ${limit}){` +
@@ -268,12 +268,12 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$ep=[System.Windows.Automation.ExpandCollapsePattern]$ep;" +
       "$toks+=\"expanded=$(if($ep.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded){'true'}else{'false'})\"};" +
       "Write-Output ($toks -join \"`t\");" +
-      "$script:n++}}catch{$script:errors++}};" +
+      "$script:n++}}catch{$script:errors++;if(-not $script:firstError){$script:firstError=$_.Exception.Message}}};" +
       "Walk-CuseTree $e;" +
-      "try{$e=$walker.GetNextSibling($e)}catch{$script:errors++;$e=$null}" +
+      "try{$e=$walker.GetNextSibling($e)}catch{$script:errors++;if(-not $script:firstError){$script:firstError=$_.Exception.Message};$e=$null}" +
       "}};" +
       "Walk-CuseTree $w};" +
-      "Write-Warning \"cuse windows walker: raw=$raw visible=$n hidden=$hidden errors=$errors\"");
+      "[Console]::Error.WriteLine(\"cuse windows walker: raw=$raw visible=$n hidden=$hidden errors=$errors firstError=$firstError\")");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not
     // present by default, and an app only appears on it if its toolkit exports
