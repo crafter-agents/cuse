@@ -234,8 +234,18 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] " +
       "public struct Rect { public int Left, Top, Right, Bottom; }" +
       "[DllImport(\"user32.dll\")] public static extern bool GetWindowRect(System.IntPtr h, out Rect r);" +
+      "[DllImport(\"user32.dll\")] public static extern bool IsWindowEnabled(System.IntPtr h);" +
+      "[DllImport(\"user32.dll\")] static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint p);" +
+      "[DllImport(\"user32.dll\", EntryPoint=\"SendMessageW\")] static extern System.IntPtr SendMessage(System.IntPtr h, uint m, " +
+      "System.IntPtr w, System.IntPtr l);" +
+      "[DllImport(\"user32.dll\", EntryPoint=\"SendMessageW\", CharSet=CharSet.Unicode)] static extern System.IntPtr SendMessageText(" +
+      "System.IntPtr h, uint m, System.IntPtr w, System.Text.StringBuilder l);" +
       "public static int[] WindowRect(System.IntPtr h) { Rect r; if (!GetWindowRect(h, out r)) " +
       "return new int[0]; return new int[] { r.Left, r.Top, r.Right-r.Left, r.Bottom-r.Top }; }" +
+      "public static uint ProcessId(System.IntPtr h) { uint p; GetWindowThreadProcessId(h, out p); return p; }" +
+      "public static string GetText(System.IntPtr h) { int n=(int)SendMessage(h,14,System.IntPtr.Zero," +
+      "System.IntPtr.Zero).ToInt64(); var s=new System.Text.StringBuilder(n+1); " +
+      "SendMessageText(h,13,(System.IntPtr)(n+1),s); return s.ToString(); }" +
       "public static System.IntPtr[] GetChildWindows(System.IntPtr parent) {" +
       "var found = new System.Collections.Generic.List<System.IntPtr>();" +
       "EnumChildWindows(parent, delegate(System.IntPtr h, System.IntPtr p) { found.Add(h); return true; }, " +
@@ -249,6 +259,15 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$windowHandle=[IntPtr]$w.Current.NativeWindowHandle;" +
       "foreach($handle in [CuseWin]::GetChildWindows($windowHandle)){" +
       `if($n -ge ${limit}){break}` +
+      "$handleClass='';$classBuffer=New-Object System.Text.StringBuilder 256;" +
+      "[void][CuseWin]::GetClassName($handle,$classBuffer,256);$handleClass=$classBuffer.ToString();" +
+      "if($handleClass -eq 'Edit' -or $handleClass -like 'RichEdit*'){" +
+      "$wr=[CuseWin]::WindowRect($handle);if($wr.Length -eq 4 -and $wr[2] -gt 0){" +
+      "$legacyValue=[CuseWin]::GetText($handle) -replace \"[`t`r`n]\",' ';" +
+      "$legacy=@(\"Pane|$handleClass\",'', $wr[0],$wr[1],$wr[2],$wr[3]," +
+      "\"enabled=$(if([CuseWin]::IsWindowEnabled($handle)){'true'}else{'false'})\"," +
+      "\"processId=$([CuseWin]::ProcessId($handle))\",\"value=$legacyValue\");" +
+      "Write-Output ($legacy -join \"`t\");$n++};continue};" +
       "try{" +
       "$e=[System.Windows.Automation.AutomationElement]::FromHandle($handle);" +
       "$r=$e.Current.BoundingRectangle;" +
