@@ -133,7 +133,8 @@ describe("asking each platform", () => {
   test("windows emits a nonzero process ID token", () => {
     const c = elementsCmd("windows", "CU_TARGET").join(" ");
     expect(c).toContain("Current.ProcessId");
-    expect(c).toContain('processId=$pid');
+    expect(c).toContain('processId=$processId');
+    expect(c).not.toContain("$pid=");
   });
   test("windows emits pattern-gated selected, checked and expanded state tokens", () => {
     const c = elementsCmd("windows", "CU_TARGET").join(" ");

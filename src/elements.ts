@@ -231,18 +231,17 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$root=[System.Windows.Automation.AutomationElement]::RootElement;" +
       "$all=$root.FindAll('Children',[System.Windows.Automation.Condition]::TrueCondition);" +
       `$app='${app.replace(/'/g, "''")}';` +
-      "$n=0;$raw=0;$hidden=0;$errors=0;$firstError='';" +
+      "$n=0;" +
       "foreach($w in $all){" +
       "if($app -and $w.Current.Name -notlike \"*$app*\"){continue}" +
       "$walker=[System.Windows.Automation.TreeWalker]::RawViewWalker;" +
       "function Walk-CuseTree($parent){" +
-      "try{$e=$walker.GetFirstChild($parent)}catch{$script:errors++;if(-not $script:firstError){$script:firstError=$_.Exception.Message};$e=$null};" +
+      "try{$e=$walker.GetFirstChild($parent)}catch{$e=$null};" +
       "while($null -ne $e){" +
-      "$script:raw++;" +
       `if($script:n -lt ${limit}){` +
       "try{" +
       "$r=$e.Current.BoundingRectangle;" +
-      "if($r.Width -le 0){$script:hidden++}else{" +
+      "if($r.Width -gt 0){" +
       "$t=($e.Current.ControlType.ProgrammaticName -split '\\.')[-1];" +
       // WinForms answers Pane for everything through UI Automation; the same
       // control names itself properly through the legacy interface.
@@ -254,7 +253,7 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "\"enabled=$(if($e.Current.IsEnabled){'true'}else{'false'})\"," +
       "\"focused=$(if($e.Current.HasKeyboardFocus){'true'}else{'false'})\");" +
       "$aid=$e.Current.AutomationId;if($aid){$toks+=\"automationId=$aid\"};" +
-      "$pid=$e.Current.ProcessId;if($pid -ne 0){$toks+=\"processId=$pid\"};" +
+      "$processId=$e.Current.ProcessId;if($processId -ne 0){$toks+=\"processId=$processId\"};" +
       "$vp=$null;if($e.TryGetCurrentPattern([System.Windows.Automation.ValuePatternIdentifiers]::Pattern,[ref]$vp)){" +
       "$vp=[System.Windows.Automation.ValuePattern]$vp;" +
       "$value=$vp.Current.Value -replace \"[`t`r`n]\",' ';$toks+=\"value=$value\"};" +
@@ -268,12 +267,11 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$ep=[System.Windows.Automation.ExpandCollapsePattern]$ep;" +
       "$toks+=\"expanded=$(if($ep.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded){'true'}else{'false'})\"};" +
       "Write-Output ($toks -join \"`t\");" +
-      "$script:n++}}catch{$script:errors++;if(-not $script:firstError){$script:firstError=$_.Exception.Message}}};" +
+      "$script:n++}}catch{}};" +
       "Walk-CuseTree $e;" +
-      "try{$e=$walker.GetNextSibling($e)}catch{$script:errors++;if(-not $script:firstError){$script:firstError=$_.Exception.Message};$e=$null}" +
+      "try{$e=$walker.GetNextSibling($e)}catch{$e=$null}" +
       "}};" +
-      "Walk-CuseTree $w};" +
-      "[Console]::Error.WriteLine(\"cuse windows walker: raw=$raw visible=$n hidden=$hidden errors=$errors firstError=$firstError\")");
+      "Walk-CuseTree $w}");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not
     // present by default, and an app only appears on it if its toolkit exports
