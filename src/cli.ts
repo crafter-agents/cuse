@@ -16,7 +16,7 @@ import { decodeXWD } from "./xwd.ts";
 import { listWindowsCmd, parseWindows, pickWindow, pointIn, frontmostCmd, parseFrontmost,
          frontmostMatches, type Win } from "./window.ts";
 import { findTemplate, crop, variance, MIN_VARIANCE } from "./match.ts";
-import { elementsCmd, parseElements, pickElement, pointInElement, describeMisses,
+import { elementsCmd, parseElements, pickElement, pointInElement, describeElement, describeMisses,
          geometryLooksUsable, normalizeRole, type Element } from "./elements.ts";
 import { runningAppsCmd, parseApps, pickApp, describeApps, type App } from "./apps.ts";
 import { displaysCmd, parseDisplays, frameOrigin, coverageWarning, toScreenPoint,
@@ -870,6 +870,23 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
       // The desktop's closest thing to a DOM: role, name and rectangle per
       // control, which is what makes "click the button that says Save" possible.
+      case "element": {
+        if (!opts.element && !opts.role) {
+          return { ok: false, ...base, error: "element needs --element=<name> or --role=<kind>" };
+        }
+        const { els } = await listElements(os, args[0] ?? "", timeoutMs,
+                                           opts.depth, opts.limit);
+        const sel = { name: opts.element, role: opts.role };
+        const hit = pickElement(els, sel);
+        if (!hit) {
+          return { ok: false, ...base,
+            error: `no control matching ${opts.element ? `'${opts.element}'` : ""}` +
+              `${opts.role ? ` of role '${opts.role}'` : ""} - ` +
+              `what is there: ${describeMisses(els, sel)}` };
+        }
+        return { ok: true, ...base, detail: describeElement(hit), data: hit };
+      }
+
       case "elements": {
         const { els, note } = await listElements(os, args[0] ?? "", timeoutMs,
                                                  opts.depth, opts.limit);
@@ -1230,6 +1247,7 @@ Windows and apps
   windows                      list visible windows with their rectangles
   frontmost                    which window currently has the keyboard
   wait [gapMs]                 until --element / --window shows up (or --gone)
+  element [app]                one control by --element/--role, with its full state
   elements [app]               controls in the accessibility tree: role, name, rect
 
 Finding things

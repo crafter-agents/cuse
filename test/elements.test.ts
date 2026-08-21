@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import {
   elementsCmd, parseElements, pickElement, pointInElement,
-  normalizeRole, resolveWindowsRole, describeMisses, geometryLooksUsable, type Element,
+  normalizeRole, resolveWindowsRole, describeElement, describeMisses, geometryLooksUsable, type Element,
 } from "../src/elements.ts";
 import type { OS } from "../src/os.ts";
 
@@ -64,6 +64,29 @@ describe("a selector is cuse's vocabulary, not a platform's", () => {
   test("an unknown role is passed through, not swallowed", () => {
     expect(normalizeRole("AXSomethingNew")).toBe("somethingnew");
     expect(normalizeRole("")).toBe("unknown");
+  });
+});
+
+describe("describing one element", () => {
+  test("includes every property the backend reported, including false", () => {
+    const description = describeElement(el({ checked: true, enabled: false, value: "42" }));
+
+    expect(description).toContain("button 'Save'");
+    expect(description).toContain("checked=true");
+    expect(description).toContain("enabled=false");
+    expect(description).toContain('value="42"');
+  });
+
+  test("does not fabricate properties the backend did not report", () => {
+    const description = describeElement(el({}));
+
+    expect(description).toBe("button 'Save'");
+    for (const property of [
+      "checked", "enabled", "selected", "expanded", "focused",
+      "automationId", "processId", "value",
+    ]) {
+      expect(description).not.toContain(property);
+    }
   });
 });
 

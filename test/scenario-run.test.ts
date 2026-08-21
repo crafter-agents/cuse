@@ -209,6 +209,37 @@ describe("scenario variables and saved step results", () => {
     expect(calls).toEqual([["os", ["current"], undefined]]);
   });
 
+  test("asserts reported element state and fails when that state is absent", async () => {
+    const reported = await runScenario(scenario([
+      { type: "cuse", action: "element", saveAs: "target" },
+      { type: "assert", actual: "${steps.target.data.checked}", operator: "eq", expected: true },
+    ]), {
+      invokeCuse: async () => ({
+        ok: true,
+        data: { role: "checkbox", name: "Remember me", checked: true },
+      }),
+    });
+
+    expect(reported.status).toBe("passed");
+    expect(reported.steps.map((step) => step.status)).toEqual(["passed", "passed"]);
+
+    const absent = await runScenario(scenario([
+      { type: "cuse", action: "element", saveAs: "target" },
+      { type: "assert", actual: "${steps.target.data.checked}", operator: "exists" },
+    ]), {
+      invokeCuse: async () => ({
+        ok: true,
+        data: { role: "checkbox", name: "Remember me" },
+      }),
+    });
+
+    expect(absent.status).toBe("failed");
+    expect(absent.steps[1]).toMatchObject({
+      status: "failed",
+      message: "missing reference: steps.target.data.checked",
+    });
+  });
+
   test("reads saved exec stdout in a later assertion", async () => {
     const result = await runScenario(scenario([
       { ...exec("process.stdout.write('structured flow')"), saveAs: "command" },

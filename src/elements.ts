@@ -545,6 +545,20 @@ export function pointInElement(e: Element, fx = 0.5, fy = 0.5): { x: number; y: 
   return { x: Math.round(e.x + e.width * fx), y: Math.round(e.y + e.height * fy) };
 }
 
+/** Describe one control and every state property its backend actually reported. */
+export function describeElement(e: Element): string {
+  const properties: string[] = [];
+  if (e.value !== undefined) properties.push(`value=${JSON.stringify(e.value)}`);
+  if (e.enabled !== undefined) properties.push(`enabled=${e.enabled}`);
+  if (e.selected !== undefined) properties.push(`selected=${e.selected}`);
+  if (e.checked !== undefined) properties.push(`checked=${e.checked}`);
+  if (e.expanded !== undefined) properties.push(`expanded=${e.expanded}`);
+  if (e.focused !== undefined) properties.push(`focused=${e.focused}`);
+  if (e.automationId !== undefined) properties.push(`automationId=${e.automationId}`);
+  if (e.processId !== undefined) properties.push(`processId=${e.processId}`);
+  return `${e.role} '${e.name}'${properties.length ? ` ${properties.join(" ")}` : ""}`;
+}
+
 /** What to say when a selector matches nothing: the near misses, not silence. */
 export function describeMisses(els: Element[], sel: Selector, keep = 8): string {
   const named = els.filter((e) => e.name);
