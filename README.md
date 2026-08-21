@@ -382,8 +382,33 @@ property through `steps.<name>.data`:
 ```
 
 This `element` plus `assert` pattern is covered by a unit test with a stubbed
-cuse invocation. It is not yet exercised by an OS-level CI scenario against a
-live control on macOS, Windows or Linux.
+cuse invocation. The `value` property is also exercised against a live control
+on every supported platform, with a matching negative scenario that forces the
+assertion red once. macOS runs `mac-element-assert.json` and
+`mac-element-assert-negative.json` from `.github/workflows/ci.yml`; Linux runs
+`linux-element-assert.json` and `linux-element-assert-negative.json` from
+`scenarios/linux-atspi.sh`; Windows runs `windows-element-assert.json` and
+`windows-element-assert-negative.json` from
+`scenarios/verify-workaround.sh`.
+
+All eight normalized properties are extracted on all three platforms. A cell
+marked **Extracted + live gate** additionally has the forced-red live CI
+coverage described above; **Extracted** does not yet have that live gate.
+
+| Property | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| `value` | Extracted + live gate | Extracted + live gate | Extracted + live gate |
+| `enabled` | Extracted | Extracted | Extracted |
+| `selected` | Extracted | Extracted | Extracted |
+| `checked` | Extracted | Extracted | Extracted |
+| `expanded` | Extracted | Extracted | Extracted |
+| `focused` | Extracted | Extracted | Extracted |
+| `automationId` | Extracted | Extracted | Extracted |
+| `processId` | Extracted | Extracted | Extracted |
+
+Steps 4 and 5 of issue #35 Plan 006 are therefore covered by real live gates
+for `value`, and this matrix covers Step 6. Extending those live gates to the
+other seven properties is future work and is not claimed here.
 
 Every step needs a `timeoutMs`, its own or the scenario's
 `defaultTimeoutMs`; there is no unbounded step. `platforms` restricts a
