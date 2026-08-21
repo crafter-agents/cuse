@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "name": "assert a live Windows edit control's observed value (forced red)",
+  "platforms": ["windows"],
+  "vars": {},
+  "defaultTimeoutMs": 20000,
+  "steps": [
+    { "type": "cuse", "action": "element", "args": ["notepad-target"], "options": { "role": "text" }, "saveAs": "target" },
+    { "type": "assert", "actual": "${steps.target.data.value}", "operator": "contains", "expected": "the text that was never typed" }
+  ]
+}
