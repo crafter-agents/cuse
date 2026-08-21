@@ -289,7 +289,7 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$ep=[System.Windows.Automation.ExpandCollapsePattern]$ep;" +
       "$toks+=\"expanded=$(if($ep.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded){'true'}else{'false'})\"};" +
       "Write-Output ($toks -join \"`t\");" +
-      "$script:n++}}catch{[Console]::Error.WriteLine(\"cuse windows element error: $($_.Exception.Message)\")};" +
+      "$script:n++}}catch{[Console]::Error.WriteLine(\"cuse windows element error: $($_.Exception.Message)\")}};" +
       "Walk-CuseTree $e;" +
       "try{$e=$walker.GetNextSibling($e)}catch{$e=$null}" +
       "}};" +
