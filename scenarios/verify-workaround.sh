@@ -27,6 +27,14 @@ say "type, save, and read the file back"
 "$CUSE" focus notepad-target --json
 "$CUSE" type "cuse typed into the classic notepad" --expect-front=notepad-target --json || {
   echo "refused to type; who had the keyboard:"; "$CUSE" frontmost --json; exit 1; }
+"$CUSE" scenario scenarios/windows-element-assert.json --json | tee assert-pass.json
+grep -q '"ok":true' assert-pass.json || {
+  echo "the correct-value assertion did not pass against a live control"; exit 1; }
+"$CUSE" scenario scenarios/windows-element-assert-negative.json --json | tee assert-fail.json
+grep -q '"ok":false' assert-fail.json || {
+  echo "the wrong-value assertion did not fail; the assert step is not discriminating real state"
+  exit 1; }
+echo "asserted a live control's observed value, and forced the assertion red once"
 "$CUSE" key ctrl+s --json
 sleep 3
 cat notepad-target.txt

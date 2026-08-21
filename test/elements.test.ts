@@ -106,10 +106,15 @@ describe("asking each platform", () => {
     expect(c).toContain("System Events");
     expect(c).toContain("role of UI elements of el");
   });
-  test("windows walks UI Automation descendants", () => {
+  test("windows bridges Win32 child windows into UI Automation", () => {
     const c = elementsCmd("windows", "CU_TARGET").join(" ");
-    expect(c).toContain("Descendants");
+    expect(c).toContain("EnumChildWindows");
+    expect(c).toContain("GetChildWindows");
+    expect(c).toContain("AutomationElement]::FromHandle");
     expect(c).toContain("BoundingRectangle");
+    expect(c).toContain("WindowRect($handle)");
+    expect(c).toContain("GetText($handle)");
+    expect(c).toContain("$handleClass -eq 'Edit'");
   });
   test("windows emits enabled and focused state tokens", () => {
     const c = elementsCmd("windows", "CU_TARGET").join(" ");
@@ -131,7 +136,8 @@ describe("asking each platform", () => {
   test("windows emits a nonzero process ID token", () => {
     const c = elementsCmd("windows", "CU_TARGET").join(" ");
     expect(c).toContain("Current.ProcessId");
-    expect(c).toContain('processId=$pid');
+    expect(c).toContain('processId=$processId');
+    expect(c).not.toContain("$pid=");
   });
   test("windows emits pattern-gated selected, checked and expanded state tokens", () => {
     const c = elementsCmd("windows", "CU_TARGET").join(" ");

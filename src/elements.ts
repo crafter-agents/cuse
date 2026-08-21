@@ -227,17 +227,54 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       // every WinForms control and answers the same question.
       "if(-not ('CuseWin' -as [type])){Add-Type -Name CuseWin -Namespace '' -MemberDefinition " +
       "'[DllImport(\"user32.dll\", CharSet=CharSet.Unicode)] public static extern int " +
-      "GetClassName(System.IntPtr h, System.Text.StringBuilder s, int max);'};" +
+      "GetClassName(System.IntPtr h, System.Text.StringBuilder s, int max);" +
+      "public delegate bool EnumProc(System.IntPtr h, System.IntPtr p);" +
+      "[DllImport(\"user32.dll\")] public static extern bool EnumChildWindows(" +
+      "System.IntPtr parent, EnumProc callback, System.IntPtr data);" +
+      "[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] " +
+      "public struct Rect { public int Left, Top, Right, Bottom; }" +
+      "[DllImport(\"user32.dll\")] public static extern bool GetWindowRect(System.IntPtr h, out Rect r);" +
+      "[DllImport(\"user32.dll\")] public static extern bool IsWindowEnabled(System.IntPtr h);" +
+      "[DllImport(\"user32.dll\")] static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint p);" +
+      "[DllImport(\"user32.dll\", EntryPoint=\"SendMessageW\")] static extern System.IntPtr SendMessage(System.IntPtr h, uint m, " +
+      "System.IntPtr w, System.IntPtr l);" +
+      "[DllImport(\"user32.dll\", EntryPoint=\"SendMessageW\", CharSet=CharSet.Unicode)] static extern System.IntPtr SendMessageText(" +
+      "System.IntPtr h, uint m, System.IntPtr w, System.Text.StringBuilder l);" +
+      "public static int[] WindowRect(System.IntPtr h) { Rect r; if (!GetWindowRect(h, out r)) " +
+      "return new int[0]; return new int[] { r.Left, r.Top, r.Right-r.Left, r.Bottom-r.Top }; }" +
+      "public static uint ProcessId(System.IntPtr h) { uint p; GetWindowThreadProcessId(h, out p); return p; }" +
+      "public static string GetText(System.IntPtr h) { int n=(int)SendMessage(h,14,System.IntPtr.Zero," +
+      "System.IntPtr.Zero).ToInt64(); var s=new System.Text.StringBuilder(n+1); " +
+      "SendMessageText(h,13,(System.IntPtr)(n+1),s); return s.ToString(); }" +
+      "public static System.IntPtr[] GetChildWindows(System.IntPtr parent) {" +
+      "var found = new System.Collections.Generic.List<System.IntPtr>();" +
+      "EnumChildWindows(parent, delegate(System.IntPtr h, System.IntPtr p) { found.Add(h); return true; }, " +
+      "System.IntPtr.Zero); return found.ToArray(); }'};" +
       "$root=[System.Windows.Automation.AutomationElement]::RootElement;" +
       "$all=$root.FindAll('Children',[System.Windows.Automation.Condition]::TrueCondition);" +
       `$app='${app.replace(/'/g, "''")}';` +
       "$n=0;" +
       "foreach($w in $all){" +
       "if($app -and $w.Current.Name -notlike \"*$app*\"){continue}" +
-      "foreach($e in $w.FindAll('Descendants',[System.Windows.Automation.Condition]::TrueCondition)){" +
+      "$windowHandle=[IntPtr]$w.Current.NativeWindowHandle;" +
+      "foreach($handle in [CuseWin]::GetChildWindows($windowHandle)){" +
       `if($n -ge ${limit}){break}` +
+      "$handleClass='';$classBuffer=New-Object System.Text.StringBuilder 256;" +
+      "[void][CuseWin]::GetClassName($handle,$classBuffer,256);$handleClass=$classBuffer.ToString();" +
+      "if($handleClass -eq 'Edit' -or $handleClass -like 'RichEdit*'){" +
+      "$wr=[CuseWin]::WindowRect($handle);if($wr.Length -eq 4 -and $wr[2] -gt 0){" +
+      "$legacyValue=[CuseWin]::GetText($handle) -replace \"[`t`r`n]\",' ';" +
+      "$legacy=@(\"Pane|$handleClass\",'', $wr[0],$wr[1],$wr[2],$wr[3]," +
+      "\"enabled=$(if([CuseWin]::IsWindowEnabled($handle)){'true'}else{'false'})\"," +
+      "\"processId=$([CuseWin]::ProcessId($handle))\",\"value=$legacyValue\");" +
+      "Write-Output ($legacy -join \"`t\");$n++};continue};" +
+      "try{" +
+      "$e=[System.Windows.Automation.AutomationElement]::FromHandle($handle);" +
       "$r=$e.Current.BoundingRectangle;" +
-      "if($r.Width -le 0){continue}" +
+      "$x=$r.X;$y=$r.Y;$width=$r.Width;$height=$r.Height;" +
+      "if($width -le 0){$wr=[CuseWin]::WindowRect($handle);if($wr.Length -eq 4){" +
+      "$x=$wr[0];$y=$wr[1];$width=$wr[2];$height=$wr[3]}};" +
+      "if($width -gt 0){" +
       "$t=($e.Current.ControlType.ProgrammaticName -split '\\.')[-1];" +
       // WinForms answers Pane for everything through UI Automation; the same
       // control names itself properly through the legacy interface.
@@ -245,11 +282,11 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "try{$h=$e.Current.NativeWindowHandle;" +
       "if($h -ne 0){$sb=New-Object System.Text.StringBuilder 256;" +
       "[void][CuseWin]::GetClassName([IntPtr]$h,$sb,256);$cls=$sb.ToString()}}catch{}" +
-      "$toks=@(\"$t|$cls\",$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height," +
+      "$toks=@(\"$t|$cls\",$e.Current.Name,$x,$y,$width,$height," +
       "\"enabled=$(if($e.Current.IsEnabled){'true'}else{'false'})\"," +
       "\"focused=$(if($e.Current.HasKeyboardFocus){'true'}else{'false'})\");" +
       "$aid=$e.Current.AutomationId;if($aid){$toks+=\"automationId=$aid\"};" +
-      "$pid=$e.Current.ProcessId;if($pid -ne 0){$toks+=\"processId=$pid\"};" +
+      "$processId=$e.Current.ProcessId;if($processId -ne 0){$toks+=\"processId=$processId\"};" +
       "$vp=$null;if($e.TryGetCurrentPattern([System.Windows.Automation.ValuePatternIdentifiers]::Pattern,[ref]$vp)){" +
       "$vp=[System.Windows.Automation.ValuePattern]$vp;" +
       "$value=$vp.Current.Value -replace \"[`t`r`n]\",' ';$toks+=\"value=$value\"};" +
@@ -263,7 +300,7 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$ep=[System.Windows.Automation.ExpandCollapsePattern]$ep;" +
       "$toks+=\"expanded=$(if($ep.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded){'true'}else{'false'})\"};" +
       "Write-Output ($toks -join \"`t\");" +
-      "$n++}}");
+      "$n++}}catch{}}}");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not
     // present by default, and an app only appears on it if its toolkit exports
