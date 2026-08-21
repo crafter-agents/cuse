@@ -253,28 +253,18 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$root=[System.Windows.Automation.AutomationElement]::RootElement;" +
       "$all=$root.FindAll('Children',[System.Windows.Automation.Condition]::TrueCondition);" +
       `$app='${app.replace(/'/g, "''")}';` +
-      "$n=0;" +
+      "$n=0;$raw=0;$hidden=0;$errors=0;" +
       "foreach($w in $all){" +
       "if($app -and $w.Current.Name -notlike \"*$app*\"){continue}" +
-      "$windowHandle=[IntPtr]$w.Current.NativeWindowHandle;" +
-      "foreach($handle in [CuseWin]::GetChildWindows($windowHandle)){" +
-      `if($n -ge ${limit}){break}` +
-      "$handleClass='';$classBuffer=New-Object System.Text.StringBuilder 256;" +
-      "[void][CuseWin]::GetClassName($handle,$classBuffer,256);$handleClass=$classBuffer.ToString();" +
-      "if($handleClass -eq 'Edit' -or $handleClass -like 'RichEdit*'){" +
-      "$wr=[CuseWin]::WindowRect($handle);if($wr.Length -eq 4 -and $wr[2] -gt 0){" +
-      "$legacyValue=[CuseWin]::GetText($handle) -replace \"[`t`r`n]\",' ';" +
-      "$legacy=@(\"Pane|$handleClass\",'', $wr[0],$wr[1],$wr[2],$wr[3]," +
-      "\"enabled=$(if([CuseWin]::IsWindowEnabled($handle)){'true'}else{'false'})\"," +
-      "\"processId=$([CuseWin]::ProcessId($handle))\",\"value=$legacyValue\");" +
-      "Write-Output ($legacy -join \"`t\");$n++};continue};" +
+      "$walker=[System.Windows.Automation.TreeWalker]::RawViewWalker;" +
+      "function Walk-CuseTree($parent){" +
+      "try{$e=$walker.GetFirstChild($parent)}catch{$script:errors++;$e=$null};" +
+      "while($null -ne $e){" +
+      "$script:raw++;" +
+      `if($script:n -lt ${limit}){` +
       "try{" +
-      "$e=[System.Windows.Automation.AutomationElement]::FromHandle($handle);" +
       "$r=$e.Current.BoundingRectangle;" +
-      "$x=$r.X;$y=$r.Y;$width=$r.Width;$height=$r.Height;" +
-      "if($width -le 0){$wr=[CuseWin]::WindowRect($handle);if($wr.Length -eq 4){" +
-      "$x=$wr[0];$y=$wr[1];$width=$wr[2];$height=$wr[3]}};" +
-      "if($width -gt 0){" +
+      "if($r.Width -le 0){$script:hidden++}else{" +
       "$t=($e.Current.ControlType.ProgrammaticName -split '\\.')[-1];" +
       // WinForms answers Pane for everything through UI Automation; the same
       // control names itself properly through the legacy interface.
@@ -300,7 +290,12 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$ep=[System.Windows.Automation.ExpandCollapsePattern]$ep;" +
       "$toks+=\"expanded=$(if($ep.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded){'true'}else{'false'})\"};" +
       "Write-Output ($toks -join \"`t\");" +
-      "$n++}}catch{}}}");
+      "$script:n++}}catch{$script:errors++}};" +
+      "Walk-CuseTree $e;" +
+      "try{$e=$walker.GetNextSibling($e)}catch{$script:errors++;$e=$null}" +
+      "}};" +
+      "Walk-CuseTree $w};" +
+      "Write-Warning \"cuse windows walker: raw=$raw visible=$n hidden=$hidden errors=$errors\"");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not
     // present by default, and an app only appears on it if its toolkit exports
