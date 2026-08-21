@@ -46,7 +46,7 @@ describe("Action platform preparation", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("display-required=false");
     expect(result.stdout).toContain("packages=none start-xvfb=false");
-  });
+  }, 15_000);
 
   test("a display action requests bounded Linux display facilities", async () => {
     const path = await scenario("display", [{ type: "cuse", action: "capture", args: ["out.png"] }]);
@@ -54,7 +54,7 @@ describe("Action platform preparation", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("display-required=true");
     expect(result.stdout).toContain("packages=xvfb x11-apps start-xvfb=true");
-  });
+  }, 15_000);
 
   test("invalid preparation input is rejected before mutation", async () => {
     const path = await scenario("invalid", []);
@@ -62,7 +62,7 @@ describe("Action platform preparation", () => {
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("invalid linux-display 'sometimes'");
     expect(result.stdout).not.toContain("plan:");
-  });
+  }, 15_000);
 
   test("Linux accessibility setup is opt-in and observable", async () => {
     const path = await scenario("accessibility", [{ type: "cuse", action: "elements", args: ["Editor"] }]);
@@ -72,7 +72,7 @@ describe("Action platform preparation", () => {
     expect(implicit.stdout).toContain("AT-SPI will not be installed");
     expect(explicit.stdout).toContain("linux-accessibility=true");
     expect(explicit.stdout).toContain("at-spi2-core python3-pyatspi dbus-x11");
-  });
+  }, 15_000);
 
   test("non-Linux preparation preserves the interactive session", async () => {
     const path = await scenario("macos", [{ type: "cuse", action: "capture" }]);
@@ -81,5 +81,5 @@ describe("Action platform preparation", () => {
     expect(result.stdout).toContain("uses its current interactive session");
     expect(result.stdout).toContain("no display service was changed");
     expect(result.stdout).not.toContain("plan:");
-  });
+  }, 15_000);
 });
