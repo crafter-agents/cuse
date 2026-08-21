@@ -231,6 +231,11 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "public delegate bool EnumProc(System.IntPtr h, System.IntPtr p);" +
       "[DllImport(\"user32.dll\")] public static extern bool EnumChildWindows(" +
       "System.IntPtr parent, EnumProc callback, System.IntPtr data);" +
+      "[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] " +
+      "public struct Rect { public int Left, Top, Right, Bottom; }" +
+      "[DllImport(\"user32.dll\")] public static extern bool GetWindowRect(System.IntPtr h, out Rect r);" +
+      "public static int[] WindowRect(System.IntPtr h) { Rect r; if (!GetWindowRect(h, out r)) " +
+      "return new int[0]; return new int[] { r.Left, r.Top, r.Right-r.Left, r.Bottom-r.Top }; }" +
       "public static System.IntPtr[] GetChildWindows(System.IntPtr parent) {" +
       "var found = new System.Collections.Generic.List<System.IntPtr>();" +
       "EnumChildWindows(parent, delegate(System.IntPtr h, System.IntPtr p) { found.Add(h); return true; }, " +
@@ -244,13 +249,13 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$windowHandle=[IntPtr]$w.Current.NativeWindowHandle;" +
       "foreach($handle in [CuseWin]::GetChildWindows($windowHandle)){" +
       `if($n -ge ${limit}){break}` +
-      "$debugClass=New-Object System.Text.StringBuilder 256;" +
-      "[void][CuseWin]::GetClassName($handle,$debugClass,256);" +
-      "[Console]::Error.WriteLine(\"cuse windows handle=$handle class=$debugClass\");" +
       "try{" +
       "$e=[System.Windows.Automation.AutomationElement]::FromHandle($handle);" +
       "$r=$e.Current.BoundingRectangle;" +
-      "if($r.Width -gt 0){" +
+      "$x=$r.X;$y=$r.Y;$width=$r.Width;$height=$r.Height;" +
+      "if($width -le 0){$wr=[CuseWin]::WindowRect($handle);if($wr.Length -eq 4){" +
+      "$x=$wr[0];$y=$wr[1];$width=$wr[2];$height=$wr[3]}};" +
+      "if($width -gt 0){" +
       "$t=($e.Current.ControlType.ProgrammaticName -split '\\.')[-1];" +
       // WinForms answers Pane for everything through UI Automation; the same
       // control names itself properly through the legacy interface.
@@ -258,7 +263,7 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "try{$h=$e.Current.NativeWindowHandle;" +
       "if($h -ne 0){$sb=New-Object System.Text.StringBuilder 256;" +
       "[void][CuseWin]::GetClassName([IntPtr]$h,$sb,256);$cls=$sb.ToString()}}catch{}" +
-      "$toks=@(\"$t|$cls\",$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height," +
+      "$toks=@(\"$t|$cls\",$e.Current.Name,$x,$y,$width,$height," +
       "\"enabled=$(if($e.Current.IsEnabled){'true'}else{'false'})\"," +
       "\"focused=$(if($e.Current.HasKeyboardFocus){'true'}else{'false'})\");" +
       "$aid=$e.Current.AutomationId;if($aid){$toks+=\"automationId=$aid\"};" +
@@ -276,7 +281,7 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$ep=[System.Windows.Automation.ExpandCollapsePattern]$ep;" +
       "$toks+=\"expanded=$(if($ep.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded){'true'}else{'false'})\"};" +
       "Write-Output ($toks -join \"`t\");" +
-      "$n++}}catch{[Console]::Error.WriteLine(\"cuse windows handle=$handle class=$debugClass error=$($_.Exception.Message)\")}}}");
+      "$n++}}catch{}}}");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not
     // present by default, and an app only appears on it if its toolkit exports

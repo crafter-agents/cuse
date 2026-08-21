@@ -112,6 +112,7 @@ describe("asking each platform", () => {
     expect(c).toContain("GetChildWindows");
     expect(c).toContain("AutomationElement]::FromHandle");
     expect(c).toContain("BoundingRectangle");
+    expect(c).toContain("WindowRect($handle)");
   });
   test("windows emits enabled and focused state tokens", () => {
     const c = elementsCmd("windows", "CU_TARGET").join(" ");
