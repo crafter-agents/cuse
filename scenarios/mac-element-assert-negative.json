@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "name": "assert a live macOS control's observed value (forced red)",
+  "platforms": ["macos"],
+  "vars": {},
+  "defaultTimeoutMs": 20000,
+  "steps": [
+    { "type": "cuse", "action": "element", "args": ["osascript"], "options": { "role": "text" }, "saveAs": "target" },
+    { "type": "assert", "actual": "${steps.target.data.value}", "operator": "eq", "expected": "the wrong text" }
+  ]
+}
