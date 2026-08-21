@@ -259,6 +259,15 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$windowHandle=[IntPtr]$w.Current.NativeWindowHandle;" +
       "foreach($handle in [CuseWin]::GetChildWindows($windowHandle)){" +
       `if($n -ge ${limit}){break}` +
+      "$handleClass='';$classBuffer=New-Object System.Text.StringBuilder 256;" +
+      "[void][CuseWin]::GetClassName($handle,$classBuffer,256);$handleClass=$classBuffer.ToString();" +
+      "if($handleClass -eq 'Edit' -or $handleClass -like 'RichEdit*'){" +
+      "$wr=[CuseWin]::WindowRect($handle);if($wr.Length -eq 4 -and $wr[2] -gt 0){" +
+      "$legacyValue=[CuseWin]::GetText($handle) -replace \"[`t`r`n]\",' ';" +
+      "$legacy=@(\"Pane|$handleClass\",'', $wr[0],$wr[1],$wr[2],$wr[3]," +
+      "\"enabled=$(if([CuseWin]::IsWindowEnabled($handle)){'true'}else{'false'})\"," +
+      "\"processId=$([CuseWin]::ProcessId($handle))\",\"value=$legacyValue\");" +
+      "Write-Output ($legacy -join \"`t\");$n++};continue};" +
       "try{" +
       "$e=[System.Windows.Automation.AutomationElement]::FromHandle($handle);" +
       "$r=$e.Current.BoundingRectangle;" +
