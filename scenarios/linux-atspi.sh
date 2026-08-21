@@ -84,6 +84,14 @@ bun -e '
 "$CUSE" focus CU_TARGET --json
 "$CUSE" click --element="type here" --role=text --app=zenity --json
 "$CUSE" type "$SENTINEL" --json
+"$CUSE" scenario scenarios/linux-element-assert.json --json | tee assert-pass.json
+grep -q '"ok":true' assert-pass.json || {
+  echo "the correct-value assertion did not pass against a live control"; exit 1; }
+"$CUSE" scenario scenarios/linux-element-assert-negative.json --json | tee assert-fail.json
+grep -q '"ok":false' assert-fail.json || {
+  echo "the wrong-value assertion did not fail; the assert step is not discriminating real state"
+  exit 1; }
+echo "asserted a live control's observed value, and forced the assertion red once"
 "$CUSE" click --element=OK --role=button --app=zenity --json
 sleep 2
 

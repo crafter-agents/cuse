@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "name": "assert a live Linux GTK control's observed value",
+  "platforms": ["linux"],
+  "vars": {},
+  "defaultTimeoutMs": 20000,
+  "steps": [
+    { "type": "cuse", "action": "element", "args": ["zenity"], "options": { "role": "text" }, "saveAs": "target" },
+    { "type": "assert", "actual": "${steps.target.data.value}", "operator": "eq", "expected": "CUSE_PRESSED_THE_REAL_BUTTON" }
+  ]
+}
