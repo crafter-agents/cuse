@@ -227,19 +227,25 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       // every WinForms control and answers the same question.
       "if(-not ('CuseWin' -as [type])){Add-Type -Name CuseWin -Namespace '' -MemberDefinition " +
       "'[DllImport(\"user32.dll\", CharSet=CharSet.Unicode)] public static extern int " +
-      "GetClassName(System.IntPtr h, System.Text.StringBuilder s, int max);'};" +
+      "GetClassName(System.IntPtr h, System.Text.StringBuilder s, int max);" +
+      "public delegate bool EnumProc(System.IntPtr h, System.IntPtr p);" +
+      "[DllImport(\"user32.dll\")] public static extern bool EnumChildWindows(" +
+      "System.IntPtr parent, EnumProc callback, System.IntPtr data);" +
+      "public static System.IntPtr[] GetChildWindows(System.IntPtr parent) {" +
+      "var found = new System.Collections.Generic.List<System.IntPtr>();" +
+      "EnumChildWindows(parent, delegate(System.IntPtr h, System.IntPtr p) { found.Add(h); return true; }, " +
+      "System.IntPtr.Zero); return found.ToArray(); }'};" +
       "$root=[System.Windows.Automation.AutomationElement]::RootElement;" +
       "$all=$root.FindAll('Children',[System.Windows.Automation.Condition]::TrueCondition);" +
       `$app='${app.replace(/'/g, "''")}';` +
       "$n=0;" +
       "foreach($w in $all){" +
       "if($app -and $w.Current.Name -notlike \"*$app*\"){continue}" +
-      "$walker=[System.Windows.Automation.TreeWalker]::RawViewWalker;" +
-      "function Walk-CuseTree($parent){" +
-      "try{$e=$walker.GetFirstChild($parent)}catch{$e=$null};" +
-      "while($null -ne $e){" +
-      `if($script:n -lt ${limit}){` +
+      "$windowHandle=[IntPtr]$w.Current.NativeWindowHandle;" +
+      "foreach($handle in [CuseWin]::GetChildWindows($windowHandle)){" +
+      `if($n -ge ${limit}){break}` +
       "try{" +
+      "$e=[System.Windows.Automation.AutomationElement]::FromHandle($handle);" +
       "$r=$e.Current.BoundingRectangle;" +
       "if($r.Width -gt 0){" +
       "$t=($e.Current.ControlType.ProgrammaticName -split '\\.')[-1];" +
@@ -267,11 +273,7 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$ep=[System.Windows.Automation.ExpandCollapsePattern]$ep;" +
       "$toks+=\"expanded=$(if($ep.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded){'true'}else{'false'})\"};" +
       "Write-Output ($toks -join \"`t\");" +
-      "$script:n++}}catch{[Console]::Error.WriteLine(\"cuse windows element error: $($_.Exception.Message)\")}};" +
-      "Walk-CuseTree $e;" +
-      "try{$e=$walker.GetNextSibling($e)}catch{$e=$null}" +
-      "}};" +
-      "Walk-CuseTree $w}");
+      "$n++}}catch{}}}");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not
     // present by default, and an app only appears on it if its toolkit exports

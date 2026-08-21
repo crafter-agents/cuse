@@ -106,11 +106,11 @@ describe("asking each platform", () => {
     expect(c).toContain("System Events");
     expect(c).toContain("role of UI elements of el");
   });
-  test("windows walks the raw UI Automation tree", () => {
+  test("windows bridges Win32 child windows into UI Automation", () => {
     const c = elementsCmd("windows", "CU_TARGET").join(" ");
-    expect(c).toContain("RawViewWalker");
-    expect(c).toContain("GetFirstChild");
-    expect(c).toContain("GetNextSibling");
+    expect(c).toContain("EnumChildWindows");
+    expect(c).toContain("GetChildWindows");
+    expect(c).toContain("AutomationElement]::FromHandle");
     expect(c).toContain("BoundingRectangle");
   });
   test("windows emits enabled and focused state tokens", () => {
