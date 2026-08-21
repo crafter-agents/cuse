@@ -360,6 +360,8 @@ jobs:
             gtk-elements.json
             windows.json
             zenity-out.txt
+            assert-pass.json
+            assert-fail.json
 
   # Does a click land on macOS? Nothing else here asks.
   #
