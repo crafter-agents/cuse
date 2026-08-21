@@ -208,6 +208,7 @@ async function listElements(os: OS, app: string, timeoutMs: number,
   const r = await runWithTimeout(argv, timeoutMs);
   const problem = explainFailure(argv, r, timeoutMs);
   if (problem) throw new Error(problem);
+  if (os === "windows" && r.stderr.trim()) console.error(r.stderr.trim());
   return { els: parseElements(r.stdout, os) };
 }
 
