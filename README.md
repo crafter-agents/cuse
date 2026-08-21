@@ -360,6 +360,31 @@ reaches into the `exec` step's captured stdout. A whole-string reference like
 `"${steps.echoed}"` resolves to the referenced value itself, not a
 stringified copy; embedding it inside a longer string coerces it to text.
 
+### Assert an element's observed state
+
+The singular `element` action selects exactly one control by `--element` or
+`--role`. Unlike the plural `elements` action, it returns that control with
+every accessibility property the platform backend actually reported, plus a
+human-readable summary in `detail`. Save the result and assert a reported
+property through `steps.<name>.data`:
+
+```json
+{
+  "version": 1,
+  "name": "remember preference",
+  "vars": {},
+  "defaultTimeoutMs": 5000,
+  "steps": [
+    { "type": "cuse", "action": "element", "args": ["--element=Remember me"], "saveAs": "target" },
+    { "type": "assert", "actual": "${steps.target.data.checked}", "operator": "eq", "expected": true }
+  ]
+}
+```
+
+This `element` plus `assert` pattern is covered by a unit test with a stubbed
+cuse invocation. It is not yet exercised by an OS-level CI scenario against a
+live control on macOS, Windows or Linux.
+
 Every step needs a `timeoutMs`, its own or the scenario's
 `defaultTimeoutMs`; there is no unbounded step. `platforms` restricts a
 scenario to `macos`, `linux` or `windows`, and a mismatched platform reports
