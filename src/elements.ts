@@ -259,13 +259,13 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$windowHandle=[IntPtr]$w.Current.NativeWindowHandle;" +
       "foreach($handle in [CuseWin]::GetChildWindows($windowHandle)){" +
       `if($n -ge ${limit}){break}` +
-      "$debugClass=New-Object System.Text.StringBuilder 256;" +
-      "[void][CuseWin]::GetClassName($handle,$debugClass,256);" +
-      "[Console]::Error.WriteLine(\"cuse windows handle=$handle class=$debugClass\");" +
       "try{" +
       "$e=[System.Windows.Automation.AutomationElement]::FromHandle($handle);" +
       "$r=$e.Current.BoundingRectangle;" +
-      "if($r.Width -gt 0){" +
+      "$x=$r.X;$y=$r.Y;$width=$r.Width;$height=$r.Height;" +
+      "if($width -le 0){$wr=[CuseWin]::WindowRect($handle);if($wr.Length -eq 4){" +
+      "$x=$wr[0];$y=$wr[1];$width=$wr[2];$height=$wr[3]}};" +
+      "if($width -gt 0){" +
       "$t=($e.Current.ControlType.ProgrammaticName -split '\\.')[-1];" +
       // WinForms answers Pane for everything through UI Automation; the same
       // control names itself properly through the legacy interface.
@@ -291,7 +291,7 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$ep=[System.Windows.Automation.ExpandCollapsePattern]$ep;" +
       "$toks+=\"expanded=$(if($ep.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded){'true'}else{'false'})\"};" +
       "Write-Output ($toks -join \"`t\");" +
-      "$n++}}catch{[Console]::Error.WriteLine(\"cuse windows handle=$handle class=$debugClass error=$($_.Exception.Message)\")}}}");
+      "$n++}}catch{}}}");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not
     // present by default, and an app only appears on it if its toolkit exports
