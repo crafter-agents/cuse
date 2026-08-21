@@ -248,6 +248,11 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$toks=@(\"$t|$cls\",$e.Current.Name,[int]$r.X,[int]$r.Y,[int]$r.Width,[int]$r.Height," +
       "\"enabled=$(if($e.Current.IsEnabled){'true'}else{'false'})\"," +
       "\"focused=$(if($e.Current.HasKeyboardFocus){'true'}else{'false'})\");" +
+      "$aid=$e.Current.AutomationId;if($aid){$toks+=\"automationId=$aid\"};" +
+      "$pid=$e.Current.ProcessId;if($pid -ne 0){$toks+=\"processId=$pid\"};" +
+      "$vp=$null;if($e.TryGetCurrentPattern([System.Windows.Automation.ValuePatternIdentifiers]::Pattern,[ref]$vp)){" +
+      "$vp=[System.Windows.Automation.ValuePattern]$vp;" +
+      "$value=$vp.Current.Value -replace \"[`t`r`n]\",' ';$toks+=\"value=$value\"};" +
       "$sp=$null;if($e.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPatternIdentifiers]::Pattern,[ref]$sp)){" +
       "$sp=[System.Windows.Automation.SelectionItemPattern]$sp;" +
       "$toks+=\"selected=$(if($sp.Current.IsSelected){'true'}else{'false'})\"};" +

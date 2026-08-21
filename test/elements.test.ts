@@ -93,6 +93,23 @@ describe("asking each platform", () => {
     expect(c).toContain("IsEnabled");
     expect(c).toContain("HasKeyboardFocus");
   });
+  test("windows emits a pattern-gated sanitized value token", () => {
+    const c = elementsCmd("windows", "CU_TARGET").join(" ");
+    expect(c).toContain("ValuePatternIdentifiers");
+    expect(c).toContain("ValuePattern");
+    expect(c).toContain("Current.Value");
+    expect(c).toContain('-replace "[`t`r`n]"');
+  });
+  test("windows emits a non-empty automation ID token", () => {
+    const c = elementsCmd("windows", "CU_TARGET").join(" ");
+    expect(c).toContain("Current.AutomationId");
+    expect(c).toContain('automationId=$aid');
+  });
+  test("windows emits a nonzero process ID token", () => {
+    const c = elementsCmd("windows", "CU_TARGET").join(" ");
+    expect(c).toContain("Current.ProcessId");
+    expect(c).toContain('processId=$pid');
+  });
   test("windows emits pattern-gated selected, checked and expanded state tokens", () => {
     const c = elementsCmd("windows", "CU_TARGET").join(" ");
     expect(c).toContain("SelectionItemPatternIdentifiers");
