@@ -422,6 +422,20 @@ jobs:
             echo "a bare coordinate click did not land"; exit 1; }
           echo "pressed a bare coordinate"
 
+      - name: assert an element's observed value against a live control
+        run: |
+          rm -f target.txt assert-pass.json assert-fail.json
+          osascript -e 'display dialog "cuse assert gate" default answer "" buttons {"OK"} default button "OK" giving up after 100' \
+            > target.txt 2>&1 &
+          ./cuse scenario scenarios/mac-element-assert.json --json | tee assert-pass.json
+          grep -q '"ok":true' assert-pass.json || {
+            echo "the correct-value assertion did not pass against a live control"; exit 1; }
+          ./cuse scenario scenarios/mac-element-assert-negative.json --json | tee assert-fail.json
+          grep -q '"ok":false' assert-fail.json || {
+            echo "the wrong-value assertion did not fail; the assert step is not discriminating real state"
+            exit 1; }
+          echo "asserted a live control's observed value, and forced the assertion red once"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -430,6 +444,9 @@ jobs:
             dialog.json
             named.txt
             xy.txt
+            target.txt
+            assert-pass.json
+            assert-fail.json
 
   # Every other Windows proof drives a window this repo builds for the purpose,
   # which is the bias the rest of this file exists to remove: a target you wrote

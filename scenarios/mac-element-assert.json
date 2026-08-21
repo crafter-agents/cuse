@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "name": "assert a live macOS control's observed value",
+  "platforms": ["macos"],
+  "vars": {},
+  "defaultTimeoutMs": 20000,
+  "steps": [
+    { "type": "cuse", "action": "wait", "options": { "role": "text", "app": "osascript", "timeoutMs": 20000 } },
+    { "type": "cuse", "action": "type", "args": ["cuse assert gate"] },
+    { "type": "cuse", "action": "element", "args": ["osascript"], "options": { "role": "text" }, "saveAs": "target" },
+    { "type": "assert", "actual": "${steps.target.data.value}", "operator": "eq", "expected": "cuse assert gate" }
+  ]
+}
