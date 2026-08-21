@@ -256,12 +256,11 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$n=0;" +
       "foreach($w in $all){" +
       "if($app -and $w.Current.Name -notlike \"*$app*\"){continue}" +
-      "$walker=[System.Windows.Automation.TreeWalker]::RawViewWalker;" +
-      "function Walk-CuseTree($parent){" +
-      "try{$e=$walker.GetFirstChild($parent)}catch{$e=$null};" +
-      "while($null -ne $e){" +
-      `if($script:n -lt ${limit}){` +
+      "$windowHandle=[IntPtr]$w.Current.NativeWindowHandle;" +
+      "foreach($handle in [CuseWin]::GetChildWindows($windowHandle)){" +
+      `if($n -ge ${limit}){break}` +
       "try{" +
+      "$e=[System.Windows.Automation.AutomationElement]::FromHandle($handle);" +
       "$r=$e.Current.BoundingRectangle;" +
       "if($r.Width -gt 0){" +
       "$t=($e.Current.ControlType.ProgrammaticName -split '\\.')[-1];" +
@@ -289,11 +288,7 @@ export function elementsCmd(os: OS, app: string, limit = 300, depth = 12): strin
       "$ep=[System.Windows.Automation.ExpandCollapsePattern]$ep;" +
       "$toks+=\"expanded=$(if($ep.Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded){'true'}else{'false'})\"};" +
       "Write-Output ($toks -join \"`t\");" +
-      "$script:n++}}catch{[Console]::Error.WriteLine(\"cuse windows element error: $($_.Exception.Message)\")}};" +
-      "Walk-CuseTree $e;" +
-      "try{$e=$walker.GetNextSibling($e)}catch{$e=$null}" +
-      "}};" +
-      "Walk-CuseTree $w}");
+      "$n++}}catch{}}}");
 
     // AT-SPI is the Linux accessibility bus. Unlike the other two it is not
     // present by default, and an app only appears on it if its toolkit exports
