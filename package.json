@@ -1,6 +1,6 @@
 {
   "name": "cuse",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Cross-platform computer-use CLI. One verb, the right OS primitive.",
   "repository": {
