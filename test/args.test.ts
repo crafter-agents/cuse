@@ -41,6 +41,11 @@ describe("reading the options", () => {
     expect(o.minScore).toBe(0.75);
     expect(o.timeoutMs).toBe(4000);
   });
+  test("drag duration and interpolation steps are numeric options", () => {
+    const o = parseArgs(["drag", "0", "0", "10", "20", "--duration=240", "--steps=8"]).opts;
+    expect(o.durationMs).toBe(240);
+    expect(o.steps).toBe(8);
+  });
   test("a point is a pair", () => {
     expect(parseArgs(["click", "--at=0.25,0.75"]).opts.at).toEqual([0.25, 0.75]);
   });

@@ -13,7 +13,8 @@ export type Plan =
   | { kind: "exec-many"; argvs: string[][] }
   | { kind: "native"; op: "warp"; x: number; y: number }
   | { kind: "native"; op: "click"; x?: number; y?: number; count: number; button: MouseButton; mods: string[] }
-  | { kind: "native"; op: "drag"; fromX: number; fromY: number; toX: number; toY: number }
+  | { kind: "native"; op: "drag"; fromX: number; fromY: number; toX: number; toY: number;
+      durationMs: number; steps: number }
   | { kind: "native"; op: "scroll"; axis: "vertical" | "horizontal"; lines: number };
 
 const ps = (script: string) => ["powershell", "-NoProfile", "-Command", script];
@@ -80,13 +81,42 @@ export function clickPlan(os: OS, count: number, x?: number, y?: number,
   }
 }
 
-export function dragPlan(os: OS, fromX: number, fromY: number, toX: number, toY: number): Plan {
+export type DragOptions = { durationMs?: number; steps?: number };
+
+// Five moves over 150 ms stays near the old Windows drag's 180 ms while every
+// backend now exposes enough motion for targets that observe pointer events.
+const DEFAULT_DRAG_DURATION_MS = 150;
+const DEFAULT_DRAG_STEPS = 5;
+
+export function dragPlan(os: OS, fromX: number, fromY: number, toX: number, toY: number,
+                         opts: DragOptions = {}): Plan {
+  for (const [name, value] of Object.entries({ fromX, fromY, toX, toY })) {
+    if (!Number.isFinite(value)) throw new Error(`drag ${name} must be a finite number`);
+  }
+  const durationMs = opts.durationMs ?? DEFAULT_DRAG_DURATION_MS;
+  const steps = opts.steps ?? DEFAULT_DRAG_STEPS;
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    throw new Error("drag durationMs must be a finite positive number");
+  }
+  if (!Number.isSafeInteger(steps) || steps <= 0) {
+    throw new Error("drag steps must be a finite positive integer");
+  }
+
+  const delayMs = durationMs / steps;
+  const waypoints = Array.from({ length: steps }, (_, index) => {
+    const progress = (index + 1) / steps;
+    return [fromX + (toX - fromX) * progress, fromY + (toY - fromY) * progress] as const;
+  });
+
   switch (os) {
-    case "macos": return { kind: "native", op: "drag", fromX, fromY, toX, toY };
+    case "macos": return { kind: "native", op: "drag", fromX, fromY, toX, toY, durationMs, steps };
     case "linux": return { kind: "exec-many", argvs: [
       ["xdotool", "mousemove", String(fromX), String(fromY)],
       ["xdotool", "mousedown", "1"],
-      ["xdotool", "mousemove", String(toX), String(toY)],
+      ...waypoints.flatMap(([x, y]) => [
+        ["sleep", String(delayMs / 1000)],
+        ["xdotool", "mousemove", String(x), String(y)],
+      ]),
       ["xdotool", "mouseup", "1"],
     ] };
     case "windows": return { kind: "exec", argv: ps(
@@ -94,9 +124,11 @@ export function dragPlan(os: OS, fromX: number, fromY: number, toX: number, toY:
       `Add-Type -AssemblyName System.Windows.Forms,System.Drawing;` +
       `Add-Type 'using System;using System.Runtime.InteropServices;public class M{[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,int e);}';` +
       `[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(${fromX},${fromY});` +
-      `Start-Sleep -Milliseconds 60;[M]::mouse_event(2,0,0,0,0);` +
-      `Start-Sleep -Milliseconds 60;[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(${toX},${toY});` +
-      `Start-Sleep -Milliseconds 60;[M]::mouse_event(4,0,0,0,0);`) };
+      `[M]::mouse_event(2,0,0,0,0);` +
+      waypoints.map(([x, y]) =>
+        `Start-Sleep -Milliseconds ${delayMs};` +
+        `[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(${x},${y});`).join("") +
+      `[M]::mouse_event(4,0,0,0,0);`) };
     default: throw new Error(`drag unsupported on ${os}`);
   }
 }

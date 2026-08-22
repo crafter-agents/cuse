@@ -71,6 +71,8 @@ export type Options = {
   pid?: number;
   port?: number;
   protocol?: string;
+  durationMs?: number;
+  steps?: number;
 };
 
 export type Result = {
@@ -112,7 +114,9 @@ async function execute(plan: Plan, run: (argv: string[]) => Promise<void>): Prom
       const mac = await import("./macos.ts");
       if (plan.op === "warp") return mac.warp(plan.x, plan.y);
       if (plan.op === "click") return mac.click(plan.count, plan.x, plan.y, plan.button, plan.mods);
-      if (plan.op === "drag") return mac.drag(plan.fromX, plan.fromY, plan.toX, plan.toY);
+      if (plan.op === "drag") {
+        return mac.drag(plan.fromX, plan.fromY, plan.toX, plan.toY, plan.durationMs, plan.steps);
+      }
       return mac.scroll(plan.lines, plan.axis);
     }
   }
@@ -1146,7 +1150,10 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       }
       case "drag": {
         const [fromX, fromY, toX, toY] = args.slice(0, 4).map(Number);
-        await execute(dragPlan(os, fromX!, fromY!, toX!, toY!), run);
+        await execute(dragPlan(os, fromX!, fromY!, toX!, toY!, {
+          durationMs: opts.durationMs,
+          steps: opts.steps,
+        }), run);
         return { ok: true, ...base, detail: `dragged ${fromX},${fromY} to ${toX},${toY}`,
           data: { fromX, fromY, toX, toY } };
       }
@@ -1267,6 +1274,7 @@ Input
   move <x> <y>                 move the cursor
   click | dblclick [x] [y]     click; or aim with --window / --find
   drag <x1> <y1> <x2> <y2>     hold the button from one point to another
+                               (--duration=<ms>, --steps=<n>; defaults 150, 5)
   scroll <up|down|left|right> [amount]
                                scroll the view under the cursor
   select-all | copy | paste    the platform's own chord for each
@@ -1279,6 +1287,8 @@ Other
 Flags
   --json                       structured Result on stdout
   --timeout=<ms>               deadline for this action
+  --duration=<ms>              drag duration (default 150)
+  --steps=<n>                  drag interpolation steps (default 5)
   --same-under=<pct>           diff tolerance; 0 means "did anything change"
   --element=<name>             aim at a control by its accessibility name
   --role=<kind>                narrow it: button, text, checkbox, link, ...
