@@ -33,7 +33,7 @@ cuse <action> --json        # structured Result for agents
 With Bun, install the npm package or run it without a global install:
 
 ```sh
-bun add --global cuse
+bun add --global cuse-cli
 cuse os
 
 bunx cuse os
