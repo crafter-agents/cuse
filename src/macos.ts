@@ -100,21 +100,26 @@ export function click(count: number, x?: number, y?: number,
   cf.CFRelease(event);
 }
 
-export function drag(fromX: number, fromY: number, toX: number, toY: number): void {
+export async function drag(fromX: number, fromY: number, toX: number, toY: number,
+                           durationMs: number, steps: number): Promise<void> {
   const { cg, cf } = syms();
   warp(fromX, fromY);
 
-  const points: Array<[number, number, number]> = [
-    [LEFT_DOWN, fromX, fromY],
-    [LEFT_DRAGGED, (fromX + toX) / 2, (fromY + toY) / 2],
-    [LEFT_DRAGGED, toX, toY],
-    [LEFT_UP, toX, toY],
-  ];
-  for (const [type, x, y] of points) {
+  const post = (type: number, x: number, y: number) => {
     const event = need(cg.CGEventCreateMouseEvent(null, type, x, y, 0), "drag event");
     cg.CGEventPost(HID_TAP, event);
     cf.CFRelease(event);
+  };
+
+  post(LEFT_DOWN, fromX, fromY);
+  for (let index = 1; index <= steps; index++) {
+    await Bun.sleep(durationMs / steps);
+    const progress = index / steps;
+    post(LEFT_DRAGGED,
+      fromX + (toX - fromX) * progress,
+      fromY + (toY - fromY) * progress);
   }
+  post(LEFT_UP, toX, toY);
 }
 
 export function scroll(lines: number, axis: "vertical" | "horizontal" = "vertical"): void {

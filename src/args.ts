@@ -65,6 +65,8 @@ export function parseArgs(argv: string[]): Parsed {
     pid: num(flag("pid")),
     port: num(flag("port")),
     protocol: flag("protocol"),
+    durationMs: num(flag("duration")),
+    steps: num(flag("steps")),
     expectFront: flag("expect-front"),
     element: flag("element"),
     role: flag("role"),

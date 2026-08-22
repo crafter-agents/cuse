@@ -204,26 +204,72 @@ describe("mouse plans", () => {
   test("macOS drag carries both points to the native backend", () => {
     expect(dragPlan("macos", 1, 2, 30, 40)).toEqual({
       kind: "native", op: "drag", fromX: 1, fromY: 2, toX: 30, toY: 40,
+      durationMs: 150, steps: 5,
     });
   });
   test("linux drag holds the left button while moving", () => {
-    expect(dragPlan("linux", 1, 2, 30, 40)).toEqual({ kind: "exec-many", argvs: [
-      ["xdotool", "mousemove", "1", "2"],
+    expect(dragPlan("linux", 0, 0, 10, 20, { durationMs: 100, steps: 2 })).toEqual({
+      kind: "exec-many", argvs: [
+      ["xdotool", "mousemove", "0", "0"],
       ["xdotool", "mousedown", "1"],
-      ["xdotool", "mousemove", "30", "40"],
+      ["sleep", "0.05"],
+      ["xdotool", "mousemove", "5", "10"],
+      ["sleep", "0.05"],
+      ["xdotool", "mousemove", "10", "20"],
       ["xdotool", "mouseup", "1"],
     ] });
   });
-  test("windows drag presses, moves, and releases through user32", () => {
-    const plan = dragPlan("windows", 1, 2, 30, 40);
+  test("linux drag defaults to multiple spaced pointer moves", () => {
+    expect(dragPlan("linux", 0, 0, 10, 20)).toEqual({ kind: "exec-many", argvs: [
+      ["xdotool", "mousemove", "0", "0"],
+      ["xdotool", "mousedown", "1"],
+      ["sleep", "0.03"],
+      ["xdotool", "mousemove", "2", "4"],
+      ["sleep", "0.03"],
+      ["xdotool", "mousemove", "4", "8"],
+      ["sleep", "0.03"],
+      ["xdotool", "mousemove", "6", "12"],
+      ["sleep", "0.03"],
+      ["xdotool", "mousemove", "8", "16"],
+      ["sleep", "0.03"],
+      ["xdotool", "mousemove", "10", "20"],
+      ["xdotool", "mouseup", "1"],
+    ] });
+  });
+  test("windows drag presses, interpolates, and releases through user32", () => {
+    const plan = dragPlan("windows", 0, 0, 10, 20, { durationMs: 100, steps: 2 });
     expect(plan.kind).toBe("exec");
     if (plan.kind === "exec") {
       const script = plan.argv.join(" ");
-      expect(script).toContain("Point(1,2)");
+      expect(script).toContain("Point(0,0)");
       expect(script).toContain("mouse_event(2");
-      expect(script).toContain("Point(30,40)");
+      expect(script).toContain("Start-Sleep -Milliseconds 50;[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(5,10)");
+      expect(script).toContain("Start-Sleep -Milliseconds 50;[System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point(10,20)");
       expect(script).toContain("mouse_event(4");
     }
+  });
+  test("windows drag defaults to multiple pointer moves", () => {
+    const plan = dragPlan("windows", 0, 0, 10, 20);
+    if (plan.kind === "exec") {
+      const script = plan.argv.join(" ");
+      expect(script.match(/Start-Sleep -Milliseconds 30;/g)).toHaveLength(5);
+      expect(script.match(/Cursor]::Position/g)).toHaveLength(6);
+    }
+  });
+  test("macOS custom drag timing changes its deterministic move count", () => {
+    expect(dragPlan("macos", 1, 2, 30, 40, { durationMs: 240, steps: 8 })).toMatchObject({
+      durationMs: 240, steps: 8,
+    });
+  });
+  test("drag rejects invalid coordinates, duration, and step count", () => {
+    expect(() => dragPlan("macos", Number.NaN, 0, 1, 1)).toThrow("fromX must be a finite number");
+    expect(() => dragPlan("linux", 0, 0, Number.POSITIVE_INFINITY, 1)).toThrow("toX must be a finite number");
+    expect(() => dragPlan("windows", 0, 0, 1, 1, { durationMs: 0 })).toThrow("durationMs");
+    expect(() => dragPlan("windows", 0, 0, 1, 1, { durationMs: -1 })).toThrow("durationMs");
+    expect(() => dragPlan("windows", 0, 0, 1, 1, { durationMs: Number.NaN })).toThrow("durationMs");
+    expect(() => dragPlan("linux", 0, 0, 1, 1, { steps: 0 })).toThrow("steps");
+    expect(() => dragPlan("linux", 0, 0, 1, 1, { steps: -1 })).toThrow("steps");
+    expect(() => dragPlan("linux", 0, 0, 1, 1, { steps: 1.5 })).toThrow("steps");
   });
   test("scroll direction maps to sign on macOS and to buttons on linux", () => {
     expect(scrollPlan("macos", "up", 3)).toEqual({ kind: "native", op: "scroll", axis: "vertical", lines: 3 });
