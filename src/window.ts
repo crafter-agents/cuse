@@ -11,6 +11,16 @@ import type { OS } from "./os.ts";
 
 export type Win = { title: string; x: number; y: number; width: number; height: number; pid?: number };
 
+/** Convert a window rectangle from input points to captured pixels. */
+export function windowCropRect(w: Win, scale: number): { x: number; y: number; width: number; height: number } {
+  return {
+    x: w.x * scale,
+    y: w.y * scale,
+    width: w.width * scale,
+    height: w.height * scale,
+  };
+}
+
 const ps = (script: string) => ["powershell", "-NoProfile", "-Command", script];
 
 /** Each OS can list its windows; none of them agree on how. */

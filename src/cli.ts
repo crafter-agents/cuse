@@ -3,6 +3,8 @@
 // Structured Result + --json. Actions delegate to pure builders (tested).
 
 import { resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { inflateSync, deflateSync } from "node:zlib";
 import { detectOS, chordToOS, normalizeMods, type OS } from "./os.ts";
 import { captureCmd, typeCmd, launchCmd, focusCmd, comboKey, videoCmd } from "./commands.ts";
@@ -14,7 +16,7 @@ import { runWithTimeout, runBytes, explainFailure, timeoutFor } from "./exec.ts"
 import { encodePNG } from "./png.ts";
 import { decodeXWD } from "./xwd.ts";
 import { listWindowsCmd, parseWindows, pickWindow, pointIn, frontmostCmd, parseFrontmost,
-         frontmostMatches, type Win } from "./window.ts";
+         frontmostMatches, windowCropRect, type Win } from "./window.ts";
 import { findTemplate, crop, variance, MIN_VARIANCE } from "./match.ts";
 import { elementsCmd, parseElements, pickElement, pointInElement, describeElement, describeMisses,
          geometryLooksUsable, normalizeRole, type Element } from "./elements.ts";
@@ -746,14 +748,35 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         // Absolute, because the Windows backend saves through .NET, whose
         // working directory is not PowerShell's.
         const out = resolve(args[0] ?? "out.png");
-        await captureTo(os, out, timeoutMs, run, opts.display);
+        if (opts.window) {
+          const tempDir = await mkdtemp(resolve(tmpdir(), "cuse-capture-"));
+          const fullPath = resolve(tempDir, "full.png");
+          try {
+            await captureTo(os, fullPath, timeoutMs, run, opts.display);
+            const wins = await listWindows(os, timeoutMs);
+            const win = pickWindow(wins, opts.window);
+            if (!win) {
+              const seen = wins.map((v) => v.title).filter(Boolean).slice(0, 8).join(", ") || "none";
+              return { ok: false, ...base,
+                error: `no window matching '${opts.window}' (visible windows: ${seen})` };
+            }
+            const full = await loadImage(fullPath);
+            const rect = windowCropRect(win, await pointScale(os, full.width));
+            const img = crop(full, rect.x, rect.y, rect.width, rect.height);
+            await Bun.write(out, encodePNG(img, deflate));
+          } finally {
+            await rm(tempDir, { recursive: true, force: true });
+          }
+        } else {
+          await captureTo(os, out, timeoutMs, run, opts.display);
+        }
         const size = (await Bun.file(out).exists()) ? Bun.file(out).size : 0;
         if (size === 0) return { ok: false, ...base, error: "no file produced" };
         // Two ways a frame can be useless: it shows nothing, or it shows only
         // part of the desk. The second is silent on a second monitor, where
         // `screencapture` writes one file per screen and cuse asked for one.
         const warn = [await inspectFrame(out, size),
-                      await captureCoverage(os, out, timeoutMs, opts.display)]
+                      ...(opts.window ? [] : [await captureCoverage(os, out, timeoutMs, opts.display)])]
           .filter(Boolean).join("; ");
         return { ok: true, ...base, detail: `${size}B -> ${out}`, ...(warn ? { warn } : {}) };
       }
@@ -1257,7 +1280,7 @@ const HELP = `cuse ${VERSION} - cross-platform computer-use CLI
   cuse <action> [args] [flags]
 
 Screen
-  capture [out.png]            screenshot; warns when the frame is blank
+  capture [out.png]            screenshot; --window=<name> captures only that window
   record [n] [gapMs]           n captures in a row
   record <seconds> --video     actual video, where the OS can (not Windows)
   settle [tries] [gapMs] [n]   wait until the screen stops changing

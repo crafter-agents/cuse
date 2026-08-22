@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import { listWindowsCmd, parseWindows, pickWindow, pointIn,
-         frontmostCmd, parseFrontmost, frontmostMatches } from "../src/window.ts";
+         frontmostCmd, parseFrontmost, frontmostMatches, windowCropRect } from "../src/window.ts";
 import type { OS } from "../src/os.ts";
 
 describe("listing windows", () => {
@@ -71,6 +71,18 @@ describe("aiming at a window", () => {
     expect(pointIn(wins[0]!, 0, 0)).toEqual({ x: 100, y: 50 });
     expect(pointIn(wins[0]!, 1, 1)).toEqual({ x: 500, y: 250 });
     expect(pointIn({ ...wins[0]!, x: 300, width: 800 }, 0.5, 0.5)).toEqual({ x: 700, y: 150 });
+  });
+});
+
+describe("cropping to a window", () => {
+  const win = { title: "CU_TARGET", x: 12, y: 34, width: 400, height: 250 };
+
+  test("scale 1 preserves the point-space rectangle", () => {
+    expect(windowCropRect(win, 1)).toEqual({ x: 12, y: 34, width: 400, height: 250 });
+  });
+
+  test("scale 2 doubles every field", () => {
+    expect(windowCropRect(win, 2)).toEqual({ x: 24, y: 68, width: 800, height: 500 });
   });
 });
 
