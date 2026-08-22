@@ -547,5 +547,7 @@ jobs:
           path: |
             notepad-target.txt
             notepad-elements.json
+            windows-before-drag.json
+            windows-after-drag.json
             assert-pass.json
             assert-fail.json

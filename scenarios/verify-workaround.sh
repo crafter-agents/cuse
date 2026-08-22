@@ -20,6 +20,42 @@ powershell -NoProfile -Command \
 "$CUSE" wait --window=notepad-target --timeout=25000 --json || {
   echo "it started but never presented a window"; exit 1; }
 
+say "drag the live window by its title bar"
+"$CUSE" windows --json | tee windows-before-drag.json >/dev/null || {
+  echo "could not capture windows before the drag"; exit 1; }
+before_window=$(jq -er \
+  '[.data[] | select(.title | test("notepad-target"; "i"))][0] | select(. != null) | [.x, .y, .width] | @tsv' \
+  windows-before-drag.json) || {
+  echo "could not find notepad-target before the drag"; exit 1; }
+read -r before_x before_y window_width <<< "$before_window"
+
+# The hosted Windows display has ample room for this fixed offset. Starting at
+# the horizontal center and 10 pixels below the top keeps the pointer on the
+# classic Notepad title bar.
+from_x=$((before_x + window_width / 2))
+from_y=$((before_y + 10))
+to_x=$((from_x + 150))
+to_y=$((from_y + 120))
+"$CUSE" drag "$from_x" "$from_y" "$to_x" "$to_y" --duration=250 --steps=6 --json || {
+  echo "the interpolated drag command failed against the live window"; exit 1; }
+
+"$CUSE" windows --json | tee windows-after-drag.json >/dev/null || {
+  echo "could not capture windows after the drag"; exit 1; }
+after_window=$(jq -er \
+  '[.data[] | select(.title | test("notepad-target"; "i"))][0] | select(. != null) | [.x, .y] | @tsv' \
+  windows-after-drag.json) || {
+  echo "could not find notepad-target after the drag"; exit 1; }
+read -r after_x after_y <<< "$after_window"
+delta_x=$((after_x - before_x))
+delta_y=$((after_y - before_y))
+abs_delta_x=${delta_x#-}
+abs_delta_y=${delta_y#-}
+if ((abs_delta_x < 50 && abs_delta_y < 50)); then
+  echo "live window did not move far enough: before=($before_x,$before_y) after=($after_x,$after_y) delta=($delta_x,$delta_y)"
+  exit 1
+fi
+echo "dragged a live Windows window by ($delta_x,$delta_y), proving the interpolated drag path moves a real target"
+
 say "what the tree says about it"
 "$CUSE" elements notepad-target --json | tee notepad-elements.json
 
