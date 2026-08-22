@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { act, exitCodeFor, fillTarget, VERSION, type Result } from "../src/cli.ts";
+import { act, exitCodeFor, fillTarget, macSessionUnreachable, VERSION, type Result } from "../src/cli.ts";
 import type { OS } from "../src/os.ts";
 import { detectOS } from "../src/os.ts";
 import type { Plan } from "../src/plan.ts";
@@ -24,6 +24,7 @@ describe("exit codes", () => {
     expect(exitCodeFor(r({ error: "`xdotool` not found: apt-get install -y xdotool" }))).toBe(4);
     expect(exitCodeFor(r({ error: "no X display: DISPLAY is unset (run under Xvfb)" }))).toBe(4);
     expect(exitCodeFor(r({ error: "the session is locked: input would go to the login window" }))).toBe(4);
+    expect(exitCodeFor(r({ error: "no window server session: frame is blank" }))).toBe(4);
   });
   test("anything else is 1", () => {
     expect(exitCodeFor(r({ error: "osascript: no window matching 'Notepad'" }))).toBe(1);
@@ -34,6 +35,45 @@ describe("exit codes", () => {
     expect(exitCodeFor(r({ action: "doctor", data: { verdict: "unusable" } }))).toBe(4);
   });
   test("the version is a real semver", () => expect(VERSION).toMatch(/^\d+\.\d+\.\d+$/));
+});
+
+describe("macOS window server probe", () => {
+  test("returns the existing blank-frame warning before the guarded command", async () => {
+    const calls: string[] = [];
+    const warning = await macSessionUnreachable(15_000, {
+      tempPath: () => "/tmp/cuse-test-session.png",
+      capture: async (os, out, timeoutMs) => {
+        calls.push(`capture:${os}:${out}:${timeoutMs}`);
+      },
+      size: async () => 295,
+      inspect: async (_path, bytes) => {
+        calls.push(`inspect:${bytes}`);
+        return "frame is blank: input actions will be delivered to no window";
+      },
+      remove: async () => { calls.push("remove"); },
+    });
+
+    expect(warning).toContain("frame is blank");
+    expect(calls).toEqual([
+      "capture:macos:/tmp/cuse-test-session.png:3000",
+      "inspect:295",
+      "remove",
+    ]);
+  });
+
+  test("does not refuse when capture cannot determine the session state", async () => {
+    let removed = false;
+    const warning = await macSessionUnreachable(1500, {
+      tempPath: () => "/tmp/cuse-test-session-error.png",
+      capture: async () => { throw new Error("capture unavailable"); },
+      size: async () => 0,
+      inspect: async () => "frame is blank",
+      remove: async () => { removed = true; },
+    });
+
+    expect(warning).toBeUndefined();
+    expect(removed).toBe(true);
+  });
 });
 
 const scenarioPath = (name: string) =>
