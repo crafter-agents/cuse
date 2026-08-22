@@ -24,6 +24,8 @@ describe("listing windows", () => {
     const c = listWindowsCmd("linux").join(" ");
     expect(c).toContain("getwindowgeometry");
     expect(c).toContain("--onlyvisible");
+    expect(c).toContain('--name ".*"');
+    expect(c).not.toContain('--name ""');
   });
 });
 
