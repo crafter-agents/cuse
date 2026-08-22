@@ -172,6 +172,40 @@ async function inspectFrame(path: string, bytes: number): Promise<string | undef
   }
 }
 
+type SessionFrameProbe = {
+  capture: typeof captureTo;
+  inspect: typeof inspectFrame;
+  size: (path: string) => Promise<number>;
+  remove: (path: string) => Promise<void>;
+  tempPath: () => string;
+};
+
+const realSessionFrameProbe: SessionFrameProbe = {
+  capture: captureTo,
+  inspect: inspectFrame,
+  size: async (path) => (await Bun.file(path).exists()) ? Bun.file(path).size : 0,
+  remove: async (path) => { await rm(path, { force: true }); },
+  tempPath: () => resolve(tmpdir(), `cuse-session-${process.pid}-${crypto.randomUUID()}.png`),
+};
+
+/** Confirm the blank frame that macOS returns when this process has no usable window server. */
+export async function macSessionUnreachable(timeoutMs: number,
+                                            sessionProbe: SessionFrameProbe = realSessionFrameProbe): Promise<string | undefined> {
+  const out = sessionProbe.tempPath();
+  const budget = Math.min(timeoutMs, 3000);
+  try {
+    await sessionProbe.capture("macos", out, budget, runner("capture", budget));
+    const bytes = await sessionProbe.size(out);
+    if (bytes === 0) return undefined;
+    return await sessionProbe.inspect(out, bytes);
+  } catch {
+    // An unreadable probe is unknown, not a refusal. Let the command report its own error.
+    return undefined;
+  } finally {
+    await sessionProbe.remove(out).catch(() => {});
+  }
+}
+
 const probe: Probe = { env: process.env, has: (tool) => Bun.which(tool) !== null };
 
 /** Ask the OS whether the screen is locked; null when it cannot be asked. */
@@ -277,6 +311,8 @@ async function macElements(app: string, timeoutMs: number,
 
 /** The fallback route, through System Events, for an untrusted process. */
 async function systemEventsElements(app: string, timeoutMs: number): Promise<Tree> {
+  const unreachable = await macSessionUnreachable(timeoutMs);
+  if (unreachable) throw new Error(`no window server session: ${unreachable}`);
   const argv = elementsCmd("macos", app);
   const r = await runWithTimeout(argv, timeoutMs);
   const problem = explainFailure(argv, r, timeoutMs);
@@ -1020,6 +1056,10 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       // Who has the keyboard? A system dialog that steals focus is invisible to
       // an agent reading only exit codes.
       case "frontmost": {
+        if (os === "macos") {
+          const unreachable = await macSessionUnreachable(timeoutMs);
+          if (unreachable) return { ok: false, ...base, error: `no window server session: ${unreachable}` };
+        }
         const argv = frontmostCmd(os);
         const r = await runWithTimeout(argv, timeoutMs);
         const problem = explainFailure(argv, r, timeoutMs);
@@ -1030,6 +1070,10 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
       // What is on screen right now, and where. The first half of aiming.
       case "windows": {
+        if (os === "macos") {
+          const unreachable = await macSessionUnreachable(timeoutMs);
+          if (unreachable) return { ok: false, ...base, error: `no window server session: ${unreachable}` };
+        }
         const wins = await listWindows(os, timeoutMs);
         const named = wins.filter((w) => w.title);
         const blind = blindNote(await isSessionLocked({ os, read: () => readLockState(os) }), wins.length === 0);
@@ -1364,7 +1408,7 @@ export function exitCodeFor(r: Result): number {
   const e = r.error ?? "";
   if (/^unknown action|needs two PNG paths|^ocr-read needs|^fill (needs|coordinates need) |^invalid --button=|^invalid --modifiers=|^invalid scroll direction |^scenario needs|^scenario file not found|^scenario file must contain valid JSON|^invalid scenario at /.test(e)) return 2;
   if (/did not finish within|ran out of time|never went quiet/.test(e)) return 3;
-  if (/not found:|DISPLAY is unset|session is locked|unsupported (on|platform)/.test(e)) return 4;
+  if (/not found:|DISPLAY is unset|session is locked|no window server session|unsupported (on|platform)/.test(e)) return 4;
   return 1;
 }
 
