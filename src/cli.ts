@@ -33,6 +33,7 @@ import { probeFile } from "./probes/file.ts";
 import { probeScheduledTask } from "./probes/scheduled-task.ts";
 import { probeService } from "./probes/service.ts";
 import type { PortProtocol } from "./probes/types.ts";
+import { realDoctorProbe, runDoctor, type DoctorVerdict } from "./doctor.ts";
 
 export type Options = {
   force?: boolean; sameUnder?: number; timeoutMs?: number;
@@ -518,7 +519,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
   // Fail before touching the machine, with the reason and the fix, not an opaque
   // exit code from a missing binary or an absent display.
-  if (!["os", "diff", "ocr-read", "scenario", "compare", "inspect"].includes(action)) {
+  if (!["os", "doctor", "diff", "ocr-read", "scenario", "compare", "inspect"].includes(action)) {
     const pre = preflight(os, action === "fill" ? "click" : action, probe);
     if (!pre.ok) return { ok: false, ...base, error: pre.reason };
   }
@@ -725,6 +726,21 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       }
 
       case "os": return { ok: true, ...base, detail: os };
+
+      case "doctor": {
+        const report = await runDoctor(os, realDoctorProbe);
+        const detail = [
+          `verdict: ${report.verdict}`,
+          ...report.checks.map((check) => `${check.name}: ${check.status} - ${check.detail}`),
+        ].join("\n");
+        return {
+          ok: report.verdict === "healthy",
+          ...base,
+          detail,
+          ...(report.verdict === "unusable" ? { error: "doctor found unusable capabilities" } : {}),
+          data: report,
+        };
+      }
 
       case "capture": {
         // Absolute, because the Windows backend saves through .NET, whose
@@ -1281,6 +1297,7 @@ Input
 
 Other
   os                           which platform this is
+  doctor                       bounded, read-only capability checks (macOS)
   serve                        read one command per line, answer one JSON per line
   screen                       frame size, point size, the ratio, and every display
 
@@ -1314,6 +1331,10 @@ Exit codes
 
 /** Exit codes an agent can branch on without parsing prose. */
 export function exitCodeFor(r: Result): number {
+  if (r.action === "doctor" && r.data && typeof r.data === "object" && "verdict" in r.data) {
+    const verdict = r.data.verdict as DoctorVerdict;
+    return verdict === "healthy" ? 0 : verdict === "degraded" ? 1 : 4;
+  }
   if (r.action === "scenario" && r.data && typeof r.data === "object" &&
       "status" in r.data && r.data.status === "timed_out") return 3;
   if (r.ok) return 0;
@@ -1354,7 +1375,7 @@ if (import.meta.main) {
   }, (opts.timeoutMs ?? 30_000) + 100) : undefined;
   const r = await act(action, args, opts);
   if (waitWatchdog !== undefined) clearTimeout(waitWatchdog);
-  console.log(wantJson ? JSON.stringify(r) : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cuse: ${r.error}`);
+  console.log(wantJson ? JSON.stringify(r) : r.action === "doctor" ? r.detail : r.ok ? `${r.action}: ${r.detail ?? "ok"}` : `cuse: ${r.error}`);
   if (!wantJson && r.warn) console.warn(`cuse: warning: ${r.warn}`);
   process.exit(exitCodeFor(r));
 }

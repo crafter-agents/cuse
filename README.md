@@ -502,6 +502,17 @@ Exit codes are meant to be branched on without parsing prose: `0` ok, `1`
 failed, `2` bad usage, `3` timed out, `4` refused because the machine cannot do
 it (missing dependency, no display, locked session).
 
+## doctor
+
+`cuse doctor` runs individually bounded, read-only checks for the session,
+display geometry, desktop capabilities, and required tools. Use `cuse doctor
+--json` for stable per-check statuses and the overall `healthy`, `degraded`, or
+`unusable` verdict. The exit code is `0`, `1`, or `4`, respectively.
+
+This first slice covers macOS. Linux, Windows, headless Linux, and SSH failure
+shapes are a named follow-up for issue #82 and are reported as unsupported until
+that work lands.
+
 ## Design
 
 - **Pure core, tested.** Command mapping (`src/commands.ts`, `src/os.ts`), input

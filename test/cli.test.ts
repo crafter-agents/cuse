@@ -28,6 +28,11 @@ describe("exit codes", () => {
   test("anything else is 1", () => {
     expect(exitCodeFor(r({ error: "osascript: no window matching 'Notepad'" }))).toBe(1);
   });
+  test("doctor verdicts have distinct gateable exit codes", () => {
+    expect(exitCodeFor(r({ action: "doctor", data: { verdict: "healthy" } }))).toBe(0);
+    expect(exitCodeFor(r({ action: "doctor", data: { verdict: "degraded" } }))).toBe(1);
+    expect(exitCodeFor(r({ action: "doctor", data: { verdict: "unusable" } }))).toBe(4);
+  });
   test("the version is a real semver", () => expect(VERSION).toMatch(/^\d+\.\d+\.\d+$/));
 });
 
