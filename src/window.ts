@@ -35,7 +35,7 @@ export function listWindowsCmd(os: OS): string[] {
     // xdotool prints geometry as key=value blocks; asking per window keeps it
     // parseable and works without a window manager.
     case "linux": return ["sh", "-c",
-      'for id in $(xdotool search --onlyvisible --name "" 2>/dev/null); do ' +
+      'for id in $(xdotool search --onlyvisible --name ".*" 2>/dev/null); do ' +
       'name=$(xdotool getwindowname "$id" 2>/dev/null); ' +
       'eval "$(xdotool getwindowgeometry --shell "$id" 2>/dev/null)"; ' +
       '[ -n "$WIDTH" ] && printf "%s\\t%s\\t%s\\t%s\\t%s\\n" "$name" "$X" "$Y" "$WIDTH" "$HEIGHT"; ' +
