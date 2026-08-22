@@ -477,6 +477,10 @@ a black 3024x1964 macOS frame compressed to 112 KB, comfortably above any
 size threshold, and only the decode caught it. The heuristic remains as a
 fallback for images the decoder refuses.
 
+Pass `--window=<name>` to `capture` to save only the matching visible window.
+If no visible window title matches, the command fails and lists the titles it
+could see instead of silently saving the full desktop.
+
 ## Nothing waits forever
 
 Every backend cuse shells out to can hang — osascript on an app that stopped
