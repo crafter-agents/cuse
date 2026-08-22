@@ -1,13 +1,31 @@
 {
-  "name": "@crafter/cuse",
-  "version": "0.1.0",
+  "name": "cuse",
+  "version": "0.2.0",
   "type": "module",
   "description": "Cross-platform computer-use CLI. One verb, the right OS primitive.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crafter-agents/cuse.git"
+  },
+  "homepage": "https://github.com/crafter-agents/cuse#readme",
+  "bugs": {
+    "url": "https://github.com/crafter-agents/cuse/issues"
+  },
+  "keywords": [
+    "computer-use",
+    "desktop-automation",
+    "cli",
+    "agents"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
   "bin": {
     "cuse": "./src/cli.ts"
   },
   "files": [
     "src",
+    "skills",
     "README.md"
   ],
   "scripts": {
