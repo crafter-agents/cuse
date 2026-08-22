@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { act, exitCodeFor, fillTarget, macSessionUnreachable, VERSION, type Result } from "../src/cli.ts";
+import { act, exitCodeFor, fillTarget, macSessionUnreachable, pointScale, VERSION, type Result } from "../src/cli.ts";
 import type { OS } from "../src/os.ts";
 import { detectOS } from "../src/os.ts";
 import type { Plan } from "../src/plan.ts";
@@ -73,6 +73,39 @@ describe("macOS window server probe", () => {
 
     expect(warning).toBeUndefined();
     expect(removed).toBe(true);
+  });
+});
+
+describe("pointScale", () => {
+  const runner = (stdout: string[]) => {
+    let calls = 0;
+    return {
+      run: async () => ({
+        code: 0,
+        stdout: stdout[calls++] ?? "",
+        stderr: "",
+        timedOut: false,
+      }),
+      calls: () => calls,
+    };
+  };
+
+  test("returns a non-1 backing scale without querying logical width", async () => {
+    const stub = runner(["2\n"]);
+    expect(await pointScale("macos", 3024, stub.run)).toBe(2);
+    expect(stub.calls()).toBe(1);
+  });
+
+  test("overrides an ambiguous 1 when the ratio implies 2", async () => {
+    const stub = runner(["1\n", "1512\n"]);
+    expect(await pointScale("macos", 3024, stub.run)).toBe(2);
+    expect(stub.calls()).toBe(2);
+  });
+
+  test("keeps 1 when the backing scale and ratio both imply 1", async () => {
+    const stub = runner(["1\n", "1920\n"]);
+    expect(await pointScale("macos", 1920, stub.run)).toBe(1);
+    expect(stub.calls()).toBe(2);
   });
 });
 

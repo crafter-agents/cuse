@@ -438,7 +438,11 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
  * mouse events use, so a match found in the frame has to be halved before it is
  * clicked. Other platforms capture and click in the same units.
  */
-async function pointScale(os: OS, frameWidth: number): Promise<number> {
+export async function pointScale(
+  os: OS,
+  frameWidth: number,
+  runner: typeof runWithTimeout = runWithTimeout,
+): Promise<number> {
   if (os !== "macos") return 1;
 
   // Ask the window server, not Finder. The old path asked Finder for the bounds
@@ -451,22 +455,23 @@ async function pointScale(os: OS, frameWidth: number): Promise<number> {
   //
   // NSScreen.backingScaleFactor is the same number the compositor uses, needs no
   // application to be running, and measured 71 ms.
-  const r = await runWithTimeout(["osascript", "-l", "JavaScript", "-e",
+  const r = await runner(["osascript", "-l", "JavaScript", "-e",
     'ObjC.import("AppKit");' +
     "String($.NSScreen.screens.objectAtIndex(0).backingScaleFactor)"], 5000);
   const scale = Number(r.stdout.trim());
-  if (Number.isFinite(scale) && scale > 0) return Math.round(scale);
+  const roundedScale = Number.isFinite(scale) && scale > 0 ? Math.round(scale) : undefined;
+  if (roundedScale !== undefined && roundedScale !== 1) return roundedScale;
 
-  // Fall back to the ratio only if the window server did not answer: a frame
-  // wider than the logical desktop still implies the scale.
-  const f = await runWithTimeout(["osascript", "-l", "JavaScript", "-e",
+  // A disconnected window server can silently report 1 for a Retina display.
+  // Cross-check that ambiguous answer against the pixel-to-point ratio.
+  const f = await runner(["osascript", "-l", "JavaScript", "-e",
     'ObjC.import("AppKit");' +
     "String($.NSScreen.screens.objectAtIndex(0).frame.size.width)"], 5000);
   const logical = Number(f.stdout.trim());
-  if (!Number.isFinite(logical) || logical <= 0) return 1;
+  if (!Number.isFinite(logical) || logical <= 0) return roundedScale ?? 1;
   const ratio = frameWidth / logical;
   // Only trust a clean integer ratio; anything else means the guess is wrong.
-  return Math.abs(ratio - Math.round(ratio)) < 0.01 ? Math.round(ratio) : 1;
+  return Math.abs(ratio - Math.round(ratio)) < 0.01 ? Math.round(ratio) : roundedScale ?? 1;
 }
 
 const xy = (a?: string, b?: string) =>
