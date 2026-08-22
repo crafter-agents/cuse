@@ -585,6 +585,33 @@ asking a tool whether it worked and finding out.
   `--expect-front` guard cannot see it, and it swallows every keystroke after
   that. CI proves input before taking any screenshot for this reason.
 
+## Scope
+
+**Core.** Cuse provides local, cross-platform desktop primitives with structured
+results, scenarios, evidence, and GitHub Actions integration. The core stays a
+small, auditable CLI that acts on the machine where it runs.
+
+**Adjacent adapters.** Agent tools and MCP wrappers may call the CLI and translate
+its structured results for their own consumers. These adapters can live alongside
+cuse without becoming part of the core or adding their orchestration concerns to
+the CLI.
+
+**Non-goals.** Cuse does not bundle a planner or model, provide a hosted desktop
+cloud, replace browser DOM automation, grow into an RPA workflow builder, or
+encode app-specific business logic.
+
+**Feature admission criteria.** A core feature needs a real target, a deterministic
+oracle that can prove its result, and bounded execution. It must also define a
+cross-platform contract or name an explicit capability gap on unsupported
+platforms.
+
+**Compatibility and versioning.** Published CLI commands, flags, exit codes, and
+documented JSON fields are consumer contracts. Patch releases preserve those
+contracts. Before 1.0, a minor release may make an incompatible change and must
+document it; after 1.0, incompatible changes require a major release. Additive JSON
+fields are backward-compatible, so consumers should ignore fields they do not
+recognize.
+
 ## A real defect, reproduced
 
 Everything else here is gated against a target built for the purpose, which is
