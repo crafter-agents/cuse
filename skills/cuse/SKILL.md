@@ -10,7 +10,7 @@ One verb, the right OS primitive underneath: `osascript` and CoreGraphics on
 macOS, `xdotool` and `xwd` on Linux, SendKeys and user32 on Windows. Every
 command answers JSON with `--json`, so nothing has to be parsed out of prose.
 
-Install: `npm i -g @crafter-agents/cuse`, or build from source with
+Install: `bun add --global cuse`, or build from source with
 `bun build --compile src/cli.ts --outfile dist/cuse`.
 
 ## The one thing to know first

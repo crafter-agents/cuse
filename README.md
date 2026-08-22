@@ -30,6 +30,18 @@ cuse <action> --json        # structured Result for agents
 
 ## Install
 
+With Bun, install the npm package or run it without a global install:
+
+```sh
+bun add --global cuse
+cuse os
+
+bunx cuse os
+```
+
+The npm package runs from TypeScript and requires Bun. For a standalone binary
+with no runtime dependency, use a release asset below.
+
 Download the binary for your platform from
 [Releases](https://github.com/crafter-agents/cuse/releases) — one file, nothing
 to install alongside it, no runtime.
