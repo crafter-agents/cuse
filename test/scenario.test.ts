@@ -40,6 +40,25 @@ describe("scenario schema", () => {
     });
   });
 
+  test("rejects an unsupported exec stdout format", () => {
+    const result = parseScenario({
+      version: 1,
+      name: "invalid stdout format",
+      vars: {},
+      defaultTimeoutMs: 1_000,
+      steps: [{ type: "exec", argv: ["printf", "ok"], stdout: "yaml" }],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_scenario",
+        path: "$.steps[0].stdout",
+        message: "stdout must be \"text\" or \"json\"",
+      },
+    });
+  });
+
   test("rejects a step without a timeout or bounded default", () => {
     const document = minimal();
     delete (document.steps[0] as { timeoutMs?: number }).timeoutMs;

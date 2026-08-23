@@ -22,6 +22,7 @@ export type ExecStep = StepBase & {
   argv: string[];
   cwd?: string;
   env?: Record<string, string>;
+  stdout?: "text" | "json";
 };
 
 export type AssertOperator = "eq" | "ne" | "contains" | "exists" | "gt" | "gte" | "lt" | "lte";
@@ -131,10 +132,11 @@ function parseStep(value: unknown, path: string, defaultTimeoutMs?: number, nest
       if (value.options !== undefined && !record(value.options)) return fail(`${path}.options`, "options must be an object");
       break;
     case "exec":
-      allowed = [...BASE_KEYS, "argv", "cwd", "env"];
+      allowed = [...BASE_KEYS, "argv", "cwd", "env", "stdout"];
       if (!Array.isArray(value.argv) || value.argv.length === 0 || value.argv.some((item) => typeof item !== "string")) return fail(`${path}.argv`, "argv must be a non-empty array of strings");
       if (value.cwd !== undefined && typeof value.cwd !== "string") return fail(`${path}.cwd`, "cwd must be a string");
       if (value.env !== undefined && (!record(value.env) || Object.values(value.env).some((item) => typeof item !== "string"))) return fail(`${path}.env`, "env must contain string values");
+      if (value.stdout !== undefined && value.stdout !== "text" && value.stdout !== "json") return fail(`${path}.stdout`, "stdout must be \"text\" or \"json\"");
       break;
     case "assert":
       allowed = [...BASE_KEYS, "actual", "operator", "expected"];
