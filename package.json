@@ -31,5 +31,8 @@
   "scripts": {
     "test": "bun test",
     "build": "bun build --compile src/cli.ts --outfile dist/cuse"
+  },
+  "devDependencies": {
+    "electron": "^43.4.1"
   }
 }

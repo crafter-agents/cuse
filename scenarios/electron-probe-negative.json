@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "name": "assert real Electron runtime evidence (forced red)",
+  "platforms": ["macos"],
+  "vars": {},
+  "defaultTimeoutMs": 20000,
+  "steps": [
+    { "type": "exec", "argv": ["bunx", "electron", "scenarios/fixtures/electron-probe/probe.mjs"], "stdout": "json", "saveAs": "runtime" },
+    { "type": "assert", "actual": "${steps.runtime.json.value.electronVersion}", "operator": "eq", "expected": "0.0.0" }
+  ]
+}

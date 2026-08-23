@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "assert real Electron runtime and geometry evidence",
+  "platforms": ["macos"],
+  "vars": {},
+  "defaultTimeoutMs": 20000,
+  "steps": [
+    { "type": "exec", "argv": ["bunx", "electron", "scenarios/fixtures/electron-probe/probe.mjs"], "stdout": "json", "saveAs": "runtime" },
+    { "type": "assert", "actual": "${steps.runtime.json.value.electronVersion}", "operator": "contains", "expected": "43." },
+    { "type": "assert", "actual": "${steps.runtime.json.value.chromiumVersion}", "operator": "exists" },
+    { "type": "assert", "actual": "${steps.runtime.json.value.requestedDpr}", "operator": "type", "expected": "number" },
+    { "type": "assert", "actual": "${steps.runtime.json.value.observedDpr}", "operator": "type", "expected": "number" },
+    { "type": "assert", "actual": "${steps.runtime.json.value.scrollGeometry.scrollHeight}", "operator": "gt", "expected": 1000 },
+    { "type": "assert", "actual": "${steps.runtime.json.value.ownsWindow}", "operator": "eq", "expected": true }
+  ]
+}
