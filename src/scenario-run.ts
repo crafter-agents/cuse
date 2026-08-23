@@ -1,5 +1,5 @@
 import { runWithTimeout, type RunResult } from "./exec.ts";
-import { parseJsonDocument, type ParsedJsonResult } from "./scenario-json.ts";
+import { parseJsonDocument, readJsonFile, type ParsedJsonResult } from "./scenario-json.ts";
 import type {
   AssertStep,
   Scenario,
@@ -56,6 +56,7 @@ export type ScenarioStepEventSink = (event: ScenarioStepEvent) => void | Promise
 export type ScenarioRunOptions = {
   invokeCuse?: CuseInvoker;
   onStepEvent?: ScenarioStepEventSink;
+  workDir?: string;
 };
 
 export type ScenarioRunResult = {
@@ -218,6 +219,16 @@ async function executeStep(
         run,
       };
     }
+    case "json": {
+      const json = readJsonFile(step.path, options.workDir ?? process.cwd());
+      return {
+        status: json.ok ? "passed" : "failed",
+        timedOut: false,
+        attempts: 1,
+        json,
+        message: json.ok ? undefined : `JSON file read failed (${json.kind}): ${json.message}`,
+      };
+    }
     case "assert": {
       const passed = assertPasses(step);
       return {
@@ -311,6 +322,13 @@ function savedValue(
       };
       return result.json ? { ...base, json: result.json } : base;
     }
+    case "json":
+      return result.json ?? {
+        ok: false,
+        kind: "read_error",
+        message: result.message ?? "JSON file read failed",
+        byteCount: 0,
+      };
     case "assert":
       return { passed: result.status === "passed", actual: step.actual, expected: step.expected ?? null };
     case "cuse": {

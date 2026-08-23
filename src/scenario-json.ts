@@ -1,18 +1,94 @@
+import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { ScenarioValue } from "./scenario.ts";
-
-// This pure parser is intentionally unwired and has no side effects.
-// Nothing in the existing scenario runner calls it yet.
 
 export type ParsedJsonResult =
   | { ok: true; value: ScenarioValue; source: string; byteCount: number }
   | {
     ok: false;
-    kind: "empty" | "malformed" | "multiple_documents" | "oversized";
+    kind: "empty" | "malformed" | "multiple_documents" | "oversized" |
+      "outside_root" | "not_found" | "not_file" | "read_error";
     message: string;
     byteCount: number;
   };
 
 export const DEFAULT_MAX_JSON_BYTES = 65_536;
+
+function failedFileResult(
+  kind: "outside_root" | "not_found" | "not_file" | "read_error",
+  message: string,
+): ParsedJsonResult {
+  return { ok: false, kind, message, byteCount: 0 };
+}
+
+function isInside(root: string, candidate: string): boolean {
+  const pathFromRoot = relative(root, candidate);
+  return pathFromRoot === "" || (!pathFromRoot.startsWith("..") && !isAbsolute(pathFromRoot));
+}
+
+export function readJsonFile(
+  declaredPath: string,
+  root: string,
+  maxBytes: number = DEFAULT_MAX_JSON_BYTES,
+): ParsedJsonResult {
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(root);
+    if (!statSync(realRoot).isDirectory()) {
+      return failedFileResult("not_file", "Allowed root is not a directory");
+    }
+  } catch (error) {
+    return failedFileResult("not_found", `Allowed root was not found: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const candidate = resolve(realRoot, declaredPath);
+  if (!isInside(realRoot, candidate)) {
+    return failedFileResult("outside_root", "JSON file path is outside the allowed root");
+  }
+
+  let realCandidate: string;
+  try {
+    realCandidate = realpathSync(candidate);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return failedFileResult("not_found", `JSON file was not found: ${declaredPath}`);
+    }
+    return failedFileResult("read_error", `Could not resolve JSON file: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (!isInside(realRoot, realCandidate)) {
+    return failedFileResult("outside_root", "JSON file path is outside the allowed root");
+  }
+
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(realCandidate, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const openedFile = fstatSync(descriptor);
+    if (!openedFile.isFile()) {
+      return failedFileResult("not_file", `JSON path is not a file: ${declaredPath}`);
+    }
+    const pathAfterOpen = realpathSync(candidate);
+    const fileAfterOpen = statSync(pathAfterOpen);
+    if (!isInside(realRoot, pathAfterOpen) ||
+      openedFile.dev !== fileAfterOpen.dev || openedFile.ino !== fileAfterOpen.ino) {
+      return failedFileResult("outside_root", "JSON file path changed outside the allowed root while opening");
+    }
+    const text = readFileSync(descriptor, "utf8");
+    return parseJsonDocument(text, declaredPath, maxBytes);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return failedFileResult("not_found", `JSON file was not found: ${declaredPath}`);
+    }
+    if (code === "EISDIR") {
+      return failedFileResult("not_file", `JSON path is not a file: ${declaredPath}`);
+    }
+    return failedFileResult("read_error", `Could not read JSON file: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
 
 function classifyParseError(error: unknown): "malformed" | "multiple_documents" {
   return error instanceof SyntaxError && error.message.includes("after JSON at position")
