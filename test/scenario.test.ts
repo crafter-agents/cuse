@@ -94,6 +94,38 @@ describe("scenario schema", () => {
     });
   });
 
+  test("accepts supported primitive type assertions", () => {
+    for (const expected of ["string", "number", "boolean", "null", "array", "object", "missing"]) {
+      const result = parseScenario({
+        version: 1,
+        name: "type assertion",
+        vars: {},
+        defaultTimeoutMs: 1_000,
+        steps: [{ type: "assert", actual: "${vars.value}", operator: "type", expected }],
+      });
+      expect(result.ok).toBe(true);
+    }
+  });
+
+  test("rejects an unsupported primitive type assertion", () => {
+    const result = parseScenario({
+      version: 1,
+      name: "invalid type assertion",
+      vars: {},
+      defaultTimeoutMs: 1_000,
+      steps: [{ type: "assert", actual: 1, operator: "type", expected: "integer" }],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_scenario",
+        path: "$.steps[0].expected",
+        message: "type assertion expected must be string, number, boolean, null, array, object or missing",
+      },
+    });
+  });
+
   test("rejects a step without a timeout or bounded default", () => {
     const document = minimal();
     delete (document.steps[0] as { timeoutMs?: number }).timeoutMs;

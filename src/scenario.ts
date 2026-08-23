@@ -30,7 +30,7 @@ export type JsonStep = StepBase & {
   path: string;
 };
 
-export type AssertOperator = "eq" | "ne" | "contains" | "exists" | "gt" | "gte" | "lt" | "lte";
+export type AssertOperator = "eq" | "ne" | "contains" | "exists" | "type" | "gt" | "gte" | "lt" | "lte";
 export type AssertStep = StepBase & {
   type: "assert";
   actual: ScenarioValue;
@@ -68,8 +68,9 @@ export type ScenarioParseResult =
 
 const PLATFORMS = new Set<ScenarioPlatform>(["macos", "linux", "windows"]);
 const ASSERT_OPERATORS = new Set<AssertOperator>(
-  ["eq", "ne", "contains", "exists", "gt", "gte", "lt", "lte"],
+  ["eq", "ne", "contains", "exists", "type", "gt", "gte", "lt", "lte"],
 );
+const ASSERT_TYPES = new Set(["string", "number", "boolean", "null", "array", "object", "missing"]);
 const INTERPOLATION = /\$\{(?:vars\.[A-Za-z_][\w-]*|steps\.[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\}/g;
 
 function fail(path: string, message: string): ScenarioParseResult {
@@ -152,6 +153,9 @@ function parseStep(value: unknown, path: string, defaultTimeoutMs?: number, nest
       if (!("actual" in value)) return fail(`${path}.actual`, "actual is required");
       if (!ASSERT_OPERATORS.has(value.operator as AssertOperator)) return fail(`${path}.operator`, "unsupported assertion operator");
       if (value.operator !== "exists" && !("expected" in value)) return fail(`${path}.expected`, "expected is required for this operator");
+      if (value.operator === "type" && (typeof value.expected !== "string" || !ASSERT_TYPES.has(value.expected))) {
+        return fail(`${path}.expected`, "type assertion expected must be string, number, boolean, null, array, object or missing");
+      }
       break;
     case "wait":
       if (nested) return fail(`${path}.type`, "wait steps cannot contain another wait step");
