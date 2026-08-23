@@ -74,6 +74,7 @@ type ScenarioContext = {
 
 const INTERPOLATION = /\$\{(vars\.[A-Za-z_][\w-]*|steps\.[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\}/g;
 const WHOLE_INTERPOLATION = /^\$\{(vars\.[A-Za-z_][\w-]*|steps\.[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\}$/;
+const MISSING = Symbol("cuse-missing-field");
 
 function resolveReference(reference: string, context: ScenarioContext): ScenarioValue {
   const [scope, name, ...path] = reference.split(".");
@@ -121,6 +122,20 @@ function resolveStep(step: ScenarioStep, context: ScenarioContext): ScenarioStep
   return resolveValue(step as unknown as ScenarioValue, context) as unknown as ScenarioStep;
 }
 
+function resolveAssertOperand(value: ScenarioValue, context: ScenarioContext): ScenarioValue {
+  if (typeof value === "string") {
+    const whole = value.match(WHOLE_INTERPOLATION);
+    if (whole) {
+      try {
+        return resolveReference(whole[1]!, context);
+      } catch {
+        return MISSING as unknown as ScenarioValue;
+      }
+    }
+  }
+  return resolveValue(value, context);
+}
+
 function currentPlatform(): ScenarioPlatform | undefined {
   if (process.platform === "darwin") return "macos";
   if (process.platform === "linux") return "linux";
@@ -151,7 +166,20 @@ function assertPasses(step: AssertStep): boolean {
         return step.actual.includes(step.expected);
       }
       return Array.isArray(step.actual) && step.actual.some((value) => equal(value, step.expected));
-    case "exists": return step.actual !== null && step.actual !== undefined;
+    case "exists": return step.actual !== (MISSING as unknown as ScenarioValue);
+    case "type": {
+      const actual = step.actual as unknown;
+      if (step.expected === "missing") return actual === MISSING;
+      if (step.expected === "null") return actual === null;
+      if (step.expected === "array") return Array.isArray(actual);
+      if (step.expected === "object") {
+        return actual !== MISSING && actual !== null && typeof actual === "object" && !Array.isArray(actual);
+      }
+      if (step.expected === "string" || step.expected === "number" || step.expected === "boolean") {
+        return typeof actual === step.expected;
+      }
+      return false;
+    }
     case "gt": return orderedComparison(step.actual, step.expected, "gt");
     case "gte": return orderedComparison(step.actual, step.expected, "gte");
     case "lt": return orderedComparison(step.actual, step.expected, "lt");
@@ -160,6 +188,7 @@ function assertPasses(step: AssertStep): boolean {
 }
 
 function displayValue(value: ScenarioValue | undefined): string {
+  if ((value as unknown) === MISSING) return "<missing>";
   return value === undefined ? "undefined" : JSON.stringify(value);
 }
 
@@ -350,7 +379,13 @@ async function runStep(
 ): Promise<Omit<ScenarioStepResult, "phase" | "index" | "step">> {
   let resolvedStep: ScenarioStep;
   try {
-    resolvedStep = resolveStep(step, context);
+    resolvedStep = step.type === "assert"
+      ? {
+        ...step,
+        actual: resolveAssertOperand(step.actual, context),
+        ...(step.expected === undefined ? {} : { expected: resolveAssertOperand(step.expected, context) }),
+      }
+      : resolveStep(step, context);
   } catch (error) {
     return {
       status: "failed",
@@ -361,7 +396,9 @@ async function runStep(
   }
 
   const result = await executeStep(resolvedStep, timeoutMs, options);
-  if (step.saveAs) context.steps[step.saveAs] = savedValue(resolvedStep, result);
+  const containsMissing = resolvedStep.type === "assert" &&
+    ((resolvedStep.actual as unknown) === MISSING || (resolvedStep.expected as unknown) === MISSING);
+  if (step.saveAs && !containsMissing) context.steps[step.saveAs] = savedValue(resolvedStep, result);
   return result;
 }
 

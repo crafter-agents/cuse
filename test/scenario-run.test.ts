@@ -377,7 +377,97 @@ describe("scenario variables and saved step results", () => {
     expect(absent.status).toBe("failed");
     expect(absent.steps[1]).toMatchObject({
       status: "failed",
-      message: "missing reference: steps.target.data.checked",
+      attempts: 1,
+      message: "assertion exists failed: expected undefined, observed <missing>",
+    });
+  });
+
+  test("evaluates an absent JSON field as missing instead of a resolution error", async () => {
+    const result = await runScenario(scenario([
+      {
+        ...exec("console.log(JSON.stringify({ geometry: {} }))"),
+        stdout: "json",
+        saveAs: "result",
+      },
+      { type: "assert", actual: "${steps.result.json.value.geometry.gap}", operator: "exists" },
+    ]));
+
+    expect(result.status).toBe("failed");
+    expect(result.steps[1]).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      message: "assertion exists failed: expected undefined, observed <missing>",
+    });
+  });
+
+  test.each([
+    ["null", null],
+    ["false", false],
+    ["zero", 0],
+    ["empty string", ""],
+  ] as const)("treats a present JSON %s as existing", async (_label, value) => {
+    const result = await runScenario(scenario([
+      {
+        ...exec(`console.log(JSON.stringify({ value: ${JSON.stringify(value)} }))`),
+        stdout: "json",
+        saveAs: "result",
+      },
+      { type: "assert", actual: "${steps.result.json.value.value}", operator: "exists" },
+    ]));
+
+    expect(result.status).toBe("passed");
+    expect(result.steps[1]).toMatchObject({ status: "passed", attempts: 1 });
+  });
+
+  test("passes a matching primitive type assertion", async () => {
+    const result = await runScenario(scenario([
+      {
+        ...exec("console.log(JSON.stringify({ geometry: { gap: 12 } }))"),
+        stdout: "json",
+        saveAs: "result",
+      },
+      { type: "assert", actual: "${steps.result.json.value.geometry.gap}", operator: "type", expected: "number" },
+    ]));
+
+    expect(result.status).toBe("passed");
+    expect(result.steps[1]).toMatchObject({ status: "passed" });
+  });
+
+  test("fails mismatched and missing primitive type assertions readably", async () => {
+    const mismatch = await runScenario(scenario([
+      {
+        ...exec("console.log(JSON.stringify({ geometry: { gap: 12 } }))"),
+        stdout: "json",
+        saveAs: "result",
+      },
+      { type: "assert", actual: "${steps.result.json.value.geometry.gap}", operator: "type", expected: "string" },
+    ]));
+    const missing = await runScenario(scenario([
+      {
+        ...exec("console.log(JSON.stringify({ geometry: {} }))"),
+        stdout: "json",
+        saveAs: "result",
+      },
+      { type: "assert", actual: "${steps.result.json.value.geometry.gap}", operator: "type", expected: "number" },
+    ]));
+
+    expect(mismatch.steps[1]).toMatchObject({ status: "failed" });
+    expect(missing.steps[1]).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      message: "assertion type failed: expected \"number\", observed <missing>",
+    });
+  });
+
+  test("keeps missing references strict for non-assert steps", async () => {
+    const result = await runScenario(scenario([
+      { type: "exec", argv: [process.execPath, "${vars.absent}"] },
+    ]));
+
+    expect(result.steps[0]).toMatchObject({
+      status: "failed",
+      attempts: 0,
+      message: "missing reference: vars.absent",
     });
   });
 
@@ -418,7 +508,11 @@ describe("scenario variables and saved step results", () => {
     ]));
 
     expect(result.status).toBe("failed");
-    expect(result.steps[0]).toMatchObject({ status: "failed", message: "missing reference: vars.absent" });
+    expect(result.steps[0]).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      message: "assertion exists failed: expected undefined, observed <missing>",
+    });
   });
 
   test("fails references to steps that were never saved", async () => {
@@ -427,7 +521,11 @@ describe("scenario variables and saved step results", () => {
     ]));
 
     expect(result.status).toBe("failed");
-    expect(result.steps[0]).toMatchObject({ status: "failed", message: "missing reference: steps.never.stdout" });
+    expect(result.steps[0]).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      message: "assertion exists failed: expected undefined, observed <missing>",
+    });
   });
 
   test("preserves whole-token numeric values from saved assertions", async () => {
