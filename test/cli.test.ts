@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { act, exitCodeFor, fillTarget, macSessionUnreachable, pointScale, VERSION, type Result } from "../src/cli.ts";
@@ -228,6 +228,45 @@ test("compare persists discoverable parsed JSON evidence for both sides", async 
     }
   } finally {
     await Promise.all(evidenceRoots.map((root) => rm(root, { recursive: true, force: true })));
+    await rm(scratch, { recursive: true, force: true });
+  }
+});
+
+test("compare deletes evidence directories when --keep-evidence=false", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "cuse-cli-compare-test-"));
+  const scenario = join(scratch, "scenario.json");
+  const manifest = join(scratch, "comparison.json");
+  const comparisonRoots = async () => new Set(
+    (await readdir(tmpdir())).filter((entry) =>
+      entry.startsWith("cuse-compare-baseline-") ||
+      entry.startsWith("cuse-compare-candidate-")),
+  );
+
+  try {
+    await Bun.write(scenario, JSON.stringify({
+      version: 1,
+      name: "cleaned JSON evidence comparison",
+      vars: {},
+      defaultTimeoutMs: 1_000,
+      steps: [{
+        type: "exec",
+        argv: [process.execPath, "-e", "console.log(JSON.stringify({probe: 1}))"],
+        stdout: "json",
+      }],
+    }));
+    await Bun.write(manifest, JSON.stringify({
+      scenario,
+      baseline: { argv: ["true"], cwd: scratch },
+      candidate: { argv: ["true"], cwd: scratch },
+    }));
+    const before = await comparisonRoots();
+
+    const result = await act("compare", [manifest], { keepEvidence: false });
+
+    expect(result.ok).toBe(true);
+    expect((result.data as { evidence?: unknown }).evidence).toBeUndefined();
+    expect(await comparisonRoots()).toEqual(before);
+  } finally {
     await rm(scratch, { recursive: true, force: true });
   }
 });

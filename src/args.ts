@@ -67,6 +67,7 @@ export function parseArgs(argv: string[]): Parsed {
     protocol: flag("protocol"),
     durationMs: num(flag("duration")),
     steps: num(flag("steps")),
+    keepEvidence: flag("keep-evidence") !== "false",
     expectFront: flag("expect-front"),
     element: flag("element"),
     role: flag("role"),
