@@ -20,7 +20,7 @@ export type ComparisonVerdict =
   | { kind: "inconclusive_missing_evidence"; missing: string[] };
 
 export type ComparisonFieldPath =
-  `steps[${number}].${"run" | "cuse" | "message"}${string}`;
+  `steps[${number}].${"run" | "cuse" | "json" | "message"}${string}`;
 
 export type FieldComparison = {
   path: "status" | ComparisonFieldPath;
@@ -34,7 +34,7 @@ export type ScenarioComparison = {
   fields: FieldComparison[];
 };
 
-const FIELD_PATH = /^steps\[(\d+)]\.(run|cuse|message)(?:\.([A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*))?$/;
+const FIELD_PATH = /^steps\[(\d+)]\.(run|cuse|json|message)(?:\.([A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*))?$/;
 
 function isSetupFailure(input: ComparisonInput): input is SetupFailure {
   return input !== null && input !== undefined && "kind" in input && input.kind === "setup_failed";
@@ -51,7 +51,7 @@ function fieldValue(result: ScenarioRunResult, path: ComparisonFieldPath): unkno
   const step = result.steps[Number(match[1])];
   if (!step) return undefined;
 
-  let value: unknown = step[match[2] as "run" | "cuse" | "message"];
+  let value: unknown = step[match[2] as "run" | "cuse" | "json" | "message"];
   for (const segment of match[3]?.split(".") ?? []) {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
     value = (value as Record<string, unknown>)[segment];
@@ -77,7 +77,7 @@ function equal(left: unknown, right: unknown): boolean {
 /**
  * Compares already-collected scenario evidence without I/O. By default only
  * status is compared. Durations, timestamps, paths, and all step payloads are
- * excluded unless a caller selects a run, cuse, or message field explicitly.
+ * excluded unless a caller selects a run, cuse, json, or message field explicitly.
  */
 export function compareScenarioResults(
   baseline: ComparisonInput,

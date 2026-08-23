@@ -24,6 +24,17 @@ function result(status: ScenarioStatus, value = "PT72H", durationMs = 100): Scen
   };
 }
 
+function jsonResult(version: string): ScenarioRunResult {
+  const run = result("failed");
+  run.steps[0]!.json = {
+    ok: true,
+    value: { versions: { electron: version } },
+    source: "stdout",
+    byteCount: 33,
+  };
+  return run;
+}
+
 describe("scenario comparison", () => {
   test("reports a reproduced failure fixed by the candidate", () => {
     const comparison = compareScenarioResults(result("failed"), result("passed"));
@@ -93,6 +104,30 @@ describe("scenario comparison", () => {
       baseline: "PT72H",
       candidate: "PT0S",
       equal: false,
+    });
+  });
+
+  test("reports a selected nested JSON value as changed", () => {
+    const path = "steps[0].json.value.versions.electron" as const;
+    const comparison = compareScenarioResults(jsonResult("31.0.0"), jsonResult("32.0.0"), [path]);
+
+    expect(comparison.fields[1]).toEqual({
+      path,
+      baseline: "31.0.0",
+      candidate: "32.0.0",
+      equal: false,
+    });
+  });
+
+  test("reports a selected nested JSON value as unchanged", () => {
+    const path = "steps[0].json.value.versions.electron" as const;
+    const comparison = compareScenarioResults(jsonResult("32.0.0"), jsonResult("32.0.0"), [path]);
+
+    expect(comparison.fields[1]).toEqual({
+      path,
+      baseline: "32.0.0",
+      candidate: "32.0.0",
+      equal: true,
     });
   });
 

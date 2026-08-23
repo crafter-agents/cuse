@@ -1,4 +1,7 @@
 import { test, expect, describe } from "bun:test";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { act, exitCodeFor, fillTarget, macSessionUnreachable, pointScale, VERSION, type Result } from "../src/cli.ts";
 import type { OS } from "../src/os.ts";
 import { detectOS } from "../src/os.ts";
@@ -181,6 +184,52 @@ test("scenario rejects malformed JSON as bad usage", async () => {
 
   expect(result).toMatchObject({ ok: false, error: "scenario file must contain valid JSON" });
   expect(exitCodeFor(result)).toBe(2);
+});
+
+test("compare persists discoverable parsed JSON evidence for both sides", async () => {
+  const scratch = await mkdtemp(join(tmpdir(), "cuse-cli-compare-test-"));
+  const scenario = join(scratch, "scenario.json");
+  const manifest = join(scratch, "comparison.json");
+  const evidenceRoots: string[] = [];
+
+  try {
+    await Bun.write(scenario, JSON.stringify({
+      version: 1,
+      name: "JSON evidence comparison",
+      vars: {},
+      defaultTimeoutMs: 1_000,
+      steps: [{
+        type: "exec",
+        argv: [process.execPath, "-e", "console.log(JSON.stringify({probe: 1}))"],
+        stdout: "json",
+      }],
+    }));
+    await Bun.write(manifest, JSON.stringify({
+      scenario,
+      baseline: { argv: ["true"], cwd: scratch },
+      candidate: { argv: ["true"], cwd: scratch },
+    }));
+
+    const result = await act("compare", [manifest]);
+    const evidence = (result.data as {
+      evidence: { baseline: string; candidate: string };
+    }).evidence;
+
+    expect(result.ok).toBe(true);
+    for (const evidenceDir of [evidence.baseline, evidence.candidate]) {
+      evidenceRoots.push(dirname(evidenceDir));
+      expect((await stat(evidenceDir)).isDirectory()).toBe(true);
+      const ledger = Bun.file(join(evidenceDir, "steps.jsonl"));
+      expect(await ledger.exists()).toBe(true);
+      const events = (await ledger.text()).trim().split("\n").map((line) => JSON.parse(line));
+      expect(events.find((event) => event.type === "terminal")).toMatchObject({
+        result: { json: { ok: true, value: { probe: 1 } } },
+      });
+    }
+  } finally {
+    await Promise.all(evidenceRoots.map((root) => rm(root, { recursive: true, force: true })));
+    await rm(scratch, { recursive: true, force: true });
+  }
 });
 
 test("click rejects an unknown button before dispatch", async () => {
