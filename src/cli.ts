@@ -27,6 +27,7 @@ import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
 import { recognizeText } from "./ocr.ts";
 import { parseScenario, runScenario, type ScenarioValue } from "./scenario.ts";
 import { runComparison, type ComparisonManifest } from "./compare-run.ts";
+import { createStepEvidenceSink } from "./evidence.ts";
 import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
          successDetail, type WaitTarget } from "./wait.ts";
 import { probeProcess } from "./probes/process.ts";
@@ -748,7 +749,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
             error: `invalid scenario at ${parsed.error.path}: ${parsed.error.message}` };
         }
 
-        const runSide = async () => runScenario(parsed.scenario, {
+        const runSide = async (dirs: { workDir: string; evidenceDir: string }) => runScenario(parsed.scenario, {
           invokeCuse: async (action, args, options) => {
             const invoked = await act(action, args, options as Options);
             return {
@@ -758,14 +759,27 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
               ...(isScenarioValue(invoked.data) ? { data: invoked.data } : {}),
             };
           },
+          workDir: dirs.workDir,
+          onStepEvent: await createStepEvidenceSink(dirs.evidenceDir),
         });
-        const { report } = await runComparison(manifest, {
+        const { report, dirs } = await runComparison(manifest, {
           baseline: runSide,
           candidate: runSide,
         });
         const ok = report.verdict.kind !== "baseline_or_candidate_setup_failed" &&
           report.verdict.kind !== "inconclusive_missing_evidence";
-        return { ok, ...base, detail: report.headline, data: report };
+        return {
+          ok,
+          ...base,
+          detail: report.headline,
+          data: {
+            ...report,
+            evidence: {
+              baseline: dirs.baseline.evidenceDir,
+              candidate: dirs.candidate.evidenceDir,
+            },
+          },
+        };
       }
 
       case "os": return { ok: true, ...base, detail: os };
