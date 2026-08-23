@@ -15,7 +15,7 @@ describe("scenario schema", () => {
     if (result.ok) expect(result.scenario.steps[0]?.type).toBe("cuse");
   });
 
-  test("accepts a bounded default and all four step types", () => {
+  test("accepts a bounded default and all five step types", () => {
     const result = parseScenario({
       version: 1,
       name: "complete shape",
@@ -25,12 +25,47 @@ describe("scenario schema", () => {
       steps: [
         { type: "cuse", action: "launch", args: ["${vars.app}"], saveAs: "launch" },
         { type: "exec", argv: ["printf", "%s", "ok"], saveAs: "output" },
+        { type: "json", path: "evidence/result.json", saveAs: "document" },
         { type: "assert", actual: "${steps.output.stdout}", operator: "eq", expected: "ok" },
         { type: "wait", intervalMs: 100, step: { type: "assert", actual: true, operator: "eq", expected: true } },
       ],
       finally: [{ type: "exec", argv: ["killall", "Editor"] }],
     });
     expect(result.ok).toBe(true);
+  });
+
+  test.each([
+    [{ type: "json" }, "path must be a non-empty string"],
+    [{ type: "json", path: 42 }, "path must be a non-empty string"],
+    [{ type: "json", path: "" }, "path must be a non-empty string"],
+  ] as const)("rejects an invalid JSON step path %#", (step, message) => {
+    const result = parseScenario({
+      version: 1,
+      name: "invalid JSON step",
+      vars: {},
+      defaultTimeoutMs: 1_000,
+      steps: [step],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid_scenario", path: "$.steps[0].path", message },
+    });
+  });
+
+  test("rejects unknown JSON step keys", () => {
+    const result = parseScenario({
+      version: 1,
+      name: "invalid JSON step",
+      vars: {},
+      defaultTimeoutMs: 1_000,
+      steps: [{ type: "json", path: "result.json", format: "json" }],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid_scenario", path: "$.steps[0].format", message: "unknown key: format" },
+    });
   });
 
   test("rejects an unknown key", () => {

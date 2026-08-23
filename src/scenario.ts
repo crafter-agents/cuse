@@ -25,6 +25,11 @@ export type ExecStep = StepBase & {
   stdout?: "text" | "json";
 };
 
+export type JsonStep = StepBase & {
+  type: "json";
+  path: string;
+};
+
 export type AssertOperator = "eq" | "ne" | "contains" | "exists" | "gt" | "gte" | "lt" | "lte";
 export type AssertStep = StepBase & {
   type: "assert";
@@ -36,10 +41,10 @@ export type AssertStep = StepBase & {
 export type WaitStep = StepBase & {
   type: "wait";
   intervalMs?: number;
-  step: CuseStep | ExecStep | AssertStep;
+  step: CuseStep | ExecStep | JsonStep | AssertStep;
 };
 
-export type ScenarioStep = CuseStep | ExecStep | AssertStep | WaitStep;
+export type ScenarioStep = CuseStep | ExecStep | JsonStep | AssertStep | WaitStep;
 
 export type Scenario = {
   version: typeof SCENARIO_SCHEMA_VERSION;
@@ -138,6 +143,10 @@ function parseStep(value: unknown, path: string, defaultTimeoutMs?: number, nest
       if (value.env !== undefined && (!record(value.env) || Object.values(value.env).some((item) => typeof item !== "string"))) return fail(`${path}.env`, "env must contain string values");
       if (value.stdout !== undefined && value.stdout !== "text" && value.stdout !== "json") return fail(`${path}.stdout`, "stdout must be \"text\" or \"json\"");
       break;
+    case "json":
+      allowed = [...BASE_KEYS, "path"];
+      if (typeof value.path !== "string" || value.path.length === 0) return fail(`${path}.path`, "path must be a non-empty string");
+      break;
     case "assert":
       allowed = [...BASE_KEYS, "actual", "operator", "expected"];
       if (!("actual" in value)) return fail(`${path}.actual`, "actual is required");
@@ -154,7 +163,7 @@ function parseStep(value: unknown, path: string, defaultTimeoutMs?: number, nest
       }
       break;
     default:
-      return fail(`${path}.type`, "type must be cuse, exec, assert or wait");
+      return fail(`${path}.type`, "type must be cuse, exec, json, assert or wait");
   }
 
   const extra = unknownKey(value, new Set(allowed));

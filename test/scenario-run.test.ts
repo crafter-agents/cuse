@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -192,6 +192,84 @@ describe("scenario execution lifecycle", () => {
 });
 
 describe("scenario variables and saved step results", () => {
+  test("reads a JSON file under workDir and exposes its parsed value", async () => {
+    const workDir = mkdtempSync(join(tmpdir(), "cuse-scenario-json-"));
+    try {
+      writeFileSync(join(workDir, "result.json"), JSON.stringify({ nested: { answer: 42 } }));
+      const result = await runScenario(scenario([
+        { type: "json", path: "result.json", saveAs: "document" },
+        { type: "assert", actual: "${steps.document.value.nested.answer}", operator: "eq", expected: 42 },
+      ]), { workDir });
+
+      expect(result.status).toBe("passed");
+      expect(result.steps[0]!.json).toMatchObject({
+        ok: true,
+        value: { nested: { answer: 42 } },
+        source: "result.json",
+      });
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects JSON file paths that escape workDir through traversal", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "cuse-scenario-json-"));
+    const workDir = join(parent, "root");
+    try {
+      mkdirSync(workDir);
+      writeFileSync(join(parent, "outside.json"), "{\"secret\":true}");
+      const result = await runScenario(scenario([
+        { type: "json", path: "../outside.json" },
+      ]), { workDir });
+
+      expect(result.steps[0]).toMatchObject({
+        status: "failed",
+        json: { ok: false, kind: "outside_root" },
+      });
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects JSON file paths that escape workDir through a symlink", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "cuse-scenario-json-"));
+    const workDir = join(parent, "root");
+    try {
+      mkdirSync(workDir);
+      const outside = join(parent, "outside.json");
+      writeFileSync(outside, "{\"secret\":true}");
+      symlinkSync(outside, join(workDir, "linked.json"));
+      const result = await runScenario(scenario([
+        { type: "json", path: "linked.json" },
+      ]), { workDir });
+
+      expect(result.steps[0]).toMatchObject({
+        status: "failed",
+        json: { ok: false, kind: "outside_root" },
+      });
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ["missing file", "missing.json", "not_found"],
+    ["directory", "evidence", "not_file"],
+  ] as const)("rejects a JSON %s with a distinct kind", async (_label, path, kind) => {
+    const workDir = mkdtempSync(join(tmpdir(), "cuse-scenario-json-"));
+    try {
+      mkdirSync(join(workDir, "evidence"));
+      const result = await runScenario(scenario([{ type: "json", path }]), { workDir });
+
+      expect(result.steps[0]).toMatchObject({
+        status: "failed",
+        json: { ok: false, kind },
+      });
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
   test("parses opted-in JSON stdout and exposes nested values", async () => {
     const result = await runScenario(scenario([
       {
