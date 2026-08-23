@@ -1,4 +1,5 @@
 import { runWithTimeout, type RunResult } from "./exec.ts";
+import { parseJsonDocument, type ParsedJsonResult } from "./scenario-json.ts";
 import type {
   AssertStep,
   Scenario,
@@ -31,6 +32,7 @@ export type ScenarioStepResult = {
   timedOut: boolean;
   attempts: number;
   run?: RunResult;
+  json?: ParsedJsonResult;
   cuse?: CuseInvocationResult;
   message?: string;
 };
@@ -198,6 +200,17 @@ async function executeStep(
           message: error instanceof Error ? error.message : String(error),
         };
       }
+      if (step.stdout === "json" && run.code === 0 && !run.timedOut) {
+        const json = parseJsonDocument(run.stdout, "stdout");
+        return {
+          status: json.ok ? "passed" : "failed",
+          timedOut: false,
+          attempts: 1,
+          run,
+          json,
+          message: json.ok ? undefined : `stdout JSON parse failed (${json.kind}): ${json.message}`,
+        };
+      }
       return {
         status: run.timedOut ? "timed_out" : run.code === 0 ? "passed" : "failed",
         timedOut: run.timedOut,
@@ -289,13 +302,15 @@ function savedValue(
   result: Omit<ScenarioStepResult, "phase" | "index" | "step">,
 ): ScenarioValue {
   switch (step.type) {
-    case "exec":
-      return result.run ?? {
+    case "exec": {
+      const base = result.run ?? {
         code: -1,
         stdout: "",
         stderr: result.message ?? "command failed before producing a result",
         timedOut: result.timedOut,
       };
+      return result.json ? { ...base, json: result.json } : base;
+    }
     case "assert":
       return { passed: result.status === "passed", actual: step.actual, expected: step.expected ?? null };
     case "cuse": {

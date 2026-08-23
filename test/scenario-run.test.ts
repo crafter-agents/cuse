@@ -192,6 +192,69 @@ describe("scenario execution lifecycle", () => {
 });
 
 describe("scenario variables and saved step results", () => {
+  test("parses opted-in JSON stdout and exposes nested values", async () => {
+    const result = await runScenario(scenario([
+      {
+        ...exec("console.log(JSON.stringify({ nested: { answer: 42 } }))"),
+        stdout: "json",
+        saveAs: "command",
+      },
+      {
+        type: "assert",
+        actual: "${steps.command.json.value.nested.answer}",
+        operator: "eq",
+        expected: 42,
+      },
+    ]));
+
+    expect(result.status).toBe("passed");
+    expect(result.steps.map((step) => step.status)).toEqual(["passed", "passed"]);
+    expect(result.steps[0]!.json).toMatchObject({
+      ok: true,
+      value: { nested: { answer: 42 } },
+      source: "stdout",
+    });
+  });
+
+  test.each([
+    ["empty", "process.stdout.write('')", "empty"],
+    ["malformed", "process.stdout.write('{\"a\":')", "malformed"],
+    ["multiple documents", "console.log('{\"a\":1}'); console.log('{\"b\":2}')", "multiple_documents"],
+    ["trailing log", "process.stdout.write('{\"a\":1}\\nsome trailing log line')", "malformed"],
+    ["oversized", "process.stdout.write(JSON.stringify('x'.repeat(65_536)))", "oversized"],
+  ] as const)("fails %s JSON stdout distinctly", async (_label, script, kind) => {
+    const result = await runScenario(scenario([{
+      ...exec(script),
+      stdout: "json",
+      saveAs: "command",
+    }]));
+
+    expect(result.status).toBe("failed");
+    expect(result.steps[0]).toMatchObject({
+      status: "failed",
+      json: { ok: false, kind },
+    });
+    expect(result.steps[0]!.message).toContain(`stdout JSON parse failed (${kind})`);
+  });
+
+  test("preserves plain text stdout behavior without opt-in", async () => {
+    const stdout = '{"looks":"json"}';
+    const result = await runScenario(scenario([{
+      ...exec(`process.stdout.write('${stdout}')`),
+      saveAs: "command",
+    }, {
+      type: "assert",
+      actual: "${steps.command.stdout}",
+      operator: "eq",
+      expected: stdout,
+    }]));
+
+    expect(result.status).toBe("passed");
+    expect(result.steps[0]!.run?.stdout).toBe(stdout);
+    expect(result.steps[0]!.json).toBeUndefined();
+    expect(result.steps[0]).not.toHaveProperty("json");
+  });
+
   test("invokes cuse actions and exposes saved results to later steps", async () => {
     const calls: unknown[][] = [];
     const result = await runScenario(scenario([
