@@ -383,6 +383,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      - run: bun install
+      - run: bunx install-electron
       - run: bun build --compile src/cli.ts --outfile cuse
 
       - name: click a control found by name
@@ -438,6 +440,18 @@ jobs:
             exit 1; }
           echo "asserted a live control's observed value, and forced the assertion red once"
 
+      - name: assert real Electron runtime and geometry evidence
+        run: |
+          rm -f electron-pass.json electron-fail.json
+          ./cuse scenario scenarios/electron-probe.json --json | tee electron-pass.json
+          grep -q '"ok":true' electron-pass.json || {
+            echo "the Electron runtime/DPR assertion did not pass against the real fixture"; exit 1; }
+          ./cuse scenario scenarios/electron-probe-negative.json --json | tee electron-fail.json
+          grep -q '"ok":false' electron-fail.json || {
+            echo "the wrong-version assertion did not fail; the scenario is not discriminating real state"
+            exit 1; }
+          echo "asserted real Electron runtime and geometry evidence, and forced the assertion red once"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -449,6 +463,8 @@ jobs:
             target.txt
             assert-pass.json
             assert-fail.json
+            electron-pass.json
+            electron-fail.json
 
   # Every other Windows proof drives a window this repo builds for the purpose,
   # which is the bias the rest of this file exists to remove: a target you wrote
