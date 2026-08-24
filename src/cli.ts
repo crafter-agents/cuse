@@ -27,6 +27,7 @@ import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
 import { recognizeText } from "./ocr.ts";
 import { parseScenario, runScenario, type ScenarioValue } from "./scenario.ts";
 import { runComparison, type ComparisonManifest } from "./compare-run.ts";
+import { cleanupComparisonRunDirs } from "./compare-isolation.ts";
 import { createStepEvidenceSink } from "./evidence.ts";
 import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
          successDetail, type WaitTarget } from "./wait.ts";
@@ -77,6 +78,8 @@ export type Options = {
   protocol?: string;
   durationMs?: number;
   steps?: number;
+  /** delete compare's temp evidence and work directories once the report is built */
+  keepEvidence?: boolean;
 };
 
 export type Result = {
@@ -766,6 +769,9 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           baseline: runSide,
           candidate: runSide,
         });
+        if (opts.keepEvidence === false) {
+          await cleanupComparisonRunDirs(dirs);
+        }
         const ok = report.verdict.kind !== "baseline_or_candidate_setup_failed" &&
           report.verdict.kind !== "inconclusive_missing_evidence";
         return {
@@ -774,10 +780,12 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           detail: report.headline,
           data: {
             ...report,
-            evidence: {
-              baseline: dirs.baseline.evidenceDir,
-              candidate: dirs.candidate.evidenceDir,
-            },
+            ...(opts.keepEvidence === false ? {} : {
+              evidence: {
+                baseline: dirs.baseline.evidenceDir,
+                candidate: dirs.candidate.evidenceDir,
+              },
+            }),
           },
         };
       }
