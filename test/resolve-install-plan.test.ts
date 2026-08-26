@@ -71,9 +71,18 @@ describe("install-plan resolver", () => {
   });
 
   test("maps every published runner asset to a native plan", async () => {
-    const rows = (await readFile(assetContract, "utf8")).trim().split(/\r?\n/).map((row) => row.split("\t"));
+    const expectedAssets = [
+      { os: "macOS", arch: "ARM64", asset: "cuse-macos-arm64" },
+      { os: "macOS", arch: "X64", asset: "cuse-macos-x64" },
+      { os: "Linux", arch: "ARM64", asset: "cuse-linux-arm64" },
+      { os: "Linux", arch: "X64", asset: "cuse-linux-x64" },
+      { os: "Windows", arch: "X64", asset: "cuse-windows-x64.exe" },
+    ];
+    const assetRows = (await readFile(assetContract, "utf8")).trim().split(/\r?\n/);
 
-    for (const [os, arch, asset] of rows) {
+    expect(assetRows).toHaveLength(expectedAssets.length);
+
+    for (const { os, arch, asset } of expectedAssets) {
       const plan = await resolve(os, arch);
       expect(plan).toEqual({
         schemaVersion: 1,
