@@ -11,12 +11,13 @@ case "$version" in
   *[!A-Za-z0-9._-]*|'') echo "unsupported release version: $version" >&2; exit 1 ;;
 esac
 
-asset=$(awk -F '\t' -v os="$runner_os" -v arch="$runner_arch" \
-  '$1 == os && $2 == arch { print $3 }' "$script_dir/assets.tsv")
-if [[ -z "$asset" ]]; then
+install_plan=$("$script_dir/resolve-install-plan.sh" "$runner_os" "$runner_arch")
+supported=$(jq -r '.supported' <<<"$install_plan")
+if [[ "$supported" == "false" ]]; then
   echo "unsupported runner: ${runner_os}/${runner_arch}" >&2
   exit 1
 fi
+asset=$(jq -r '.asset' <<<"$install_plan")
 
 base_url=${CUSE_RELEASE_BASE_URL:-"https://github.com/crafter-agents/cuse/releases/download/${version}"}
 work_dir=$(mktemp -d)
