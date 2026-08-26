@@ -4,6 +4,8 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const resolver = join(root, "scripts", "action", "resolve-install-plan.sh");
+const powershellResolver = join(root, "scripts", "action", "resolve-install-plan.ps1");
+const powershellInstaller = join(root, "scripts", "action", "install.ps1");
 const assetContract = join(root, "scripts", "action", "assets.tsv");
 
 type InstallPlan = {
@@ -35,6 +37,39 @@ async function resolve(os: string, arch: string, override?: string): Promise<Ins
 }
 
 describe("install-plan resolver", () => {
+  test("PowerShell resolver mirrors the install-plan contract", async () => {
+    const source = await readFile(powershellResolver, "utf8");
+
+    for (const field of [
+      "schemaVersion",
+      "supported",
+      "runner",
+      "strategy",
+      "requestedArch",
+      "resolvedArch",
+      "asset",
+      "executablePath",
+      "remediation",
+    ]) {
+      expect(source).toContain(`"${field}"`);
+    }
+    expect(source).toContain('"native"');
+    expect(source).toContain('"unsupported"');
+    expect(source).toContain('"executable-path"');
+    expect(source).toContain('Join-Path $PSScriptRoot "assets.tsv"');
+    expect(source).toContain("ConvertTo-Json -Depth 3 -Compress");
+  });
+
+  test("PowerShell installer consumes the resolver plan", async () => {
+    const source = await readFile(powershellInstaller, "utf8");
+
+    expect(source).toContain('Join-Path $PSScriptRoot "resolve-install-plan.ps1"');
+    expect(source).toContain("ConvertFrom-Json");
+    expect(source).toContain("$plan.supported");
+    expect(source).toContain("$plan.asset");
+    expect(source).not.toContain("Import-Csv");
+  });
+
   test("maps every published runner asset to a native plan", async () => {
     const rows = (await readFile(assetContract, "utf8")).trim().split(/\r?\n/).map((row) => row.split("\t"));
 
