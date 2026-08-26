@@ -31,6 +31,9 @@ inputs:
     default: cuse-evidence
 
 outputs:
+  install-plan-json:
+    description: Install plan for the current runner
+    value: ${{ steps.resolve-plan-unix.outputs.plan-json || steps.resolve-plan-windows.outputs.plan-json }}
   executable-path:
     description: Absolute path to the selected cuse executable
     value: ${{ steps.select-unix.outputs.path || steps.select-windows.outputs.path }}
@@ -69,6 +72,31 @@ runs:
         CUSE_LINUX_ACCESSIBILITY: ${{ inputs.linux-accessibility }}
       run: |
         & "${env:GITHUB_ACTION_PATH}/scripts/action/prepare-windows.ps1" $env:CUSE_LINUX_DISPLAY $env:CUSE_LINUX_ACCESSIBILITY
+
+    - id: resolve-plan-unix
+      name: Resolve cuse install plan
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        plan_json="$("${GITHUB_ACTION_PATH}/scripts/action/resolve-install-plan.sh" "${RUNNER_OS}" "${RUNNER_ARCH}")"
+        echo "plan-json=${plan_json}" >> "${GITHUB_OUTPUT}"
+        {
+          echo "### cuse install plan"
+          echo
+          echo '```json'
+          echo "${plan_json}"
+          echo '```'
+        } >> "${GITHUB_STEP_SUMMARY}"
+
+    - id: resolve-plan-windows
+      name: Resolve cuse install plan
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $planJson = & "${env:GITHUB_ACTION_PATH}/scripts/action/resolve-install-plan.ps1" -RunnerOS $env:RUNNER_OS -RunnerArch $env:RUNNER_ARCH
+        "plan-json=$planJson" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        @("### cuse install plan", "", '```json', $planJson, '```') |
+          Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
     - id: install-unix
       name: Download and verify cuse
