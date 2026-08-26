@@ -14,7 +14,7 @@ if ($Version -notmatch '^[A-Za-z0-9._-]+$') {
 $assets = Import-Csv (Join-Path $PSScriptRoot "assets.tsv") -Delimiter "`t" -Header OS, Arch, Asset
 $match = $assets | Where-Object { $_.OS -eq $RunnerOS -and $_.Arch -eq $RunnerArch }
 if ($null -eq $match) {
-  throw "unsupported runner: $RunnerOS/$RunnerArch"
+  throw "unsupported runner: $RunnerOS/$RunnerArch (set the executable-path input to skip installation and provide your own binary)"
 }
 $asset = $match.Asset
 

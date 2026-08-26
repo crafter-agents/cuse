@@ -101,6 +101,10 @@ By default, the Action downloads the requested release and verifies its
 checksum. Repository CI may set `executable-path` to an executable built from
 the checked-out source; this explicit test seam skips the release download.
 
+The Action supports macOS (arm64, x64), Linux (arm64, x64), and Windows (x64).
+Windows arm64 is unsupported by the released binary; set `executable-path` to
+run on that runner with a binary you built yourself.
+
 Named `cuse` rather than `cu` because `cu(1)` from UUCP already ships with macOS
 and most Linux distributions, and shadowing it would be a nasty surprise for
 anyone who actually uses it.
