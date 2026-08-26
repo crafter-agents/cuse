@@ -160,6 +160,37 @@ stopped answering, `xdotool` on a wedged X server. Every action carries a
 deadline and reports a timeout rather than blocking an agent that has no
 timeout of its own.
 
+## GitHub Action
+
+Read `steps.<id>.outputs.install-plan-json` before assuming the runner is
+supported. The compact JSON has these fields:
+
+- `schemaVersion`: integer, currently `1`
+- `supported`: boolean
+- `runner`: object with string `os` and `arch`
+- `strategy`: `native`, `override`, or `unsupported`
+- `requestedArch`: string
+- `resolvedArch`: string or `null`
+- `asset`: string or `null`
+- `executablePath`: string or `null`
+- `remediation`: `null`, or an object with string `kind` and `message`
+
+Branch on `supported` first. Report `remediation.message` when it is false,
+then use `strategy` to distinguish a release asset from an explicit executable:
+
+```sh
+plan='${{ steps.cuse.outputs.install-plan-json }}'
+if [ "$(jq -r '.supported' <<<"$plan")" != true ]; then
+  jq -r '.remediation.message' <<<"$plan" >&2
+  exit 1
+fi
+
+case "$(jq -r '.strategy' <<<"$plan")" in
+  native) asset=$(jq -r '.asset' <<<"$plan") ;;
+  override) executable=$(jq -r '.executablePath' <<<"$plan") ;;
+esac
+```
+
 ## When not to use cuse
 
 Use **agent-browser** for web pages inside a browser: it has the DOM,

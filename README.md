@@ -101,6 +101,40 @@ By default, the Action downloads the requested release and verifies its
 checksum. Repository CI may set `executable-path` to an executable built from
 the checked-out source; this explicit test seam skips the release download.
 
+### Install plan output
+
+The `install-plan-json` output is one line of compact JSON describing the
+runner and how cuse can be installed. For example, a native Linux plan is:
+
+```json
+{"schemaVersion":1,"supported":true,"runner":{"os":"Linux","arch":"X64"},"strategy":"native","requestedArch":"X64","resolvedArch":"X64","asset":"cuse-linux-x64","executablePath":null,"remediation":null}
+```
+
+`schemaVersion` is the integer schema version, currently `1`. `supported`
+states whether the plan can proceed. `runner` contains the `os` and `arch`
+reported by GitHub Actions. `strategy` is `native`, `override`, or
+`unsupported`. `requestedArch` preserves the requested runner architecture,
+while `resolvedArch` is the selected release architecture or `null`. `asset`
+names the release asset or is `null`; `executablePath` contains an explicit
+executable path for an override or is `null`. `remediation` is `null` for a
+supported plan. For an unsupported plan, it is an object with string `kind`
+and `message` fields explaining how to proceed.
+
+A later workflow step can branch on the output with `jq`:
+
+```sh
+plan='${{ steps.cuse.outputs.install-plan-json }}'
+if [ "$(jq -r '.supported' <<<"$plan")" != true ]; then
+  jq -r '.remediation.message' <<<"$plan" >&2
+  exit 1
+fi
+
+case "$(jq -r '.strategy' <<<"$plan")" in
+  native) echo "using release asset $(jq -r '.asset' <<<"$plan")" ;;
+  override) echo "using executable $(jq -r '.executablePath' <<<"$plan")" ;;
+esac
+```
+
 Named `cuse` rather than `cu` because `cu(1)` from UUCP already ships with macOS
 and most Linux distributions, and shadowing it would be a nasty surprise for
 anyone who actually uses it.
