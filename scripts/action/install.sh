@@ -14,7 +14,7 @@ esac
 asset=$(awk -F '\t' -v os="$runner_os" -v arch="$runner_arch" \
   '$1 == os && $2 == arch { print $3 }' "$script_dir/assets.tsv")
 if [[ -z "$asset" ]]; then
-  echo "unsupported runner: ${runner_os}/${runner_arch}" >&2
+  echo "unsupported runner: ${runner_os}/${runner_arch} (set the executable-path input to skip installation and provide your own binary)" >&2
   exit 1
 fi
 
