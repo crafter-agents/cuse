@@ -5,6 +5,7 @@ import { displaysCmd, parseDisplays } from "./display.ts";
 import { isSessionLocked, LOCK_QUERY } from "./session.ts";
 import { runWithTimeout, type RunResult } from "./exec.ts";
 import type { MacPermission } from "./macpermissions.ts";
+import { which } from "./node-compat.ts";
 
 export type DoctorStatus = "ok" | "degraded" | "unsupported" | "error";
 export type DoctorVerdict = "healthy" | "degraded" | "unusable";
@@ -132,7 +133,7 @@ export async function runDoctor(os: OS, probe: DoctorProbe): Promise<{ verdict: 
 
 export const realDoctorProbe: DoctorProbe = {
   env: process.env,
-  has: (tool) => Boolean(Bun.which(tool)),
+  has: (tool) => Boolean(which(tool)),
   read: (argv, timeoutMs) => runWithTimeout(argv, timeoutMs),
   permission: async (permission) => {
     const { readMacPermission } = await import("./macpermissions.ts");

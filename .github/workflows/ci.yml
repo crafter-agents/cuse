@@ -15,9 +15,44 @@ jobs:
       - name: test (pure core, runs everywhere)
         run: bun test
       - name: build standalone binary
-        run: bun build --compile src/cli.ts --outfile cuse-${{ matrix.os }}
+        run: bun build --compile --external koffi src/cli.ts --outfile cuse-${{ matrix.os }}
       - name: os detection
         run: ./cuse-${{ matrix.os }} os --json
+
+  node-only-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - name: build npm tarball
+        run: npm pack
+      - name: install and run with Bun absent
+        shell: pwsh
+        run: |
+          $bunDirectory = Split-Path (Get-Command bun -ErrorAction Stop).Source
+          $env:PATH = (($env:PATH -split [IO.Path]::PathSeparator | Where-Object { $_ -ne $bunDirectory }) -join [IO.Path]::PathSeparator)
+          if (Get-Command bun -ErrorAction SilentlyContinue) {
+            throw "Bun is still available on PATH"
+          }
+
+          $tarball = (Get-ChildItem cuse-cli-*.tgz | Select-Object -First 1).FullName
+          npm install --global $tarball
+          if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
+
+          $output = cuse os | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "cuse os failed with exit code $LASTEXITCODE" }
+          Write-Host $output
+          if ($output -notmatch '\b(macos|linux|windows)\b') {
+            throw "cuse os did not print a recognized OS name"
+          }
 
   # capture is the action that actually depends on the machine having a screen.
   # Hard gate on all three platforms: no `|| true`, and the PNG is decoded to
@@ -34,7 +69,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
       - name: build
-        run: bun build --compile src/cli.ts --outfile cuse
+        run: bun build --compile --external koffi src/cli.ts --outfile cuse
 
       # Linux runners are headless: no display, no imagemagick. cuse reports both
       # as structured errors instead of failing opaquely - assert that it does.
@@ -92,7 +127,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
       - name: build
-        run: bun build --compile src/cli.ts --outfile cuse
+        run: bun build --compile --external koffi src/cli.ts --outfile cuse
 
       - name: linux - type into an xterm under Xvfb
         if: runner.os == 'Linux'
@@ -343,7 +378,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
-      - run: bun build --compile src/cli.ts --outfile cuse
+      - run: bun build --compile --external koffi src/cli.ts --outfile cuse
       - name: bring up AT-SPI and press a GTK control by name
         run: |
           sudo apt-get update -qq
@@ -385,7 +420,7 @@ jobs:
         with: { bun-version: latest }
       - run: bun install
       - run: bunx install-electron
-      - run: bun build --compile src/cli.ts --outfile cuse
+      - run: bun build --compile --external koffi src/cli.ts --outfile cuse
 
       - name: click a control found by name
         run: |
@@ -482,7 +517,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
-      - run: bun build --compile src/cli.ts --outfile cuse
+      - run: bun build --compile --external koffi src/cli.ts --outfile cuse
       - name: drive an application nobody here wrote
         shell: bash
         run: |
@@ -538,7 +573,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
-      - run: bun build --compile src/cli.ts --outfile cuse
+      - run: bun build --compile --external koffi src/cli.ts --outfile cuse
       - name: why the alias starts nothing
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scenarios/win-notepad-evidence.ps1
       - name: reproduce it
@@ -552,7 +587,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
-      - run: bun build --compile src/cli.ts --outfile cuse
+      - run: bun build --compile --external koffi src/cli.ts --outfile cuse
       - name: the documented workaround, proved on disk
         shell: bash
         run: ./scenarios/verify-workaround.sh ./cuse

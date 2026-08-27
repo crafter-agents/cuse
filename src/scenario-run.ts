@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { runWithTimeout, type RunResult } from "./exec.ts";
 import { parseJsonDocument, readJsonFile, type ParsedJsonResult } from "./scenario-json.ts";
 import type {
@@ -319,7 +320,7 @@ async function executeStep(
             message: "wait step timed out",
           };
         }
-        await Bun.sleep(Math.min(intervalMs, Math.max(0, deadline - Date.now())));
+        await sleep(Math.min(intervalMs, Math.max(0, deadline - Date.now())));
         if (Date.now() >= deadline) {
           return {
             ...result,
