@@ -15,8 +15,6 @@
 // Not unit-testable, like `macos.ts` - it does not compute anything, it asks the
 // window server. What is testable lives in `parseProcessList` below and in
 // elements.ts. What proves the rest is CI reading a real TextEdit window.
-import { dlopen, FFIType as T, ptr } from "bun:ffi";
-
 const AX_PATH = "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices";
 const CF_PATH = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
 
@@ -32,8 +30,16 @@ const POINT = 1, SIZE = 2;   // AXValueType
  * an opaque 64-bit integer, which is what it is. Getting this wrong segfaults
  * on the first string, which is how it was found.
  */
-function open() {
-  const ax = dlopen(AX_PATH, {
+type Symbols = {
+  ax: Record<string, (...args: any[]) => any>;
+  cf: Record<string, (...args: any[]) => any>;
+  ptr: (value: ArrayBufferView) => any;
+};
+
+async function open(): Promise<Symbols> {
+  if (typeof Bun !== "undefined") {
+    const { dlopen, FFIType: T, ptr } = await import("bun:ffi");
+    const ax = dlopen(AX_PATH, {
     AXUIElementCreateApplication: { args: [T.i32], returns: T.u64 },
     AXUIElementCopyAttributeValue: { args: [T.u64, T.u64, T.ptr], returns: T.i32 },
     AXUIElementCopyMultipleAttributeValues: { args: [T.u64, T.u64, T.u32, T.ptr], returns: T.i32 },
@@ -42,7 +48,7 @@ function open() {
     AXValueGetTypeID: { args: [], returns: T.u64 },
     AXIsProcessTrusted: { args: [], returns: T.bool },
   });
-  const cf = dlopen(CF_PATH, {
+    const cf = dlopen(CF_PATH, {
     CFStringCreateWithCString: { args: [T.u64, T.ptr, T.u32], returns: T.u64 },
     CFStringGetCString: { args: [T.u64, T.ptr, T.i64, T.u32], returns: T.bool },
     CFStringGetTypeID: { args: [], returns: T.u64 },
@@ -57,12 +63,46 @@ function open() {
     CFNumberGetTypeID: { args: [], returns: T.u64 },
     CFNumberGetValue: { args: [T.u64, T.i64, T.ptr], returns: T.bool },
   });
-  return { ax: ax.symbols, cf: cf.symbols };
+    return { ax: ax.symbols, cf: cf.symbols, ptr } as Symbols;
+  }
+
+  const koffi = await import("koffi");
+  const ax = koffi.load(AX_PATH);
+  const cf = koffi.load(CF_PATH);
+  return {
+    ax: {
+      AXUIElementCreateApplication: ax.func("AXUIElementCreateApplication", "uint64", ["int32"]),
+      AXUIElementCopyAttributeValue: ax.func("AXUIElementCopyAttributeValue", "int32", ["uint64", "uint64", "void *"]),
+      AXUIElementCopyMultipleAttributeValues: ax.func("AXUIElementCopyMultipleAttributeValues", "int32", ["uint64", "uint64", "uint32", "void *"]),
+      AXUIElementSetMessagingTimeout: ax.func("AXUIElementSetMessagingTimeout", "int32", ["uint64", "float"]),
+      AXValueGetValue: ax.func("AXValueGetValue", "bool", ["uint64", "uint32", "void *"]),
+      AXValueGetTypeID: ax.func("AXValueGetTypeID", "uint64", []),
+      AXIsProcessTrusted: ax.func("AXIsProcessTrusted", "bool", []),
+    },
+    cf: {
+      CFStringCreateWithCString: cf.func("CFStringCreateWithCString", "uint64", ["uint64", "void *", "uint32"]),
+      CFStringGetCString: cf.func("CFStringGetCString", "bool", ["uint64", "void *", "int64", "uint32"]),
+      CFStringGetTypeID: cf.func("CFStringGetTypeID", "uint64", []),
+      CFArrayCreate: cf.func("CFArrayCreate", "uint64", ["uint64", "void *", "int64", "uint64"]),
+      CFArrayGetCount: cf.func("CFArrayGetCount", "int64", ["uint64"]),
+      CFArrayGetValueAtIndex: cf.func("CFArrayGetValueAtIndex", "uint64", ["uint64", "int64"]),
+      CFArrayGetTypeID: cf.func("CFArrayGetTypeID", "uint64", []),
+      CFGetTypeID: cf.func("CFGetTypeID", "uint64", ["uint64"]),
+      CFRelease: cf.func("CFRelease", "void", ["uint64"]),
+      CFBooleanGetTypeID: cf.func("CFBooleanGetTypeID", "uint64", []),
+      CFBooleanGetValue: cf.func("CFBooleanGetValue", "bool", ["uint64"]),
+      CFNumberGetTypeID: cf.func("CFNumberGetTypeID", "uint64", []),
+      CFNumberGetValue: cf.func("CFNumberGetValue", "bool", ["uint64", "int64", "void *"]),
+    },
+    ptr: (value) => value,
+  };
 }
 
-type Syms = ReturnType<typeof open>;
-let lib: Syms | null = null;
-const syms = (): Syms => (lib ??= open());
+let lib: Symbols | null = null;
+async function syms(): Promise<Symbols> {
+  if (!lib) lib = await open();
+  return lib;
+}
 
 export type Raw = {
   role: string; name: string; x: number; y: number; width: number; height: number;
@@ -83,8 +123,8 @@ export type Raw = {
 export type Walk = { rows: Raw[]; stopped?: "deadline" | "limit" };
 
 /** Is this process allowed to read other apps' trees at all? */
-export function trusted(): boolean {
-  return syms().ax.AXIsProcessTrusted();
+export async function trusted(): Promise<boolean> {
+  return (await syms()).ax.AXIsProcessTrusted();
 }
 
 export const UNTRUSTED =
@@ -99,9 +139,9 @@ export const UNTRUSTED =
  * timeout is the fourth - an app that stops answering must not hold the walk
  * open, which is the same lesson `exec.ts` learned about child processes.
  */
-export function elementsOfPid(pid: number, limit = 300, maxDepth = 12,
-                              deadline = Date.now() + 15_000): Walk {
-  const { ax, cf } = syms();
+export async function elementsOfPid(pid: number, limit = 300, maxDepth = 12,
+                                    deadline = Date.now() + 15_000): Promise<Walk> {
+  const { ax, cf, ptr } = await syms();
   const STRING_ID = cf.CFStringGetTypeID();
   const ARRAY_ID = cf.CFArrayGetTypeID();
   const VALUE_ID = ax.AXValueGetTypeID();

@@ -8,7 +8,6 @@
 // CGPoint is two doubles and, in the arm64 calling convention, a homogeneous
 // float aggregate travels in the same float registers as two separate doubles -
 // which is why the struct can be declared this way through FFI.
-import { dlopen, FFIType as T, type Pointer } from "bun:ffi";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { MouseButton } from "./plan.ts";
 
@@ -28,34 +27,70 @@ const MODIFIER_FLAGS: Record<string, number> = {
   cmd: 0x00100000,
 };
 
-let lib: ReturnType<typeof open> | null = null;
-let scroll2Lib: ReturnType<typeof openScroll2> | null = null;
+type Pointer = number | bigint;
+type Symbols = {
+  cg: Record<string, (...args: any[]) => any>;
+  cf: Record<string, (...args: any[]) => any>;
+};
 
-function open() {
-  const cg = dlopen(CG_PATH, {
-    CGWarpMouseCursorPosition: { args: [T.double, T.double], returns: T.i32 },
-    CGEventCreate: { args: [T.ptr], returns: T.ptr },
-    CGEventCreateMouseEvent: { args: [T.ptr, T.u32, T.double, T.double, T.u32], returns: T.ptr },
-    CGEventCreateScrollWheelEvent: { args: [T.ptr, T.u32, T.u32, T.i32], returns: T.ptr },
-    CGEventSetType: { args: [T.ptr, T.u32], returns: T.void },
-    CGEventSetFlags: { args: [T.ptr, T.u32], returns: T.void },
-    CGEventSetIntegerValueField: { args: [T.ptr, T.u32, T.i64], returns: T.void },
-    CGEventPost: { args: [T.u32, T.ptr], returns: T.void },
-  });
-  const cf = dlopen(CF_PATH, { CFRelease: { args: [T.ptr], returns: T.void } });
-  return { cg: cg.symbols, cf: cf.symbols };
+let lib: Symbols | null = null;
+let scroll2Lib: Symbols["cg"] | null = null;
+
+async function open(): Promise<Symbols> {
+  if (typeof Bun !== "undefined") {
+    const { dlopen, FFIType: T } = await import("bun:ffi");
+    const cg = dlopen(CG_PATH, {
+      CGWarpMouseCursorPosition: { args: [T.double, T.double], returns: T.i32 },
+      CGEventCreate: { args: [T.ptr], returns: T.ptr },
+      CGEventCreateMouseEvent: { args: [T.ptr, T.u32, T.double, T.double, T.u32], returns: T.ptr },
+      CGEventCreateScrollWheelEvent: { args: [T.ptr, T.u32, T.u32, T.i32], returns: T.ptr },
+      CGEventSetType: { args: [T.ptr, T.u32], returns: T.void },
+      CGEventSetFlags: { args: [T.ptr, T.u32], returns: T.void },
+      CGEventSetIntegerValueField: { args: [T.ptr, T.u32, T.i64], returns: T.void },
+      CGEventPost: { args: [T.u32, T.ptr], returns: T.void },
+    });
+    const cf = dlopen(CF_PATH, { CFRelease: { args: [T.ptr], returns: T.void } });
+    return { cg: cg.symbols, cf: cf.symbols } as Symbols;
+  }
+
+  const koffi = await import("koffi");
+  const cg = koffi.load(CG_PATH);
+  const cf = koffi.load(CF_PATH);
+  return {
+    cg: {
+      CGWarpMouseCursorPosition: cg.func("CGWarpMouseCursorPosition", "int32", ["double", "double"]),
+      CGEventCreate: cg.func("CGEventCreate", "void *", ["void *"]),
+      CGEventCreateMouseEvent: cg.func("CGEventCreateMouseEvent", "void *", ["void *", "uint32", "double", "double", "uint32"]),
+      CGEventCreateScrollWheelEvent: cg.func("CGEventCreateScrollWheelEvent", "void *", ["void *", "uint32", "uint32", "int32"]),
+      CGEventSetType: cg.func("CGEventSetType", "void", ["void *", "uint32"]),
+      CGEventSetFlags: cg.func("CGEventSetFlags", "void", ["void *", "uint64"]),
+      CGEventSetIntegerValueField: cg.func("CGEventSetIntegerValueField", "void", ["void *", "uint32", "int64"]),
+      CGEventPost: cg.func("CGEventPost", "void", ["uint32", "void *"]),
+    },
+    cf: { CFRelease: cf.func("CFRelease", "void", ["void *"]) },
+  };
 }
 
 // Bun FFI bindings have fixed arity, while this CoreGraphics function is
 // variadic. Load the same symbol separately for its two-wheel form.
-function openScroll2() {
-  return dlopen(CG_PATH, {
-    CGEventCreateScrollWheelEvent: { args: [T.ptr, T.u32, T.u32, T.i32, T.i32], returns: T.ptr },
-  }).symbols;
+async function openScroll2(): Promise<Symbols["cg"]> {
+  if (typeof Bun !== "undefined") {
+    const { dlopen, FFIType: T } = await import("bun:ffi");
+    return dlopen(CG_PATH, {
+      CGEventCreateScrollWheelEvent: { args: [T.ptr, T.u32, T.u32, T.i32, T.i32], returns: T.ptr },
+    }).symbols as Symbols["cg"];
+  }
+  const koffi = await import("koffi");
+  const cg = koffi.load(CG_PATH);
+  return {
+    CGEventCreateScrollWheelEvent: cg.func(
+      "CGEventCreateScrollWheelEvent", "void *", ["void *", "uint32", "uint32", "int32", "int32"],
+    ),
+  };
 }
 
-function syms() {
-  if (!lib) lib = open();
+async function syms(): Promise<Symbols> {
+  if (!lib) lib = await open();
   return lib;
 }
 
@@ -64,16 +99,16 @@ function need(p: Pointer | null, what: string): Pointer {
   return p;
 }
 
-export function warp(x: number, y: number): void {
-  const err = syms().cg.CGWarpMouseCursorPosition(x, y);
+export async function warp(x: number, y: number): Promise<void> {
+  const err = (await syms()).cg.CGWarpMouseCursorPosition(x, y);
   if (err !== 0) throw new Error(`CGWarpMouseCursorPosition failed (${err})`);
 }
 
-export function click(count: number, x?: number, y?: number,
-                      button: MouseButton = "left", modifiers: string[] = []): void {
-  const { cg, cf } = syms();
+export async function click(count: number, x?: number, y?: number,
+                            button: MouseButton = "left", modifiers: string[] = []): Promise<void> {
+  const { cg, cf } = await syms();
   const at = x !== undefined && y !== undefined;
-  if (at) warp(x!, y!);
+  if (at) await warp(x!, y!);
   const spec = {
     left: { down: LEFT_DOWN, up: LEFT_UP, number: 0 },
     right: { down: RIGHT_DOWN, up: RIGHT_UP, number: 1 },
@@ -103,8 +138,8 @@ export function click(count: number, x?: number, y?: number,
 
 export async function drag(fromX: number, fromY: number, toX: number, toY: number,
                            durationMs: number, steps: number): Promise<void> {
-  const { cg, cf } = syms();
-  warp(fromX, fromY);
+  const { cg, cf } = await syms();
+  await warp(fromX, fromY);
 
   const post = (type: number, x: number, y: number) => {
     const event = need(cg.CGEventCreateMouseEvent(null, type, x, y, 0), "drag event");
@@ -123,11 +158,11 @@ export async function drag(fromX: number, fromY: number, toX: number, toY: numbe
   post(LEFT_UP, toX, toY);
 }
 
-export function scroll(lines: number, axis: "vertical" | "horizontal" = "vertical"): void {
-  const { cg, cf } = syms();
+export async function scroll(lines: number, axis: "vertical" | "horizontal" = "vertical"): Promise<void> {
+  const { cg, cf } = await syms();
   const event = axis === "vertical"
     ? need(cg.CGEventCreateScrollWheelEvent(null, UNIT_LINE, 1, lines), "scroll event")
-    : need((scroll2Lib ??= openScroll2()).CGEventCreateScrollWheelEvent(
+    : need((scroll2Lib ??= await openScroll2()).CGEventCreateScrollWheelEvent(
       null, UNIT_LINE, 2, 0, lines), "horizontal scroll event");
   cg.CGEventPost(HID_TAP, event);
   cf.CFRelease(event);

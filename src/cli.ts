@@ -284,7 +284,7 @@ async function macElements(app: string, timeoutMs: number,
   // Trust is per process, and cuse's is not System Events'. A machine can have
   // AppleScript reading trees perfectly while this binary is refused, so the
   // slow route stays reachable rather than turning that into "no controls".
-  if (!ax.trusted()) return systemEventsElements(app, timeoutMs);
+  if (!(await ax.trusted())) return systemEventsElements(app, timeoutMs);
 
   const argv = runningAppsCmd();
   const r = await runWithTimeout(argv, Math.min(timeoutMs, 10_000));
@@ -298,7 +298,7 @@ async function macElements(app: string, timeoutMs: number,
   if (!target) {
     throw new Error(`no running application matching '${app}' - what is running: ${describeApps(apps)}`);
   }
-  const walk = ax.elementsOfPid(target.pid, limit ?? 300, depth ?? 12, Date.now() + timeoutMs);
+  const walk = await ax.elementsOfPid(target.pid, limit ?? 300, depth ?? 12, Date.now() + timeoutMs);
   // A tree that stopped early is missing controls, and a caller who cannot tell
   // that apart from an app without them will conclude the wrong thing.
   const truncated = walk.stopped === "deadline"
