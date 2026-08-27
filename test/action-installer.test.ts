@@ -48,6 +48,11 @@ async function install(os: string, arch: string, destination: string) {
 }
 
 describe("release installer", () => {
+  test("delegates asset resolution to the shared install-plan resolver", async () => {
+    const source = await readFile(installer, "utf8");
+    expect(source).toContain("resolve-install-plan.sh");
+  });
+
   test("the shared contract maps every published runner asset", async () => {
     const rows = (await readFile(assetContract, "utf8")).trim().split(/\r?\n/).map((row) => row.split("\t"));
     expect(rows).toEqual([

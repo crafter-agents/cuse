@@ -11,12 +11,17 @@ if ($Version -notmatch '^[A-Za-z0-9._-]+$') {
   throw "unsupported release version: $Version"
 }
 
-$assets = Import-Csv (Join-Path $PSScriptRoot "assets.tsv") -Delimiter "`t" -Header OS, Arch, Asset
-$match = $assets | Where-Object { $_.OS -eq $RunnerOS -and $_.Arch -eq $RunnerArch }
-if ($null -eq $match) {
-  throw "unsupported runner: $RunnerOS/$RunnerArch (set the executable-path input to skip installation and provide your own binary)"
+$plan = & (Join-Path $PSScriptRoot "resolve-install-plan.ps1") $RunnerOS $RunnerArch |
+  ConvertFrom-Json
+if (-not $plan.supported) {
+  $message = $plan.remediation.message
+  if ($message) {
+    throw "unsupported runner: $RunnerOS/$RunnerArch ($message)"
+  } else {
+    throw "unsupported runner: $RunnerOS/$RunnerArch"
+  }
 }
-$asset = $match.Asset
+$asset = $plan.asset
 
 $baseUrl = if ($env:CUSE_RELEASE_BASE_URL) {
   $env:CUSE_RELEASE_BASE_URL.TrimEnd('/')
