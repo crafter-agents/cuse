@@ -9,6 +9,7 @@
 // float aggregate travels in the same float registers as two separate doubles -
 // which is why the struct can be declared this way through FFI.
 import { dlopen, FFIType as T, type Pointer } from "bun:ffi";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { MouseButton } from "./plan.ts";
 
 const CG_PATH = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
@@ -113,7 +114,7 @@ export async function drag(fromX: number, fromY: number, toX: number, toY: numbe
 
   post(LEFT_DOWN, fromX, fromY);
   for (let index = 1; index <= steps; index++) {
-    await Bun.sleep(durationMs / steps);
+    await sleep(durationMs / steps);
     const progress = index / steps;
     post(LEFT_DRAGGED,
       fromX + (toX - fromX) * progress,

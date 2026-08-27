@@ -3,8 +3,9 @@
 // Structured Result + --json. Actions delegate to pure builders (tested).
 
 import { resolve } from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { setTimeout as sleep } from "node:timers/promises";
 import { inflateSync, deflateSync } from "node:zlib";
 import { detectOS, chordToOS, normalizeMods, type OS } from "./os.ts";
 import { captureCmd, typeCmd, launchCmd, focusCmd, comboKey, videoCmd } from "./commands.ts";
@@ -38,6 +39,7 @@ import { probeScheduledTask } from "./probes/scheduled-task.ts";
 import { probeService } from "./probes/service.ts";
 import type { PortProtocol } from "./probes/types.ts";
 import { realDoctorProbe, runDoctor, type DoctorVerdict } from "./doctor.ts";
+import { which } from "./node-compat.ts";
 
 export type Options = {
   force?: boolean; sameUnder?: number; timeoutMs?: number;
@@ -156,16 +158,25 @@ async function captureTo(os: OS, out: string, timeoutMs: number,
   const problem = explainFailure(plan.argv, r, timeoutMs);
   if (problem) throw new Error(problem);
   if (r.stdout.length === 0) throw new Error(`${plan.argv[0]} produced no dump (is DISPLAY reachable?)`);
-  await Bun.write(out, encodePNG(decodeXWD(r.stdout), deflate));
+  await writeFile(out, encodePNG(decodeXWD(r.stdout), deflate));
 }
 
 async function loadImage(path: string): Promise<Image> {
-  return decodePNG(new Uint8Array(await Bun.file(path).arrayBuffer()), inflate);
+  return decodePNG(new Uint8Array(await readFile(path)), inflate);
+}
+
+async function fileSize(path: string): Promise<number> {
+  try {
+    return (await stat(path)).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw error;
+  }
 }
 
 /** Look at the frame that was just captured and say whether it is worth acting on. */
 async function inspectFrame(path: string, bytes: number): Promise<string | undefined> {
-  const raw = new Uint8Array(await Bun.file(path).arrayBuffer());
+  const raw = new Uint8Array(await readFile(path));
   const header = readHeader(raw);
   try {
     // Exact answer when the frame decodes: every pixel identical or not.
@@ -187,7 +198,7 @@ type SessionFrameProbe = {
 const realSessionFrameProbe: SessionFrameProbe = {
   capture: captureTo,
   inspect: inspectFrame,
-  size: async (path) => (await Bun.file(path).exists()) ? Bun.file(path).size : 0,
+  size: fileSize,
   remove: async (path) => { await rm(path, { force: true }); },
   tempPath: () => resolve(tmpdir(), `cuse-session-${process.pid}-${crypto.randomUUID()}.png`),
 };
@@ -210,7 +221,7 @@ export async function macSessionUnreachable(timeoutMs: number,
   }
 }
 
-const probe: Probe = { env: process.env, has: (tool) => Bun.which(tool) !== null };
+const probe: Probe = { env: process.env, has: (tool) => which(tool) !== null };
 
 /** Ask the OS whether the screen is locked; null when it cannot be asked. */
 async function readLockState(os: OS): Promise<string | null> {
@@ -227,7 +238,7 @@ async function captureCoverage(os: OS, path: string, timeoutMs: number,
                                display?: number): Promise<string | undefined> {
   const displays = await listDisplays(os, timeoutMs);
   if (displays.length < 2) return undefined;
-  const header = readHeader(new Uint8Array(await Bun.file(path).arrayBuffer()));
+  const header = readHeader(new Uint8Array(await readFile(path)));
   if (!header) return undefined;
   const scale = await pointScale(os, header.width);
   const origin = frameOrigin(displays, os, display);
@@ -644,7 +655,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
         let contents: string;
         try {
-          contents = await Bun.file(resolve(path)).text();
+          contents = await readFile(resolve(path), "utf8");
         } catch {
           return { ok: false, ...base, error: `scenario file not found: ${path}` };
         }
@@ -696,7 +707,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
         let contents: string;
         try {
-          contents = await Bun.file(resolve(path)).text();
+          contents = await readFile(resolve(path), "utf8");
         } catch {
           return { ok: false, ...base, error: `comparison manifest not found: ${path}` };
         }
@@ -735,7 +746,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
 
         let scenarioContents: string;
         try {
-          scenarioContents = await Bun.file(resolve(manifest.scenario)).text();
+          scenarioContents = await readFile(resolve(manifest.scenario), "utf8");
         } catch {
           return { ok: false, ...base, error: `scenario file not found: ${manifest.scenario}` };
         }
@@ -826,14 +837,14 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
             const full = await loadImage(fullPath);
             const rect = windowCropRect(win, await pointScale(os, full.width));
             const img = crop(full, rect.x, rect.y, rect.width, rect.height);
-            await Bun.write(out, encodePNG(img, deflate));
+            await writeFile(out, encodePNG(img, deflate));
           } finally {
             await rm(tempDir, { recursive: true, force: true });
           }
         } else {
           await captureTo(os, out, timeoutMs, run, opts.display);
         }
-        const size = (await Bun.file(out).exists()) ? Bun.file(out).size : 0;
+        const size = await fileSize(out);
         if (size === 0) return { ok: false, ...base, error: "no file produced" };
         // Two ways a frame can be useless: it shows nothing, or it shows only
         // part of the desk. The second is silent on a second monitor, where
@@ -859,7 +870,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           // The deadline has to outlast the recording, or cuse kills its own
           // camera: a 30s clip under a 15s timeout is a file that never closes.
           await runner(action, Math.max(timeoutMs, seconds * 1000 + 15_000))(argv);
-          const size = (await Bun.file(out).exists()) ? Bun.file(out).size : 0;
+          const size = await fileSize(out);
           if (size === 0) return { ok: false, ...base, error: `${argv[0]} produced no file` };
           return { ok: true, ...base, detail: `${seconds}s of video, ${size}B -> ${out}`,
                    data: { path: out, bytes: size, seconds } };
@@ -872,7 +883,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           const out = resolve(`record-${String(i).padStart(3, "0")}.png`);
           await captureTo(os, out, timeoutMs, run);
           files.push(out);
-          if (i < count - 1) await Bun.sleep(gapMs);
+          if (i < count - 1) await sleep(gapMs);
         }
         return { ok: true, ...base, detail: `${files.length} frames every ${gapMs}ms`, data: files };
       }
@@ -915,7 +926,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           if (Date.now() > deadline) {
             return { ok: false, ...base, error: `settle ran out of time after ${i - 1} checks` };
           }
-          await Bun.sleep(wait);
+          await sleep(wait);
           const next = 1 - cur;
           await captureTo(os, frames[next]!, timeoutMs, run);
           last = diffImages(await loadImage(frames[cur]!), await loadImage(frames[next]!), 30, quietUnder);
@@ -944,7 +955,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       case "screen": {
         const shot = resolve("screen-probe.png");
         await captureTo(os, shot, timeoutMs, run, opts.display);
-        const img = readHeader(new Uint8Array(await Bun.file(shot).arrayBuffer()));
+        const img = readHeader(new Uint8Array(await readFile(shot)));
         if (!img) return { ok: false, ...base, error: "capture produced something that is not a PNG" };
         const scale = await pointScale(os, img.width);
         const displays = await listDisplays(os, timeoutMs);
@@ -1027,7 +1038,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           if (left === 0) throw new Error("the wait deadline expired during the platform query");
           return Promise.race([
             probe,
-            Bun.sleep(left).then(() => { throw new Error("the wait deadline expired during the platform query"); }),
+            sleep(left).then(() => { throw new Error("the wait deadline expired during the platform query"); }),
           ]);
         };
 
@@ -1076,7 +1087,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
               error: timeoutReason(target, gone, elapsed, blind ?? sample),
               data: { waitedMs: elapsed, looks } };
           }
-          await Bun.sleep(gap);
+          await sleep(gap);
         }
       }
 
@@ -1154,7 +1165,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         // that window rather than a quarter of the way into the screen.
         const k = await pointScale(os, full.width);
         const img = crop(full, Number(x) * k, Number(y) * k, Number(w) * k, Number(h) * k);
-        await Bun.write(resolve(out), encodePNG(img, deflate));
+        await writeFile(resolve(out), encodePNG(img, deflate));
         return { ok: true, ...base, detail: `${img.width}x${img.height} -> ${out}` };
       }
 

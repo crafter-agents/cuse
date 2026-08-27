@@ -21,6 +21,7 @@ import { closeSync, openSync, readFileSync } from "node:fs";
 import { spawn as nodeSpawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 export type RunResult = { code: number; stdout: string; stderr: string; timedOut: boolean };
 export type BytesResult = { code: number; stdout: Uint8Array; stderr: string; timedOut: boolean };
@@ -138,13 +139,13 @@ async function runWindows(argv: string[], ms: number, bytes: boolean, cwd?: stri
   proc.once("exit", (code) => { exitCode = code ?? -1; });
   const deadline = Date.now() + ms;
   while (exitCode === undefined && spawnError === undefined && Date.now() < deadline) {
-    await Bun.sleep(Math.min(20, Math.max(1, deadline - Date.now())));
+    await sleep(Math.min(20, Math.max(1, deadline - Date.now())));
   }
   if (spawnError) throw spawnError;
   if (exitCode === undefined) {
     proc.removeAllListeners();
     proc.unref();
-    if (proc.pid !== undefined) await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+    if (proc.pid !== undefined) await Promise.race([killTree(proc.pid), sleep(2000)]);
     return bytes
       ? { code: -1, stdout: new Uint8Array(0), stderr: "", timedOut: true }
       : { code: -1, stdout: "", stderr: "", timedOut: true };
@@ -197,7 +198,7 @@ export async function runWithTimeout(
     // Clean up the tree, but bounded: reaping must not become the new way to
     // hang. Without waiting at all, cuse exits first and leaves the grandchild
     // running - observed with a wrapper script holding a sleep.
-    await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+    await Promise.race([killTree(proc.pid), sleep(2000)]);
     try { proc.kill(); } catch { /* gone */ }
   }
   return result;
@@ -224,7 +225,7 @@ export async function runBytes(argv: string[], ms: number): Promise<BytesResult>
     stdout.cancel();
     stderr.cancel();
     proc.unref();
-    await Promise.race([killTree(proc.pid), Bun.sleep(2000)]);
+    await Promise.race([killTree(proc.pid), sleep(2000)]);
     try { proc.kill(); } catch { /* gone */ }
   }
   return result;
