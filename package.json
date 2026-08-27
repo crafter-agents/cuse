@@ -19,19 +19,22 @@
     "agents"
   ],
   "engines": {
-    "bun": ">=1.2.0"
+    "node": ">=20.0.0"
   },
   "bin": {
-    "cuse": "./src/cli.ts"
+    "cuse": "./dist/cli.js"
   },
   "files": [
+    "dist",
     "src",
     "skills",
     "README.md"
   ],
   "scripts": {
     "test": "bun test",
-    "build": "bun build --compile src/cli.ts --outfile dist/cuse"
+    "build": "bun build --compile src/cli.ts --outfile dist/cuse",
+    "build:node": "bun run scripts/build-node.ts",
+    "prepack": "bun run build:node"
   },
   "devDependencies": {
     "electron": "^43.4.1"
