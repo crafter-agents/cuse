@@ -19,6 +19,41 @@ jobs:
       - name: os detection
         run: ./cuse-${{ matrix.os }} os --json
 
+  node-only-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - name: build npm tarball
+        run: npm pack
+      - name: install and run with Bun absent
+        shell: pwsh
+        run: |
+          $bunDirectory = Split-Path (Get-Command bun -ErrorAction Stop).Source
+          $env:PATH = (($env:PATH -split [IO.Path]::PathSeparator | Where-Object { $_ -ne $bunDirectory }) -join [IO.Path]::PathSeparator)
+          if (Get-Command bun -ErrorAction SilentlyContinue) {
+            throw "Bun is still available on PATH"
+          }
+
+          $tarball = (Get-ChildItem cuse-cli-*.tgz | Select-Object -First 1).FullName
+          npm install --global $tarball
+          if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
+
+          $output = cuse os | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "cuse os failed with exit code $LASTEXITCODE" }
+          Write-Host $output
+          if ($output -notmatch '\b(macos|linux|windows)\b') {
+            throw "cuse os did not print a recognized OS name"
+          }
+
   # capture is the action that actually depends on the machine having a screen.
   # Hard gate on all three platforms: no `|| true`, and the PNG is decoded to
   # prove it is a real frame rather than a 0-byte file.
