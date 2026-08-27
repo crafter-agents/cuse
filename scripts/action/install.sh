@@ -14,7 +14,8 @@ esac
 install_plan=$("$script_dir/resolve-install-plan.sh" "$runner_os" "$runner_arch")
 supported=$(jq -r '.supported' <<<"$install_plan")
 if [[ "$supported" == "false" ]]; then
-  echo "unsupported runner: ${runner_os}/${runner_arch}" >&2
+  message=$(jq -r '.remediation.message // empty' <<<"$install_plan")
+  echo "unsupported runner: ${runner_os}/${runner_arch}${message:+ ($message)}" >&2
   exit 1
 fi
 asset=$(jq -r '.asset' <<<"$install_plan")

@@ -14,7 +14,12 @@ if ($Version -notmatch '^[A-Za-z0-9._-]+$') {
 $plan = & (Join-Path $PSScriptRoot "resolve-install-plan.ps1") $RunnerOS $RunnerArch |
   ConvertFrom-Json
 if (-not $plan.supported) {
-  throw "unsupported runner: $RunnerOS/$RunnerArch"
+  $message = $plan.remediation.message
+  if ($message) {
+    throw "unsupported runner: $RunnerOS/$RunnerArch ($message)"
+  } else {
+    throw "unsupported runner: $RunnerOS/$RunnerArch"
+  }
 }
 $asset = $plan.asset
 

@@ -135,6 +135,10 @@ case "$(jq -r '.strategy' <<<"$plan")" in
 esac
 ```
 
+The Action supports macOS (arm64, x64), Linux (arm64, x64), and Windows (x64).
+Windows arm64 is unsupported by the released binary; set `executable-path` to
+run on that runner with a binary you built yourself.
+
 Named `cuse` rather than `cu` because `cu(1)` from UUCP already ships with macOS
 and most Linux distributions, and shadowing it would be a nasty surprise for
 anyone who actually uses it.

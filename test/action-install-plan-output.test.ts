@@ -33,7 +33,8 @@ describe("Action install plan output", () => {
 
   test("publishes either runner plan as a top-level output", async () => {
     const source = await readFile(action, "utf8");
-    const output = source.match(/  install-plan-json:\n(?:    .+\n)+/)?.[0];
+    const normalized = source.replace(/\r\n/g, "\n");
+    const output = normalized.match(/  install-plan-json:\n(?:    .+\n)+/)?.[0];
 
     expect(output).toContain("value:");
     expect(output).toContain("steps.resolve-plan-unix.outputs.plan-json");

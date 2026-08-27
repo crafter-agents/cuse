@@ -1,5 +1,5 @@
 name: Run cuse scenario
-description: Install cuse and run a checked-in scenario with structured outputs
+description: Install cuse (macOS arm64/x64, Linux arm64/x64, Windows x64; Windows arm64 unsupported, use executable-path) and run a checked-in scenario with structured outputs
 
 inputs:
   scenario:
