@@ -8,6 +8,7 @@ const result = await Bun.build({
   outdir: "dist",
   naming: "cli.js",
   target: "node",
+  external: ["koffi"],
 });
 
 if (!result.success) {
