@@ -17,10 +17,10 @@
 //      cuse returns; it does not stay to collect what a wedged process might
 //      still write.
 
-import { closeSync, openSync, readFileSync } from "node:fs";
+import { accessSync, closeSync, constants, openSync, readFileSync } from "node:fs";
 import { spawn as nodeSpawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -120,6 +120,26 @@ function joinBytes(chunks: Uint8Array[]): Uint8Array {
 
 const asText = (chunks: Uint8Array[]): string => new TextDecoder().decode(joinBytes(chunks));
 
+function assertExecutable(command: string, cwd?: string): void {
+  const mode = process.platform === "win32" ? constants.F_OK : constants.X_OK;
+  const hasPath = isAbsolute(command) || command.includes("/") || command.includes("\\");
+  const paths = hasPath
+    ? [isAbsolute(command) ? command : resolve(cwd ?? process.cwd(), command)]
+    : (process.env.PATH ?? "").split(delimiter).map((dir) => join(dir, command));
+  const extensions = process.platform === "win32"
+    ? ["", ...(process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")]
+    : [""];
+  for (const path of paths) {
+    for (const extension of extensions) {
+      try {
+        accessSync(path + extension, mode);
+        return;
+      } catch { /* keep looking */ }
+    }
+  }
+  throw new Error(`Executable not found: ${command}`);
+}
+
 async function runWindows(argv: string[], ms: number, bytes: false, cwd?: string): Promise<RunResult>;
 async function runWindows(argv: string[], ms: number, bytes: true, cwd?: string): Promise<BytesResult>;
 async function runWindows(argv: string[], ms: number, bytes: boolean, cwd?: string): Promise<RunResult | BytesResult> {
@@ -131,11 +151,19 @@ async function runWindows(argv: string[], ms: number, bytes: boolean, cwd?: stri
   // Bun's Windows subprocess handle can remain referenced after unref() when
   // the child is stuck in UI Automation. Node's ChildProcess releases that
   // handle predictably, while taskkill still provides whole-tree cleanup.
-  const proc = nodeSpawn(argv[0]!, argv.slice(1), {
-    stdio: ["ignore", stdoutFd, stderrFd],
-    windowsHide: true,
-    cwd,
-  });
+  let proc: ReturnType<typeof nodeSpawn>;
+  try {
+    assertExecutable(argv[0]!, cwd);
+    proc = nodeSpawn(argv[0]!, argv.slice(1), {
+      stdio: ["ignore", stdoutFd, stderrFd],
+      windowsHide: true,
+      cwd,
+    });
+  } catch (error) {
+    closeSync(stdoutFd);
+    closeSync(stderrFd);
+    throw error;
+  }
   closeSync(stdoutFd);
   closeSync(stderrFd);
   let spawnError: Error | undefined;
@@ -175,10 +203,16 @@ export async function runWithTimeout(
   opts?: { cwd?: string },
 ): Promise<RunResult> {
   if (process.platform === "win32") return runWindows(argv, ms, false, opts?.cwd);
-  const proc = nodeSpawn(argv[0]!, argv.slice(1), {
-    stdio: ["ignore", "pipe", "pipe"],
-    cwd: opts?.cwd,
-  });
+  let proc: ReturnType<typeof nodeSpawn>;
+  try {
+    assertExecutable(argv[0]!, opts?.cwd);
+    proc = nodeSpawn(argv[0]!, argv.slice(1), {
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd: opts?.cwd,
+    });
+  } catch (error) {
+    return Promise.reject(error);
+  }
   const exited = new Promise<number>((resolve, reject) => {
     proc.once("error", reject);
     proc.once("exit", (code) => resolve(code ?? -1));
@@ -215,7 +249,13 @@ export async function runWithTimeout(
  *  and reading it as text would quietly corrupt every pixel. */
 export async function runBytes(argv: string[], ms: number): Promise<BytesResult> {
   if (process.platform === "win32") return runWindows(argv, ms, true, undefined);
-  const proc = nodeSpawn(argv[0]!, argv.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
+  let proc: ReturnType<typeof nodeSpawn>;
+  try {
+    assertExecutable(argv[0]!);
+    proc = nodeSpawn(argv[0]!, argv.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    return Promise.reject(error);
+  }
   const exited = new Promise<number>((resolve, reject) => {
     proc.once("error", reject);
     proc.once("exit", (code) => resolve(code ?? -1));
