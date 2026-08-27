@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { Readable } from "node:stream";
 import type { SetupFailure } from "./compare.ts";
 
 export type SetupCommand = {
@@ -25,18 +27,22 @@ export async function runSetup(
   const executable = command.argv[0]!;
 
   try {
-    const proc = Bun.spawn(command.argv, {
+    const proc = spawn(executable, command.argv.slice(1), {
       cwd: command.cwd,
-      stdout: "pipe",
-      stderr: "pipe",
-      stdin: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    proc.stdout.resume();
+    const stderrText = new Response(Readable.toWeb(proc.stderr)).text();
+    const exited = new Promise<number>((resolve, reject) => {
+      proc.once("error", reject);
+      proc.once("exit", (code) => resolve(code ?? -1));
     });
     const timedOut = Symbol("timedOut");
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<typeof timedOut>((resolve) => {
       timer = setTimeout(() => resolve(timedOut), timeoutMs);
     });
-    const result = await Promise.race([proc.exited, timeout]);
+    const result = await Promise.race([exited, timeout]);
     if (timer !== undefined) clearTimeout(timer);
 
     if (result === timedOut) {
@@ -53,7 +59,7 @@ export async function runSetup(
 
     if (result === 0) return { ok: true };
 
-    const stderr = await new Response(proc.stderr).text();
+    const stderr = await stderrText;
     const firstLine = stderr.split("\n").map((line) => line.trim()).find(Boolean);
     return {
       kind: "setup_failed",

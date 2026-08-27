@@ -21,6 +21,7 @@ import { closeSync, openSync, readFileSync } from "node:fs";
 import { spawn as nodeSpawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 
 export type RunResult = { code: number; stdout: string; stderr: string; timedOut: boolean };
@@ -53,9 +54,13 @@ async function descendants(pid: number): Promise<number[]> {
   const walk = async (parent: number, depth: number): Promise<void> => {
     if (depth > 5) return; // a process tree this deep is a loop, not a backend
     try {
-      const p = Bun.spawn(["pgrep", "-P", String(parent)], { stdout: "pipe", stderr: "ignore" });
-      const out = await new Response(p.stdout).text();
-      await p.exited;
+      const p = nodeSpawn("pgrep", ["-P", String(parent)], { stdio: ["ignore", "pipe", "ignore"] });
+      const exited = new Promise<void>((resolve, reject) => {
+        p.once("error", reject);
+        p.once("exit", () => resolve());
+      });
+      const out = await new Response(Readable.toWeb(p.stdout)).text();
+      await exited;
       for (const line of out.trim().split("\n").filter(Boolean)) {
         const child = Number(line);
         if (Number.isFinite(child)) { found.push(child); await walk(child, depth + 1); }
@@ -170,18 +175,20 @@ export async function runWithTimeout(
   opts?: { cwd?: string },
 ): Promise<RunResult> {
   if (process.platform === "win32") return runWindows(argv, ms, false, opts?.cwd);
-  const proc = Bun.spawn(argv, {
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
+  const proc = nodeSpawn(argv[0]!, argv.slice(1), {
+    stdio: ["ignore", "pipe", "pipe"],
     cwd: opts?.cwd,
   });
-  const stdout = readPipe(proc.stdout, asText);
-  const stderr = readPipe(proc.stderr, asText);
+  const exited = new Promise<number>((resolve, reject) => {
+    proc.once("error", reject);
+    proc.once("exit", (code) => resolve(code ?? -1));
+  });
+  const stdout = readPipe(Readable.toWeb(proc.stdout), asText);
+  const stderr = readPipe(Readable.toWeb(proc.stderr), asText);
 
   const collect = (async (): Promise<RunResult> => {
     const [out, err] = await Promise.all([stdout.value, stderr.value]);
-    return { code: await proc.exited, stdout: out, stderr: err, timedOut: false };
+    return { code: await exited, stdout: out, stderr: err, timedOut: false };
   })();
 
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -198,7 +205,7 @@ export async function runWithTimeout(
     // Clean up the tree, but bounded: reaping must not become the new way to
     // hang. Without waiting at all, cuse exits first and leaves the grandchild
     // running - observed with a wrapper script holding a sleep.
-    await Promise.race([killTree(proc.pid), sleep(2000)]);
+    if (proc.pid !== undefined) await Promise.race([killTree(proc.pid), sleep(2000)]);
     try { proc.kill(); } catch { /* gone */ }
   }
   return result;
@@ -208,12 +215,16 @@ export async function runWithTimeout(
  *  and reading it as text would quietly corrupt every pixel. */
 export async function runBytes(argv: string[], ms: number): Promise<BytesResult> {
   if (process.platform === "win32") return runWindows(argv, ms, true, undefined);
-  const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-  const stdout = readPipe(proc.stdout, joinBytes);
-  const stderr = readPipe(proc.stderr, asText);
+  const proc = nodeSpawn(argv[0]!, argv.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
+  const exited = new Promise<number>((resolve, reject) => {
+    proc.once("error", reject);
+    proc.once("exit", (code) => resolve(code ?? -1));
+  });
+  const stdout = readPipe(Readable.toWeb(proc.stdout), joinBytes);
+  const stderr = readPipe(Readable.toWeb(proc.stderr), asText);
   const collect = (async (): Promise<BytesResult> => {
     const [out, err] = await Promise.all([stdout.value, stderr.value]);
-    return { code: await proc.exited, stdout: out, stderr: err, timedOut: false };
+    return { code: await exited, stdout: out, stderr: err, timedOut: false };
   })();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<BytesResult>((res) => {
@@ -225,7 +236,7 @@ export async function runBytes(argv: string[], ms: number): Promise<BytesResult>
     stdout.cancel();
     stderr.cancel();
     proc.unref();
-    await Promise.race([killTree(proc.pid), sleep(2000)]);
+    if (proc.pid !== undefined) await Promise.race([killTree(proc.pid), sleep(2000)]);
     try { proc.kill(); } catch { /* gone */ }
   }
   return result;
