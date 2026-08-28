@@ -15,7 +15,7 @@ function toolResult(result: Result) {
   };
 }
 
-export async function startMcpServer(act: Act): Promise<void> {
+export async function startMcpServer(act: Act, opts: { allowInput?: boolean } = {}): Promise<void> {
   const server = new McpServer({ name: "cuse", version: "0.2.1" });
 
   server.registerTool("windows", {
@@ -65,6 +65,41 @@ export async function startMcpServer(act: Act): Promise<void> {
     annotations: readOnly,
   }, async ({ before, after, sameUnder }) =>
     toolResult(await act("diff", [before, after], { sameUnder })));
+
+  if (opts.allowInput) {
+    const inputInjecting = { readOnlyHint: false, destructiveHint: true } as const;
+
+    server.registerTool("click", {
+      description: "Click at coordinates or at a resolved target.",
+      inputSchema: {
+        x: z.number().optional(),
+        y: z.number().optional(),
+        window: z.string().optional(),
+        find: z.string().optional(),
+        element: z.string().optional(),
+        role: z.string().optional(),
+        button: z.enum(["left", "right", "middle"]).optional(),
+        modifiers: z.string().optional(),
+        timeoutMs: z.number().int().positive().optional(),
+      },
+      annotations: inputInjecting,
+    }, async ({ x, y, window, find, element, role, button, modifiers, timeoutMs }) =>
+      toolResult(await act("click", x === undefined ? [] : [String(x), String(y)], {
+        window, find, element, role, button, modifiers, timeoutMs,
+      })));
+
+    server.registerTool("type", {
+      description: "Type text using the operating system input mechanism.",
+      inputSchema: { text: z.string() },
+      annotations: inputInjecting,
+    }, async ({ text }) => toolResult(await act("type", [text], {})));
+
+    server.registerTool("key", {
+      description: "Send a key chord such as cmd+c.",
+      inputSchema: { chord: z.string() },
+      annotations: inputInjecting,
+    }, async ({ chord }) => toolResult(await act("key", [chord], {})));
+  }
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

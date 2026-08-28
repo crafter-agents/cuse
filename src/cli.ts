@@ -43,6 +43,7 @@ import { which } from "./node-compat.ts";
 import { startMcpServer } from "./mcp.ts";
 
 export type Options = {
+  allowInput?: boolean;
   force?: boolean; sameUnder?: number; timeoutMs?: number;
   /** aim at a window by title instead of at absolute coordinates */
   window?: string;
@@ -1467,7 +1468,7 @@ if (import.meta.main) {
     process.exit(0);
   }
   if (action === "mcp") {
-    await startMcpServer(act);
+    await startMcpServer(act, { allowInput: opts.allowInput ?? false });
     process.exit(0);
   }
   const waitWatchdog = action === "wait" ? setTimeout(() => {

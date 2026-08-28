@@ -50,6 +50,7 @@ export function parseArgs(argv: string[]): Parsed {
   const atRaw = flag("at");
 
   const opts: Options = {
+    allowInput: argv.includes("--allow-input"),
     force: argv.includes("--force"),
     gone: argv.includes("--gone"),
     sameUnder: flag("same-under") !== undefined ? Number(flag("same-under")) : 1,

@@ -31,4 +31,33 @@ describe("MCP server", () => {
       await client.close();
     }
   });
+
+  test("exposes annotated input tools only when explicitly allowed", async () => {
+    const client = new Client({ name: "cuse-test", version: "1.0.0" });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [cli, "mcp", "--allow-input"],
+      cwd: root,
+      stderr: "pipe",
+    });
+
+    try {
+      await client.connect(transport);
+      const response = await client.listTools();
+      const names = response.tools.map((tool) => tool.name);
+
+      expect(new Set(names)).toEqual(new Set([
+        "windows", "elements", "capture", "os", "diff", "click", "type", "key",
+      ]));
+      for (const tool of response.tools) {
+        if (["click", "type", "key"].includes(tool.name)) {
+          expect(tool.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+        } else {
+          expect(tool.annotations).toMatchObject({ readOnlyHint: true });
+        }
+      }
+    } finally {
+      await client.close();
+    }
+  });
 });
