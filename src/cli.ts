@@ -40,6 +40,7 @@ import { probeService } from "./probes/service.ts";
 import type { PortProtocol } from "./probes/types.ts";
 import { realDoctorProbe, runDoctor, type DoctorVerdict } from "./doctor.ts";
 import { which } from "./node-compat.ts";
+import { startMcpServer } from "./mcp.ts";
 
 export type Options = {
   force?: boolean; sameUnder?: number; timeoutMs?: number;
@@ -1463,6 +1464,10 @@ if (import.meta.main) {
   const { action, args, opts, json: wantJson } = parseArgs(argv);
   if (action === "serve") {
     await serve({ app: opts.app, window: opts.window, timeoutMs: opts.timeoutMs, force: opts.force });
+    process.exit(0);
+  }
+  if (action === "mcp") {
+    await startMcpServer(act);
     process.exit(0);
   }
   const waitWatchdog = action === "wait" ? setTimeout(() => {
