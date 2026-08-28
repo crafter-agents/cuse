@@ -99,6 +99,11 @@ export async function startMcpServer(act: Act, opts: { allowInput?: boolean } = 
       inputSchema: { chord: z.string() },
       annotations: inputInjecting,
     }, async ({ chord }) => toolResult(await act("key", [chord], {})));
+
+    server.registerTool("paste", {
+      description: "Paste the clipboard contents using the operating system input mechanism.",
+      annotations: inputInjecting,
+    }, async () => toolResult(await act("paste", [], {})));
   }
 
   const transport = new StdioServerTransport();

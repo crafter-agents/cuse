@@ -23,7 +23,7 @@ describe("MCP server", () => {
 
       expect(new Set(names)).toEqual(new Set(["windows", "elements", "capture", "os", "diff"]));
       for (const inputTool of [
-        "click", "type", "key", "drag", "scroll", "launch", "focus", "wait", "fill", "run", "scenario",
+        "click", "type", "key", "paste", "drag", "scroll", "launch", "focus", "wait", "fill", "run", "scenario",
       ]) {
         expect(names).not.toContain(inputTool);
       }
@@ -47,10 +47,10 @@ describe("MCP server", () => {
       const names = response.tools.map((tool) => tool.name);
 
       expect(new Set(names)).toEqual(new Set([
-        "windows", "elements", "capture", "os", "diff", "click", "type", "key",
+        "windows", "elements", "capture", "os", "diff", "click", "type", "key", "paste",
       ]));
       for (const tool of response.tools) {
-        if (["click", "type", "key"].includes(tool.name)) {
+        if (["click", "type", "key", "paste"].includes(tool.name)) {
           expect(tool.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
         } else {
           expect(tool.annotations).toMatchObject({ readOnlyHint: true });
