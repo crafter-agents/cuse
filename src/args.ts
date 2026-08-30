@@ -62,6 +62,7 @@ export function parseArgs(argv: string[]): Parsed {
     depth: num(flag("depth")),
     limit: num(flag("limit")),
     video: argv.includes("--video"),
+    scenario: argv.includes("--scenario"),
     out: flag("out"),
     report: flag("report"),
     pid: num(flag("pid")),

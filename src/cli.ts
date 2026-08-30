@@ -24,7 +24,7 @@ import { elementsCmd, parseElements, pickElement, pointInElement, describeElemen
 import { runningAppsCmd, parseApps, pickApp, describeApps, type App } from "./apps.ts";
 import { displaysCmd, parseDisplays, frameOrigin, coverageWarning, toScreenPoint,
          desktopBounds, type Display } from "./display.ts";
-import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
+import { parseArgs as parseBaseArgs, tokenize, withSession, type Session } from "./args.ts";
 import { recognizeText } from "./ocr.ts";
 import {
   parseScenario,
@@ -48,6 +48,12 @@ import type { PortProtocol } from "./probes/types.ts";
 import { realDoctorProbe, runDoctor, type DoctorVerdict } from "./doctor.ts";
 import { which } from "./node-compat.ts";
 import { startMcpServer } from "./mcp.ts";
+import { buildScenarioDraftFromRecordedEvents } from "./scenario-record.ts";
+import {
+  captureMacOSClicks,
+  recordScenarioClicks,
+  type MacOSClickCaptureOptions,
+} from "./scenario-capture.ts";
 
 export type Options = {
   allowInput?: boolean;
@@ -69,6 +75,8 @@ export type Options = {
   app?: string;
   /** which named object (e.g. scheduled task) to inspect */
   name?: string;
+  /** JSON object used as variables in a generated scenario */
+  vars?: string;
   /** mouse button used by click and dblclick */
   button?: string;
   /** modifier chord held during click and dblclick */
@@ -82,6 +90,8 @@ export type Options = {
   limit?: number;
   /** record actual video rather than a series of stills */
   video?: boolean;
+  /** record real clicks into a scenario recording instead of stills or video */
+  scenario?: boolean;
   /** where to write it */
   out?: string;
   /** where to write a scenario failure report */
@@ -101,6 +111,25 @@ export type Result = {
   ok: boolean; action: string; os: OS;
   detail?: string; error?: string; warn?: string; data?: unknown;
 };
+
+export type ActDependencies = {
+  os?: OS;
+  readSessionLockState?: (os: OS) => Promise<string | null>;
+  startScenarioCapture?: (options: MacOSClickCaptureOptions) => Promise<{ stop(): void }>;
+  waitForScenarioStop?: (durationMs: number) => Promise<void>;
+};
+
+function parseArgs(argv: string[]) {
+  const parsed = parseBaseArgs(argv);
+  const varsFlag = argv.find((arg) => arg.startsWith("--vars="));
+  return {
+    ...parsed,
+    opts: {
+      ...parsed.opts,
+      vars: varsFlag === undefined ? undefined : varsFlag.slice("--vars=".length),
+    },
+  };
+}
 
 function isScenarioValue(value: unknown): value is ScenarioValue {
   if (value === null || typeof value === "boolean" || typeof value === "number" ||
@@ -327,8 +356,8 @@ async function captureCoverage(os: OS, path: string, timeoutMs: number,
  */
 type Tree = { els: Element[]; note?: string };
 
-async function listElements(os: OS, app: string, timeoutMs: number,
-                            depth?: number, limit?: number): Promise<Tree> {
+export async function listElements(os: OS, app: string, timeoutMs: number,
+                                   depth?: number, limit?: number): Promise<Tree> {
   if (os === "macos") return macElements(app, timeoutMs, depth, limit);
   const argv = elementsCmd(os, app, limit, depth);
   const r = await runWithTimeout(argv, timeoutMs);
@@ -618,8 +647,13 @@ export function parseSteps(steps: unknown[]): { steps: Step[] } | { error: strin
   return { steps: out };
 }
 
-async function act(action: string, args: string[], opts: Options = {}): Promise<Result> {
-  const os = detectOS();
+async function act(
+  action: string,
+  args: string[],
+  opts: Options = {},
+  dependencies: ActDependencies = {},
+): Promise<Result> {
+  const os = dependencies.os ?? detectOS();
   const base = { action, os };
   if (action === "fill") {
     const aimed = opts.window || opts.find || opts.element || opts.role;
@@ -802,6 +836,59 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         };
       }
 
+      case "scenario-draft": {
+        const path = args[0];
+        if (!path) {
+          return { ok: false, ...base, error: "scenario-draft needs a path to recorded events" };
+        }
+        if (!opts.out) {
+          return { ok: false, ...base, error: "scenario-draft needs --out=<path>" };
+        }
+
+        let contents: string;
+        try {
+          contents = await readFile(resolve(path), "utf8");
+        } catch {
+          return { ok: false, ...base, error: `recorded events file not found: ${path}` };
+        }
+
+        let input: unknown;
+        try {
+          input = JSON.parse(contents);
+        } catch {
+          return { ok: false, ...base, error: "recorded events file must contain valid JSON" };
+        }
+
+        let vars: Record<string, unknown> | undefined;
+        if (opts.vars !== undefined) {
+          let parsedVars: unknown;
+          try {
+            parsedVars = JSON.parse(opts.vars);
+          } catch {
+            return { ok: false, ...base, error: "--vars must contain valid JSON" };
+          }
+          if (typeof parsedVars !== "object" || parsedVars === null || Array.isArray(parsedVars)) {
+            return { ok: false, ...base, error: "--vars must be a JSON object" };
+          }
+          vars = parsedVars as Record<string, unknown>;
+        }
+
+        const draft = buildScenarioDraftFromRecordedEvents(input, { name: opts.name, vars });
+        if (!draft.ok) {
+          return { ok: false, ...base, error: draft.error };
+        }
+
+        const out = resolve(opts.out);
+        try {
+          await writeFile(out, draft.serialized);
+        } catch (error) {
+          return { ok: false, ...base,
+            error: `could not write scenario draft: ${error instanceof Error ? error.message : String(error)}` };
+        }
+        return { ok: true, ...base,
+          detail: `scenario draft written -> ${out}`, data: { path: out } };
+      }
+
       case "compare": {
         const path = args[0];
         if (!path) {
@@ -959,6 +1046,38 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       }
 
       case "record": {
+        if (opts.scenario) {
+          if (os !== "macos") {
+            return { ok: false, ...base, error: "record --scenario is macOS only" };
+          }
+          if (!opts.out) {
+            return { ok: false, ...base, error: "record --scenario needs --out=<path>" };
+          }
+          if (!force) {
+            const locked = await isSessionLocked({
+              os,
+              read: () => (dependencies.readSessionLockState ?? readLockState)(os),
+            });
+            if (locked === true) return { ok: false, ...base, error: LOCKED_REASON };
+          }
+          const captureErrors: unknown[] = [];
+          const events = await recordScenarioClicks(
+            (onClick) => (dependencies.startScenarioCapture ?? captureMacOSClicks)({
+              onClick,
+              onError: (error) => captureErrors.push(error),
+              listElements: (app, timeoutMs) => listElements("macos", app, timeoutMs),
+            }),
+            (dependencies.waitForScenarioStop ?? sleep)(opts.durationMs ?? 30_000),
+          );
+          const out = resolve(opts.out);
+          await writeFile(out, JSON.stringify(events, null, 2));
+          const lastCaptureError = captureErrors.at(-1);
+          const warn = captureErrors.length === 0 ? undefined :
+            `${captureErrors.length} capture error${captureErrors.length === 1 ? "" : "s"}` +
+            `${lastCaptureError === undefined ? "" : `: ${lastCaptureError instanceof Error ? lastCaptureError.message : String(lastCaptureError)}`}`;
+          return { ok: true, ...base, detail: `${events.length} clicks recorded -> ${out}`,
+                   data: { path: out, count: events.length }, ...(warn ? { warn } : {}) };
+        }
         // Actual video, where the OS has a recorder. Stills cannot show a
         // state that exists only between two of them.
         if (opts.video) {
@@ -1498,6 +1617,7 @@ Batching
                                [["move",10,20],["click"]] or [{"action":"click"}]
   scenario <path>              run a declarative JSON scenario file
                                (--repeat=<n> reports per-step flake rates)
+  scenario-draft <path>        convert recorded click events to a scenario; requires --out
 
 Input
   type <text>                  send text to the focused window

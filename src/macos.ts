@@ -48,6 +48,7 @@ async function open(): Promise<Symbols> {
       CGEventSetFlags: { args: [T.ptr, T.u32], returns: T.void },
       CGEventSetIntegerValueField: { args: [T.ptr, T.u32, T.i64], returns: T.void },
       CGEventPost: { args: [T.u32, T.ptr], returns: T.void },
+      CGEventSourceButtonState: { args: [T.u32, T.u32], returns: T.bool },
     });
     const cf = dlopen(CF_PATH, { CFRelease: { args: [T.ptr], returns: T.void } });
     return { cg: cg.symbols, cf: cf.symbols } as Symbols;
@@ -66,8 +67,37 @@ async function open(): Promise<Symbols> {
       CGEventSetFlags: cg.func("CGEventSetFlags", "void", ["void *", "uint64"]),
       CGEventSetIntegerValueField: cg.func("CGEventSetIntegerValueField", "void", ["void *", "uint32", "int64"]),
       CGEventPost: cg.func("CGEventPost", "void", ["uint32", "void *"]),
+      CGEventSourceButtonState: cg.func("CGEventSourceButtonState", "bool", ["uint32", "uint32"]),
     },
     cf: { CFRelease: cf.func("CFRelease", "void", ["void *"]) },
+  };
+}
+
+export type MousePollers = {
+  pollButtonState: () => boolean;
+  pollMouseLocation: () => { x: number; y: number };
+};
+
+/** Readers used by scenario capture, initialized once before its polling loop. */
+export async function createMousePollers(): Promise<MousePollers> {
+  const { cg } = await syms();
+  const koffi = await import("koffi");
+  const locationLibrary = koffi.load(CG_PATH);
+  const point = koffi.struct({ x: "double", y: "double" });
+  const createEvent = locationLibrary.func("CGEventCreate", "void *", ["void *"]);
+  const eventLocation = locationLibrary.func("CGEventGetLocation", point, ["void *"]);
+  const release = koffi.load(CF_PATH).func("CFRelease", "void", ["void *"]);
+
+  return {
+    pollButtonState: () => Boolean(cg.CGEventSourceButtonState(1, 0)),
+    pollMouseLocation: () => {
+      const event = need(createEvent(null), "event");
+      try {
+        return eventLocation(event) as { x: number; y: number };
+      } finally {
+        release(event);
+      }
+    },
   };
 }
 

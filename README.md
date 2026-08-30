@@ -24,11 +24,16 @@ cuse settle                 # wait until the screen stops changing
 cuse diff a.png b.png       # how much changed, SAME or CHANGED
 cuse record 5 500           # 5 frames, 500ms apart
 cuse record 5 --video       # actual video, where the OS can
+cuse record --scenario --out=clicks.json --duration=30000
 cuse launch TextEdit
 cuse serve                  # one process, a command per line, JSON per line
 cuse os                     # which platform
 cuse <action> --json        # structured Result for agents
 ```
+
+On macOS, `cuse record --scenario --out=clicks.json [--duration=<ms>]` records
+real clicks for 30 seconds by default. Draft a runnable scenario directly from
+that output with `cuse scenario-draft clicks.json --out=scenario.json`.
 
 ## Install
 
