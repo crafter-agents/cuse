@@ -12,6 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      - run: bun install
       - name: test (pure core, runs everywhere)
         run: bun test
       - name: build standalone binary
@@ -32,6 +33,7 @@ jobs:
         with: { node-version: 20 }
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      - run: bun install
       - name: build npm tarball
         run: npm pack
       - name: install and run with Bun absent
@@ -68,6 +70,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      - run: bun install
       - name: build
         run: bun build --compile --external koffi src/cli.ts --outfile cuse
 
@@ -126,6 +129,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      - run: bun install
       - name: build
         run: bun build --compile --external koffi src/cli.ts --outfile cuse
 
@@ -378,6 +382,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      - run: bun install
       - run: bun build --compile --external koffi src/cli.ts --outfile cuse
       - name: bring up AT-SPI and press a GTK control by name
         run: |
@@ -517,6 +522,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      - run: bun install
       - run: bun build --compile --external koffi src/cli.ts --outfile cuse
       - name: drive an application nobody here wrote
         shell: bash
@@ -573,6 +579,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      - run: bun install
       - run: bun build --compile --external koffi src/cli.ts --outfile cuse
       - name: why the alias starts nothing
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scenarios/win-notepad-evidence.ps1
@@ -587,6 +594,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      - run: bun install
       - run: bun build --compile --external koffi src/cli.ts --outfile cuse
       - name: the documented workaround, proved on disk
         shell: bash
