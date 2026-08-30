@@ -32,7 +32,7 @@
   ],
   "scripts": {
     "test": "bun test",
-    "build": "bun build --compile src/cli.ts --outfile dist/cuse",
+    "build": "bun build --compile --external koffi src/cli.ts --outfile dist/cuse",
     "build:node": "bun run scripts/build-node.ts",
     "prepack": "bun run build:node"
   },
