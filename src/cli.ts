@@ -20,7 +20,7 @@ import { listWindowsCmd, parseWindows, pickWindow, pointIn, frontmostCmd, parseF
          frontmostMatches, windowCropRect, type Win } from "./window.ts";
 import { findTemplate, crop, variance, MIN_VARIANCE } from "./match.ts";
 import { elementsCmd, parseElements, pickElement, pointInElement, describeElement, describeMisses,
-         geometryLooksUsable, normalizeRole, type Element } from "./elements.ts";
+         presentElementSummaries, geometryLooksUsable, normalizeRole, type Element } from "./elements.ts";
 import { runningAppsCmd, parseApps, pickApp, describeApps, type App } from "./apps.ts";
 import { displaysCmd, parseDisplays, frameOrigin, coverageWarning, toScreenPoint,
          desktopBounds, type Display } from "./display.ts";
@@ -440,6 +440,13 @@ async function listWindows(os: OS, timeoutMs: number): Promise<Win[]> {
   return parseWindows(r.stdout);
 }
 
+class TargetNotFoundError extends Error {
+  constructor(message: string, readonly presentElements: { role: string; name: string }[]) {
+    super(message);
+    this.name = "TargetNotFoundError";
+  }
+}
+
 /**
  * Turn an intention into a coordinate.
  *
@@ -463,10 +470,12 @@ async function resolveTarget(os: OS, opts: Options, timeoutMs: number,
     }
     const hit = pickElement(els, sel);
     if (!hit) {
-      throw new Error(
+      throw new TargetNotFoundError(
         `no control matching ${opts.element ? `'${opts.element}'` : ""}` +
         `${opts.role ? ` of role '${opts.role}'` : ""} - ` +
-        `what is there: ${describeMisses(els, sel)}`);
+        `what is there: ${describeMisses(els, sel)}`,
+        presentElementSummaries(els, sel),
+      );
     }
     const p = pointInElement(hit, fx, fy);
     return { ...p, how: `${hit.role} '${hit.name}' (${hit.width}x${hit.height} at ${hit.x},${hit.y})` };
@@ -1402,7 +1411,14 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       default: return { ok: false, ...base, error: `unknown action '${action}'` };
     }
   } catch (e) {
-    return { ok: false, ...base, error: e instanceof Error ? e.message : String(e) };
+    return {
+      ok: false,
+      ...base,
+      error: e instanceof Error ? e.message : String(e),
+      ...(e instanceof TargetNotFoundError
+        ? { data: { presentElements: e.presentElements } }
+        : {}),
+    };
   }
 }
 

@@ -95,4 +95,20 @@ describe("failure report", () => {
     });
     expect(formatFailureReport(report!)).toContain(message);
   });
+
+  test("includes present elements as structured diagnostics", () => {
+    const presentElements = [
+      { role: "button", name: "OK" },
+      { role: "button", name: "Cancel" },
+    ];
+    const report = buildFailureReport(result("failed", [
+      execStep({
+        step: { type: "cuse", action: "click" },
+        cuse: { ok: false, data: { presentElements } },
+      }),
+    ]));
+
+    expect(report?.steps[0].presentElements).toEqual(presentElements);
+    expect(formatFailureReport(report!)).toContain("present: button 'OK', button 'Cancel'");
+  });
 });

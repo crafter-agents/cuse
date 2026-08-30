@@ -626,10 +626,17 @@ export function describeElement(e: Element): string {
 }
 
 /** What to say when a selector matches nothing: the near misses, not silence. */
-export function describeMisses(els: Element[], sel: Selector, keep = 8): string {
+export function presentElementSummaries(
+  els: Element[],
+  sel: Selector,
+): { role: string; name: string }[] {
   const named = els.filter((e) => e.name);
   const pool = sel.role ? named.filter((e) => e.role === selectorRole(sel.role!)) : named;
-  const sample = (pool.length ? pool : named).slice(0, keep)
+  return (pool.length ? pool : named).map(({ role, name }) => ({ role, name }));
+}
+
+export function describeMisses(els: Element[], sel: Selector, keep = 8): string {
+  const sample = presentElementSummaries(els, sel).slice(0, keep)
     .map((e) => `${e.role} '${e.name}'`);
   return sample.length ? sample.join(", ") : "no named controls at all";
 }

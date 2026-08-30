@@ -63,12 +63,13 @@ describe("Action evidence preparation", () => {
   test("lists only non-passed scenario steps in a failed summary", async () => {
     const prepared = await prepare("failed-scenario", "failed", "1", [
       { phase: "setup", index: 0, step: { type: "launch" }, status: "passed" },
-      { phase: "steps", index: 1, step: { type: "assert" }, status: "failed", message: "assertion eq failed: expected \"ready\", observed \"loading\"" },
+      { phase: "steps", index: 1, step: { type: "assert" }, status: "failed", message: "assertion eq failed: expected \"ready\", observed \"loading\"", cuse: { data: { presentElements: [{ role: "button", name: "OK" }, { role: "button", name: "Cancel" }] } } },
       { phase: "teardown", index: 0, step: { type: "close" }, status: "skipped" },
     ]);
 
     expect(prepared.summary).toContain("### Failing steps");
     expect(prepared.summary).toContain('steps[1] (assert) failed: assertion eq failed: expected "ready", observed "loading"');
+    expect(prepared.summary).toContain("present: button 'OK', button 'Cancel'");
     expect(prepared.summary).toContain("teardown[0] (close) skipped");
     expect(prepared.summary).not.toContain("setup[0] (launch) passed");
   });

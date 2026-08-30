@@ -35,7 +35,14 @@ function sanitize(value, key = "") {
 function formatFailingSteps(steps) {
   return steps
     .filter((step) => step.status !== "passed")
-    .map((step) => `${step.phase}[${step.index}] (${step.step?.type}) ${step.status}${step.message ? `: ${step.message}` : ""}`);
+    .flatMap((step) => {
+      const lines = [`${step.phase}[${step.index}] (${step.step?.type}) ${step.status}${step.message ? `: ${step.message}` : ""}`];
+      const presentElements = step.cuse?.data?.presentElements;
+      if (Array.isArray(presentElements) && presentElements.length > 0) {
+        lines.push(`present: ${presentElements.map(({ role, name }) => `${role} '${name}'`).join(", ")}`);
+      }
+      return lines;
+    });
 }
 
 const evidenceName = portableName(requestedName);

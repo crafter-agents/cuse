@@ -5,6 +5,9 @@ import type {
   ScenarioStatus,
 } from "./scenario-run.ts";
 import type { ScenarioStep } from "./scenario.ts";
+import type { ScenarioValue } from "./scenario.ts";
+
+type PresentElement = { role: string; name: string };
 
 export type FailureStepReport = {
   index: number;
@@ -12,12 +15,26 @@ export type FailureStepReport = {
   type: ScenarioStep["type"];
   status: Exclude<ScenarioStepStatus, "passed">;
   message?: string;
+  presentElements?: PresentElement[];
 };
 
 export type FailureReport = {
   status: Exclude<ScenarioStatus, "passed">;
   steps: FailureStepReport[];
 };
+
+function presentElementsFrom(data: ScenarioValue | undefined): PresentElement[] | undefined {
+  if (data === null || data === undefined || Array.isArray(data) || typeof data !== "object") {
+    return undefined;
+  }
+  const value = data.presentElements;
+  if (!Array.isArray(value)) return undefined;
+  const elements = value.filter((item): item is PresentElement =>
+    item !== null && !Array.isArray(item) && typeof item === "object" &&
+    typeof item.role === "string" && typeof item.name === "string"
+  );
+  return elements.length > 0 ? elements : undefined;
+}
 
 export function buildFailureReport(
   result: ScenarioRunResult,
@@ -34,6 +51,7 @@ export function buildFailureReport(
         type: step.step.type,
         status: step.status as Exclude<ScenarioStepStatus, "passed">,
         message: step.message,
+        presentElements: presentElementsFrom(step.cuse?.data),
       })),
   };
 }
@@ -47,6 +65,9 @@ export function formatFailureReport(report: FailureReport): string {
         step.message === undefined ? "" : `: ${step.message}`
       }`,
     );
+    if (step.presentElements?.length) {
+      lines.push(`present: ${step.presentElements.map(({ role, name }) => `${role} '${name}'`).join(", ")}`);
+    }
   }
 
   return lines.join("\n");
