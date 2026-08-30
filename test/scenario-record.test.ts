@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { act } from "../src/cli.ts";
 import type { Element } from "../src/elements.ts";
+import { LOCKED_REASON } from "../src/session.ts";
 import {
   buildScenarioDraftFromRecordedEvents,
   recordedClicksToScenarioSteps,
@@ -108,6 +113,45 @@ describe("scenario draft from recorded events", () => {
       const parsed = parseScenario(JSON.parse(result.serialized));
       expect(parsed.ok).toBe(true);
       if (parsed.ok) expect(parsed.scenario.name).toBe("recorded scenario");
+    }
+  });
+});
+
+describe("record --scenario CLI", () => {
+  test("refuses a locked session without starting capture", async () => {
+    let captureStarted = false;
+    const result = await act("record", [], { scenario: true, out: "unused.json" }, {
+      readSessionLockState: async () =>
+        "<key>CGSSessionScreenIsLocked</key><true/>",
+      startScenarioCapture: async () => {
+        captureStarted = true;
+        return { stop() {} };
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, error: LOCKED_REASON });
+    expect(captureStarted).toBe(false);
+  });
+
+  test("surfaces capture errors in the recording result", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cuse-scenario-record-test-"));
+    const out = join(dir, "recording.json");
+    try {
+      const result = await act("record", [], { scenario: true, out }, {
+        readSessionLockState: async () =>
+          "<key>CGSSessionScreenIsLocked</key><false/>",
+        startScenarioCapture: async ({ onError }) => {
+          onError?.(new Error("accessibility query failed"));
+          return { stop() {} };
+        },
+        waitForScenarioStop: async () => {},
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.warn).toContain("1 capture error");
+      expect(result.warn).toContain("accessibility query failed");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });

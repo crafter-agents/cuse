@@ -49,7 +49,11 @@ import { realDoctorProbe, runDoctor, type DoctorVerdict } from "./doctor.ts";
 import { which } from "./node-compat.ts";
 import { startMcpServer } from "./mcp.ts";
 import { buildScenarioDraftFromRecordedEvents } from "./scenario-record.ts";
-import { captureMacOSClicks, recordScenarioClicks } from "./scenario-capture.ts";
+import {
+  captureMacOSClicks,
+  recordScenarioClicks,
+  type MacOSClickCaptureOptions,
+} from "./scenario-capture.ts";
 
 export type Options = {
   allowInput?: boolean;
@@ -106,6 +110,12 @@ export type Options = {
 export type Result = {
   ok: boolean; action: string; os: OS;
   detail?: string; error?: string; warn?: string; data?: unknown;
+};
+
+export type ActDependencies = {
+  readSessionLockState?: (os: OS) => Promise<string | null>;
+  startScenarioCapture?: (options: MacOSClickCaptureOptions) => Promise<{ stop(): void }>;
+  waitForScenarioStop?: (durationMs: number) => Promise<void>;
 };
 
 function parseArgs(argv: string[]) {
@@ -636,7 +646,12 @@ export function parseSteps(steps: unknown[]): { steps: Step[] } | { error: strin
   return { steps: out };
 }
 
-async function act(action: string, args: string[], opts: Options = {}): Promise<Result> {
+async function act(
+  action: string,
+  args: string[],
+  opts: Options = {},
+  dependencies: ActDependencies = {},
+): Promise<Result> {
   const os = detectOS();
   const base = { action, os };
   if (action === "fill") {
@@ -1037,14 +1052,29 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
           if (!opts.out) {
             return { ok: false, ...base, error: "record --scenario needs --out=<path>" };
           }
+          if (!force) {
+            const locked = await isSessionLocked({
+              os,
+              read: () => (dependencies.readSessionLockState ?? readLockState)(os),
+            });
+            if (locked === true) return { ok: false, ...base, error: LOCKED_REASON };
+          }
+          const captureErrors: unknown[] = [];
           const events = await recordScenarioClicks(
-            (onClick) => captureMacOSClicks({ onClick, onError: () => {} }),
-            sleep(opts.durationMs ?? 30_000),
+            (onClick) => (dependencies.startScenarioCapture ?? captureMacOSClicks)({
+              onClick,
+              onError: (error) => captureErrors.push(error),
+            }),
+            (dependencies.waitForScenarioStop ?? sleep)(opts.durationMs ?? 30_000),
           );
           const out = resolve(opts.out);
           await writeFile(out, JSON.stringify(events, null, 2));
+          const lastCaptureError = captureErrors.at(-1);
+          const warn = captureErrors.length === 0 ? undefined :
+            `${captureErrors.length} capture error${captureErrors.length === 1 ? "" : "s"}` +
+            `${lastCaptureError === undefined ? "" : `: ${lastCaptureError instanceof Error ? lastCaptureError.message : String(lastCaptureError)}`}`;
           return { ok: true, ...base, detail: `${events.length} clicks recorded -> ${out}`,
-                   data: { path: out, count: events.length } };
+                   data: { path: out, count: events.length }, ...(warn ? { warn } : {}) };
         }
         // Actual video, where the OS has a recorder. Stills cannot show a
         // state that exists only between two of them.
