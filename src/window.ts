@@ -9,7 +9,7 @@
 // back in, so the awkward per-OS text formats are testable without a desktop.
 import type { OS } from "./os.ts";
 
-export type Win = { title: string; x: number; y: number; width: number; height: number; pid?: number };
+export type Win = { title: string; x: number; y: number; width: number; height: number; app?: string; pid?: number };
 
 /** Convert a window rectangle from input points to captured pixels. */
 export function windowCropRect(w: Win, scale: number): { x: number; y: number; width: number; height: number } {
@@ -80,12 +80,12 @@ export function parseWindows(text: string): Win[] {
     const nums = f.slice(-4).map(Number);
     if (nums.some((n) => !Number.isFinite(n))) continue;
     const [x, y, width, height] = nums as [number, number, number, number];
-    // macOS gives process and window name; prefer the window's own, falling
-    // back to the process when a window is untitled (dialogs often are).
+    // macOS gives process and window name; retain both so either can identify
+    // the window, falling back to the process when a window is untitled.
     const titleParts = f.slice(0, f.length - 4).filter(Boolean);
     const title = titleParts.length > 1 ? titleParts[1]! : (titleParts[0] ?? "");
     if (width <= 0 || height <= 0) continue;
-    out.push({ title, x, y, width, height });
+    out.push({ title, x, y, width, height, ...(titleParts.length > 1 && { app: titleParts[0] }) });
   }
   return out;
 }
@@ -150,7 +150,7 @@ export function frontmostMatches(front: string, expected: string): boolean {
 /** Case-insensitive substring match, the same rule `focus` uses. */
 export function pickWindow(wins: Win[], name: string): Win | null {
   const n = name.toLowerCase();
-  return wins.find((w) => w.title.toLowerCase().includes(n)) ?? null;
+  return wins.find((w) => w.title.toLowerCase().includes(n) || w.app?.toLowerCase().includes(n)) ?? null;
 }
 
 /**

@@ -63,6 +63,30 @@ bun install
 bun run build          # standalone binary at dist/cuse, no runtime needed
 ```
 
+## MCP server
+
+`cuse mcp` starts a Model Context Protocol server over standard input and output.
+It exposes inspection tools by default. Input tools that click, type, send keys,
+or paste are available only when the server starts with `cuse mcp --allow-input`.
+Those tools control the machine running cuse, so enable them only for clients you
+trust.
+
+For Claude Code, save this project-scoped configuration as `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "cuse": {
+      "command": "bunx",
+      "args": ["cuse", "mcp"]
+    }
+  }
+}
+```
+
+Add `"--allow-input"` to the `args` array when the host should be able to drive
+the desktop.
+
 ## GitHub Action
 
 Run a checked-in scenario, then upload the prepared evidence in a companion

@@ -37,7 +37,7 @@ describe("parsing what they print", () => {
   });
   test("reads the macOS form, preferring the window name over the process", () => {
     expect(parseWindows("TextEdit\ttarget.txt\t120\t80\t700\t500\n")).toEqual([
-      { title: "target.txt", x: 120, y: 80, width: 700, height: 500 },
+      { title: "target.txt", x: 120, y: 80, width: 700, height: 500, app: "TextEdit" },
     ]);
   });
   test("falls back to the process name when the window is untitled", () => {
@@ -60,6 +60,10 @@ describe("aiming at a window", () => {
   test("finds a window by part of its title, case-insensitively", () => {
     expect(pickWindow(wins, "cu_target")!.width).toBe(400);
     expect(pickWindow(wins, "finder")!.title).toBe("Finder");
+  });
+  test("finds a window by its owning app when its title differs", () => {
+    const textEditWins = parseWindows("TextEdit\tUntitled\t120\t80\t700\t500\n");
+    expect(pickWindow(textEditWins, "TextEdit")!.title).toBe("Untitled");
   });
   test("returns null for a window that is not there", () => {
     expect(pickWindow(wins, "Photoshop")).toBeNull();
