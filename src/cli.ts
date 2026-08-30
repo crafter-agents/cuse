@@ -36,6 +36,7 @@ import {
 import { runComparison, type ComparisonManifest } from "./compare-run.ts";
 import { cleanupComparisonRunDirs } from "./compare-isolation.ts";
 import { createStepEvidenceSink } from "./evidence.ts";
+import { buildFailureReport, formatFailureReport } from "./failure-report.ts";
 import { describeTarget, targetIsUsable, isSatisfied, nextGap, timeoutReason,
          successDetail, type WaitTarget } from "./wait.ts";
 import { probeProcess } from "./probes/process.ts";
@@ -83,6 +84,8 @@ export type Options = {
   video?: boolean;
   /** where to write it */
   out?: string;
+  /** where to write a scenario failure report */
+  report?: string;
   pid?: number;
   port?: number;
   protocol?: string;
@@ -771,6 +774,10 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         }
 
         const result = await runScenario(parsed.scenario, scenarioOptions);
+        const report = buildFailureReport(result);
+        if (opts.report !== undefined && report !== undefined) {
+          await writeFile(resolve(opts.report), formatFailureReport(report));
+        }
         const ok = result.status === "passed";
         const failedStep = result.steps.find((step) => step.status !== "passed");
         const error = failedStep
@@ -1497,6 +1504,7 @@ Other
 Flags
   --json                       structured Result on stdout
   --repeat=<n>                 run a scenario n times and report per-step flake rates
+  --report=<path>              write a failure report for a non-passing scenario
   --timeout=<ms>               deadline for this action
   --duration=<ms>              drag duration (default 150)
   --steps=<n>                  drag interpolation steps (default 5)

@@ -517,6 +517,8 @@ mid-run still shows what ran before it. Exit codes: `0` passed, `3` timed
 out, `2` for a malformed scenario file or a missing path, `1` for every other
 non-passing status, including a skipped or cleanup-failed run.
 
+`--report=<path>` writes the human-readable failure report to that path when a scenario does not pass.
+
 `scenarios/cuse-selftest.json` is the reference: it launches TextEdit, types
 into it and captures before/after screenshots, the same coverage
 `scenarios/cuse-selftest.sh` provides today. The shell script stays until the
