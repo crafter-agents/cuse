@@ -1,0 +1,20 @@
+# Real-app compatibility matrix
+
+This matrix records repeated observations from real external applications on
+GitHub-hosted runners. A row describes only the capabilities exercised by its
+fixture.
+
+| OS | External target | Scenario | Runner | Measured | Not measured | Repeats | Observed result | CI run |
+| --- | --- | --- | --- | --- | --- | ---: | --- | --- |
+| macOS | Electron | `assert real Electron runtime and geometry evidence` (`scenarios/electron-probe.json`) | `macos-latest`, GitHub-hosted | Process launch, Electron version assertion, Chromium version assertion, device pixel ratio (DPR), scroll geometry, and window ownership | Capture, focus, typing, click, drag, and window lookup | 20 | `"runs":20,"passed":20,"failed":0`; all seven emitted step records report `"passRate":1,"flakeRate":0` | [run 33338721787](https://github.com/crafter-agents/cuse/actions/runs/33338721787) |
+
+The structured artifact emitted the following aggregate fields literally:
+
+```json
+{"status":"passed","name":"assert real Electron runtime and geometry evidence","platform":"macos","durationMs":10078,"runs":20,"passed":20,"failed":0}
+```
+
+Flake rate is emitted per step, not as a scenario-level field. Step indices 0
+through 6 each emitted `"passed":20,"failed":0,"passRate":1,"flakeRate":0`.
+The artifact does not emit per-run latency, so this matrix makes no latency
+claim.

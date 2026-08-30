@@ -2,6 +2,8 @@
 
 Cross-platform computer-use CLI. One verb, the right OS primitive.
 
+See the [current real-app compatibility matrix](dogfood/compat-matrix.md) for observed external-target results.
+
 The agent writes the same command on every OS; cuse detects the platform and
 translates to the native primitive (osascript and CoreGraphics on macOS, xdotool
 on Linux, SendKeys and GDI on Windows).
