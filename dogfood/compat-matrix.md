@@ -7,6 +7,7 @@ fixture.
 | OS | External target | Scenario | Runner | Measured | Not measured | Repeats | Observed result | CI run |
 | --- | --- | --- | --- | --- | --- | ---: | --- | --- |
 | macOS | Electron | `assert real Electron runtime and geometry evidence` (`scenarios/electron-probe.json`) | `macos-latest`, GitHub-hosted | Process launch, Electron version assertion, Chromium version assertion, device pixel ratio (DPR), scroll geometry, and window ownership | Capture, focus, typing, click, drag, and window lookup | 20 | `"runs":20,"passed":20,"failed":0`; all seven emitted step records report `"passRate":1,"flakeRate":0` | [run 33338721787](https://github.com/crafter-agents/cuse/actions/runs/33338721787) |
+| Windows | Classic Notepad (`C:\Windows\System32\notepad.exe`), launched by full path | Documented workaround (`scenarios/verify-workaround.sh`) | `windows-latest`, GitHub-hosted | Window wait, window enumeration, interpolated drag with observed position delta, elements/accessibility read, focus, typing, live-value assertion proven to discriminate via its negative counterpart, and file-based save verification | Capture, click, latency, and flake rate | 1 | Passed once: the live window moved, the positive assertion passed, the negative assertion failed as expected, and the saved file contained the typed text. Flake rate has not yet been measured. | [run 33341329405](https://github.com/crafter-agents/cuse/actions/runs/33341329405) |
 
 The structured artifact emitted the following aggregate fields literally:
 
