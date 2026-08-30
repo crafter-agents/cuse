@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import {
-  elementsCmd, parseElements, pickElement, pointInElement,
+  elementsCmd, parseElements, pickElement, pointInElement, resolveHitElement,
   normalizeRole, resolveWindowsRole, describeElement, describeMisses, geometryLooksUsable, type Element,
 } from "../src/elements.ts";
 import type { OS } from "../src/os.ts";
@@ -284,6 +284,40 @@ describe("choosing the control the agent meant", () => {
   });
   test("a fraction aims inside it, for a control that is not a plain button", () => {
     expect(pointInElement(el({ x: 0, y: 0, width: 100, height: 100 }), 0.25, 0.75)).toEqual({ x: 25, y: 75 });
+  });
+});
+
+describe("resolving the element under a point", () => {
+  test("returns the element containing the point", () => {
+    const button = el({ x: 10, y: 20, width: 80, height: 24 });
+    expect(resolveHitElement([button], { x: 50, y: 32 })).toBe(button);
+  });
+
+  test("the smaller element wins when it appears before its container", () => {
+    const button = el({ x: 20, y: 20, width: 80, height: 24 });
+    const toolbar = el({ role: "toolbar", x: 0, y: 0, width: 400, height: 60 });
+    expect(resolveHitElement([button, toolbar], { x: 40, y: 30 })).toBe(button);
+  });
+
+  test("the smaller element wins when it appears after its container", () => {
+    const button = el({ x: 20, y: 20, width: 80, height: 24 });
+    const toolbar = el({ role: "toolbar", x: 0, y: 0, width: 400, height: 60 });
+    expect(resolveHitElement([toolbar, button], { x: 40, y: 30 })).toBe(button);
+  });
+
+  test("returns undefined when no element contains the point", () => {
+    expect(resolveHitElement([el({ x: 10, y: 20 })], { x: 0, y: 0 })).toBeUndefined();
+  });
+
+  test("includes left and top edges but excludes right and bottom edges", () => {
+    const button = el({ x: 10, y: 20, width: 80, height: 24 });
+    expect(resolveHitElement([button], { x: 10, y: 20 })).toBe(button);
+    expect(resolveHitElement([button], { x: 90, y: 44 })).toBeUndefined();
+  });
+
+  test("zero-width and zero-height elements never match", () => {
+    expect(resolveHitElement([el({ x: 10, y: 20, width: 0 })], { x: 10, y: 20 })).toBeUndefined();
+    expect(resolveHitElement([el({ x: 10, y: 20, height: 0 })], { x: 10, y: 20 })).toBeUndefined();
   });
 });
 
