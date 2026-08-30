@@ -42,6 +42,25 @@ export type MacOSClickCaptureOptions = {
   onError?: (error: unknown) => void;
 };
 
+export type ScenarioClickCaptureStarter = (
+  onClick: (event: RecordedClickEvent) => void,
+) => Promise<{ stop(): void }>;
+
+/** Collect click events until the supplied stop signal settles. */
+export async function recordScenarioClicks(
+  startCapture: ScenarioClickCaptureStarter,
+  stopSignal: Promise<void>,
+): Promise<RecordedClickEvent[]> {
+  const events: RecordedClickEvent[] = [];
+  const capture = await startCapture((event) => events.push(event));
+  try {
+    await stopSignal;
+  } finally {
+    capture.stop();
+  }
+  return events;
+}
+
 /** Connect the pure edge detector to CoreGraphics and the existing AX query. */
 export async function captureMacOSClicks(
   options: MacOSClickCaptureOptions,

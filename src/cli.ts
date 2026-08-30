@@ -49,6 +49,7 @@ import { realDoctorProbe, runDoctor, type DoctorVerdict } from "./doctor.ts";
 import { which } from "./node-compat.ts";
 import { startMcpServer } from "./mcp.ts";
 import { buildScenarioDraftFromRecordedEvents } from "./scenario-record.ts";
+import { captureMacOSClicks, recordScenarioClicks } from "./scenario-capture.ts";
 
 export type Options = {
   allowInput?: boolean;
@@ -85,6 +86,8 @@ export type Options = {
   limit?: number;
   /** record actual video rather than a series of stills */
   video?: boolean;
+  /** record real clicks into a scenario recording instead of stills or video */
+  scenario?: boolean;
   /** where to write it */
   out?: string;
   /** where to write a scenario failure report */
@@ -1027,6 +1030,22 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
       }
 
       case "record": {
+        if (opts.scenario) {
+          if (os !== "macos") {
+            return { ok: false, ...base, error: "record --scenario is macOS only" };
+          }
+          if (!opts.out) {
+            return { ok: false, ...base, error: "record --scenario needs --out=<path>" };
+          }
+          const events = await recordScenarioClicks(
+            (onClick) => captureMacOSClicks({ onClick, onError: () => {} }),
+            sleep(opts.durationMs ?? 30_000),
+          );
+          const out = resolve(opts.out);
+          await writeFile(out, JSON.stringify(events, null, 2));
+          return { ok: true, ...base, detail: `${events.length} clicks recorded -> ${out}`,
+                   data: { path: out, count: events.length } };
+        }
         // Actual video, where the OS has a recorder. Stills cannot show a
         // state that exists only between two of them.
         if (opts.video) {

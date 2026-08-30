@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { detectClickEdges } from "../src/scenario-capture.ts";
+import { detectClickEdges, recordScenarioClicks } from "../src/scenario-capture.ts";
+import type { RecordedClickEvent } from "../src/scenario-record.ts";
 
 type Poll = () => void;
 
@@ -56,5 +57,23 @@ describe("click edge detection", () => {
     capture.stop();
 
     expect(clicks).toEqual([]);
+  });
+});
+
+describe("scenario click recording", () => {
+  test("returns emitted events in order and stops capture once", async () => {
+    const events: RecordedClickEvent[] = [
+      { point: { x: 12, y: 34 }, timestampMs: 100, elements: [] },
+      { point: { x: 56, y: 78 }, timestampMs: 200, elements: [] },
+    ];
+    let stopCalls = 0;
+
+    const recorded = await recordScenarioClicks(async (onClick) => {
+      for (const event of events) onClick(event);
+      return { stop: () => { stopCalls += 1; } };
+    }, Promise.resolve());
+
+    expect(recorded).toEqual(events);
+    expect(stopCalls).toBe(1);
   });
 });

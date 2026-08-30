@@ -144,6 +144,11 @@ instead of always paying the full interval.
 
 ## What works where
 
+On macOS, record real clicks with
+`cuse record --scenario --out=clicks.json [--duration=<ms>]`. Its JSON output
+feeds directly into
+`cuse scenario-draft clicks.json --out=scenario.json`.
+
 Not everything exists on every platform, and cuse says so rather than
 pretending. `record --video` has no Windows path. The accessibility tree is
 richest on macOS, present on Linux through AT-SPI, and thinner on Windows.
