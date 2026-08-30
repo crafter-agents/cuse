@@ -65,7 +65,7 @@ jobs:
         with: { bun-version: latest }
       - run: bun test
       - name: compile
-        run: bun build --compile --target=${{ matrix.target }} src/cli.ts --outfile ${{ matrix.name }}
+        run: bun build --compile --external koffi --target=${{ matrix.target }} src/cli.ts --outfile ${{ matrix.name }}
       # An empty or truncated artifact is a green build and a broken download.
       - name: the file is a real executable
         run: |
