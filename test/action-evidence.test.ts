@@ -10,7 +10,12 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-async function prepare(name: string, status: string | undefined, exitCode: string) {
+async function prepare(
+  name: string,
+  status: string | undefined,
+  exitCode: string,
+  steps: unknown[] = [{ phase: "steps", index: 0, step: { type: "launch" }, status: "passed", env: { SAFE_NAME: "secret value" } }],
+) {
   const runnerTemp = await mkdtemp(join(tmpdir(), "cuse-action-evidence-"));
   temporaryDirectories.push(runnerTemp);
   const output = join(runnerTemp, "output.txt");
@@ -20,7 +25,7 @@ async function prepare(name: string, status: string | undefined, exitCode: strin
   const result = status === undefined ? "not-json" : JSON.stringify({
     ok: status === "passed",
     action: "scenario",
-    data: { status, steps: [{ env: { SAFE_NAME: "secret value" } }] },
+    data: { status, steps },
   });
   const child = Bun.spawn([
     process.execPath,
@@ -50,8 +55,22 @@ describe("Action evidence preparation", () => {
     expect(relative(prepared.runnerTemp, prepared.evidencePath)).toBe(join("cuse-evidence", "scenario-run"));
     expect(prepared.summary).toContain(`| Status | \`${status}\` |`);
     expect(prepared.summary).toContain(`| Exit code | \`${exitCode}\` |`);
+    if (status === "passed") expect(prepared.summary).not.toContain("### Failing steps");
     const stored = await readFile(join(prepared.evidencePath, "result.json"), "utf8");
     expect(JSON.parse(stored).data.steps[0].env.SAFE_NAME).toBe("[REDACTED]");
+  });
+
+  test("lists only non-passed scenario steps in a failed summary", async () => {
+    const prepared = await prepare("failed-scenario", "failed", "1", [
+      { phase: "setup", index: 0, step: { type: "launch" }, status: "passed" },
+      { phase: "steps", index: 1, step: { type: "assert" }, status: "failed", message: "assertion eq failed: expected \"ready\", observed \"loading\"" },
+      { phase: "teardown", index: 0, step: { type: "close" }, status: "skipped" },
+    ]);
+
+    expect(prepared.summary).toContain("### Failing steps");
+    expect(prepared.summary).toContain('steps[1] (assert) failed: assertion eq failed: expected "ready", observed "loading"');
+    expect(prepared.summary).toContain("teardown[0] (close) skipped");
+    expect(prepared.summary).not.toContain("setup[0] (launch) passed");
   });
 
   test("normalizes an unsafe evidence name inside runner temp", async () => {

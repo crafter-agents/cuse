@@ -32,6 +32,12 @@ function sanitize(value, key = "") {
   ]));
 }
 
+function formatFailingSteps(steps) {
+  return steps
+    .filter((step) => step.status !== "passed")
+    .map((step) => `${step.phase}[${step.index}] (${step.step?.type}) ${step.status}${step.message ? `: ${step.message}` : ""}`);
+}
+
 const evidenceName = portableName(requestedName);
 const evidenceRoot = join(runnerTemp, "cuse-evidence");
 const evidencePath = join(evidenceRoot, evidenceName);
@@ -66,6 +72,12 @@ const exitDisplay = exitCode === undefined ? "not reported" : String(exitCode);
 const gap = status === "adapter_failure"
   ? "\n> Gap: The execution adapter did not provide a valid scenario result and exit code.\n"
   : "";
+const failingSteps = status !== "passed" && Array.isArray(result?.data?.steps)
+  ? formatFailingSteps(result.data.steps)
+  : [];
+const failureDetails = failingSteps.length > 0
+  ? ["", "### Failing steps", "", ...failingSteps]
+  : [];
 await appendFile(summaryFile, [
   "## cuse scenario result",
   "",
@@ -74,5 +86,6 @@ await appendFile(summaryFile, [
   `| Status | \`${status}\` |`,
   `| Exit code | \`${exitDisplay}\` |`,
   `| Evidence | \`${evidencePath}\` |`,
+  ...failureDetails,
   gap,
 ].join("\n"), "utf8");
