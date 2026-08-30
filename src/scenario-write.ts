@@ -7,6 +7,7 @@ import {
 
 type ScenarioDraftOptions = {
   vars?: Record<string, unknown>;
+  defaultTimeoutMs?: number;
 };
 
 function requireValidScenario(input: unknown): Scenario {
@@ -26,6 +27,7 @@ export function buildScenarioDraft(
     version: SCENARIO_SCHEMA_VERSION,
     name,
     vars: opts?.vars ?? {},
+    ...(opts?.defaultTimeoutMs === undefined ? {} : { defaultTimeoutMs: opts.defaultTimeoutMs }),
     steps,
   });
 }
