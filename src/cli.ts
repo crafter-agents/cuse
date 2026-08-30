@@ -24,7 +24,7 @@ import { elementsCmd, parseElements, pickElement, pointInElement, describeElemen
 import { runningAppsCmd, parseApps, pickApp, describeApps, type App } from "./apps.ts";
 import { displaysCmd, parseDisplays, frameOrigin, coverageWarning, toScreenPoint,
          desktopBounds, type Display } from "./display.ts";
-import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
+import { parseArgs as parseBaseArgs, tokenize, withSession, type Session } from "./args.ts";
 import { recognizeText } from "./ocr.ts";
 import {
   parseScenario,
@@ -48,6 +48,7 @@ import type { PortProtocol } from "./probes/types.ts";
 import { realDoctorProbe, runDoctor, type DoctorVerdict } from "./doctor.ts";
 import { which } from "./node-compat.ts";
 import { startMcpServer } from "./mcp.ts";
+import { buildScenarioDraftFromRecordedEvents } from "./scenario-record.ts";
 
 export type Options = {
   allowInput?: boolean;
@@ -69,6 +70,8 @@ export type Options = {
   app?: string;
   /** which named object (e.g. scheduled task) to inspect */
   name?: string;
+  /** JSON object used as variables in a generated scenario */
+  vars?: string;
   /** mouse button used by click and dblclick */
   button?: string;
   /** modifier chord held during click and dblclick */
@@ -101,6 +104,18 @@ export type Result = {
   ok: boolean; action: string; os: OS;
   detail?: string; error?: string; warn?: string; data?: unknown;
 };
+
+function parseArgs(argv: string[]) {
+  const parsed = parseBaseArgs(argv);
+  const varsFlag = argv.find((arg) => arg.startsWith("--vars="));
+  return {
+    ...parsed,
+    opts: {
+      ...parsed.opts,
+      vars: varsFlag === undefined ? undefined : varsFlag.slice("--vars=".length),
+    },
+  };
+}
 
 function isScenarioValue(value: unknown): value is ScenarioValue {
   if (value === null || typeof value === "boolean" || typeof value === "number" ||
@@ -802,6 +817,59 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         };
       }
 
+      case "scenario-draft": {
+        const path = args[0];
+        if (!path) {
+          return { ok: false, ...base, error: "scenario-draft needs a path to recorded events" };
+        }
+        if (!opts.out) {
+          return { ok: false, ...base, error: "scenario-draft needs --out=<path>" };
+        }
+
+        let contents: string;
+        try {
+          contents = await readFile(resolve(path), "utf8");
+        } catch {
+          return { ok: false, ...base, error: `recorded events file not found: ${path}` };
+        }
+
+        let input: unknown;
+        try {
+          input = JSON.parse(contents);
+        } catch {
+          return { ok: false, ...base, error: "recorded events file must contain valid JSON" };
+        }
+
+        let vars: Record<string, unknown> | undefined;
+        if (opts.vars !== undefined) {
+          let parsedVars: unknown;
+          try {
+            parsedVars = JSON.parse(opts.vars);
+          } catch {
+            return { ok: false, ...base, error: "--vars must contain valid JSON" };
+          }
+          if (typeof parsedVars !== "object" || parsedVars === null || Array.isArray(parsedVars)) {
+            return { ok: false, ...base, error: "--vars must be a JSON object" };
+          }
+          vars = parsedVars as Record<string, unknown>;
+        }
+
+        const draft = buildScenarioDraftFromRecordedEvents(input, { name: opts.name, vars });
+        if (!draft.ok) {
+          return { ok: false, ...base, error: draft.error };
+        }
+
+        const out = resolve(opts.out);
+        try {
+          await writeFile(out, draft.serialized);
+        } catch (error) {
+          return { ok: false, ...base,
+            error: `could not write scenario draft: ${error instanceof Error ? error.message : String(error)}` };
+        }
+        return { ok: true, ...base,
+          detail: `scenario draft written -> ${out}`, data: { path: out } };
+      }
+
       case "compare": {
         const path = args[0];
         if (!path) {
@@ -1498,6 +1566,7 @@ Batching
                                [["move",10,20],["click"]] or [{"action":"click"}]
   scenario <path>              run a declarative JSON scenario file
                                (--repeat=<n> reports per-step flake rates)
+  scenario-draft <path>        convert recorded click events to a scenario; requires --out
 
 Input
   type <text>                  send text to the focused window

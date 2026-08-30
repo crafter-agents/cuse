@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { Element } from "../src/elements.ts";
-import { recordedClicksToScenarioSteps } from "../src/scenario-record.ts";
+import {
+  buildScenarioDraftFromRecordedEvents,
+  recordedClicksToScenarioSteps,
+} from "../src/scenario-record.ts";
 import { parseScenario } from "../src/scenario.ts";
 import { buildScenarioDraft, serializeScenario } from "../src/scenario-write.ts";
 
@@ -67,6 +70,44 @@ describe("recorded clicks to scenario steps", () => {
       expect(parsed.scenario.steps.every((step) =>
         ["cuse", "exec", "json", "assert", "wait"].includes(step.type)
       )).toBe(true);
+    }
+  });
+});
+
+describe("scenario draft from recorded events", () => {
+  const events = [
+    { point: { x: 720, y: 30 }, timestampMs: 0, elements },
+    { point: { x: 900, y: 650 }, timestampMs: 1_500, elements },
+  ];
+
+  test("serializes the same steps as the recorded click converter", () => {
+    const result = buildScenarioDraftFromRecordedEvents(events, { name: "saved flow" });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const parsed = parseScenario(JSON.parse(result.serialized));
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) {
+        expect(parsed.scenario.steps).toEqual(recordedClicksToScenarioSteps(events));
+      }
+    }
+  });
+
+  test("rejects non-array input without throwing", () => {
+    expect(buildScenarioDraftFromRecordedEvents({ events })).toEqual({
+      ok: false,
+      error: "recorded events must be an array",
+    });
+  });
+
+  test("uses the default scenario name", () => {
+    const result = buildScenarioDraftFromRecordedEvents(events);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const parsed = parseScenario(JSON.parse(result.serialized));
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) expect(parsed.scenario.name).toBe("recorded scenario");
     }
   });
 });
