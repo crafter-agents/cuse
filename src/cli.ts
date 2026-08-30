@@ -342,8 +342,8 @@ async function captureCoverage(os: OS, path: string, timeoutMs: number,
  */
 type Tree = { els: Element[]; note?: string };
 
-async function listElements(os: OS, app: string, timeoutMs: number,
-                            depth?: number, limit?: number): Promise<Tree> {
+export async function listElements(os: OS, app: string, timeoutMs: number,
+                                   depth?: number, limit?: number): Promise<Tree> {
   if (os === "macos") return macElements(app, timeoutMs, depth, limit);
   const argv = elementsCmd(os, app, limit, depth);
   const r = await runWithTimeout(argv, timeoutMs);
