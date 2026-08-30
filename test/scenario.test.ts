@@ -34,6 +34,58 @@ describe("scenario schema", () => {
     expect(result.ok).toBe(true);
   });
 
+  test("accepts retries on cuse, exec, JSON, and assert steps", () => {
+    const result = parseScenario({
+      version: 1,
+      name: "retryable steps",
+      vars: {},
+      defaultTimeoutMs: 1_000,
+      steps: [
+        { type: "cuse", action: "launch", retries: 2 },
+        { type: "exec", argv: ["printf", "ok"], retries: 2 },
+        { type: "json", path: "result.json", retries: 2 },
+        { type: "assert", actual: true, operator: "eq", expected: true, retries: 2 },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  test.each([-1, 1.5])("rejects invalid retries value %s", (retries) => {
+    const result = parseScenario({
+      ...minimal(),
+      steps: [{ ...minimal().steps[0], retries }],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "invalid_scenario",
+        path: "$.steps[0].retries",
+        message: "retries must be a non-negative integer",
+      },
+    });
+  });
+
+  test("rejects retries on a wait step as an unknown key", () => {
+    const result = parseScenario({
+      version: 1,
+      name: "invalid wait retries",
+      vars: {},
+      defaultTimeoutMs: 1_000,
+      steps: [{
+        type: "wait",
+        retries: 1,
+        step: { type: "assert", actual: true, operator: "eq", expected: true },
+      }],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: "invalid_scenario", path: "$.steps[0].retries", message: "unknown key: retries" },
+    });
+  });
+
   test.each([
     [{ type: "json" }, "path must be a non-empty string"],
     [{ type: "json", path: 42 }, "path must be a non-empty string"],

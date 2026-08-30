@@ -15,6 +15,7 @@ export type CuseStep = StepBase & {
   action: string;
   args?: string[];
   options?: Record<string, ScenarioValue>;
+  retries?: number;
 };
 
 export type ExecStep = StepBase & {
@@ -23,11 +24,13 @@ export type ExecStep = StepBase & {
   cwd?: string;
   env?: Record<string, string>;
   stdout?: "text" | "json";
+  retries?: number;
 };
 
 export type JsonStep = StepBase & {
   type: "json";
   path: string;
+  retries?: number;
 };
 
 export type AssertOperator = "eq" | "ne" | "contains" | "exists" | "type" | "gt" | "gte" | "lt" | "lte";
@@ -36,6 +39,7 @@ export type AssertStep = StepBase & {
   actual: ScenarioValue;
   operator: AssertOperator;
   expected?: ScenarioValue;
+  retries?: number;
 };
 
 export type WaitStep = StepBase & {
@@ -89,6 +93,10 @@ function validTimeout(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
+function validRetries(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
 function interpolationError(value: unknown, path: string): ScenarioParseResult | undefined {
   if (typeof value === "string") {
     const remainder = value.replace(INTERPOLATION, "");
@@ -131,25 +139,29 @@ function parseStep(value: unknown, path: string, defaultTimeoutMs?: number, nest
   let allowed: string[];
   switch (value.type) {
     case "cuse":
-      allowed = [...BASE_KEYS, "action", "args", "options"];
+      allowed = [...BASE_KEYS, "action", "args", "options", "retries"];
+      if (value.retries !== undefined && !validRetries(value.retries)) return fail(`${path}.retries`, "retries must be a non-negative integer");
       if (typeof value.action !== "string" || value.action.length === 0) return fail(`${path}.action`, "action must be a non-empty string");
       if (value.action === "scenario") return fail(`${path}.action`, "a scenario cannot invoke another scenario");
       if (value.args !== undefined && (!Array.isArray(value.args) || value.args.some((item) => typeof item !== "string"))) return fail(`${path}.args`, "args must be an array of strings");
       if (value.options !== undefined && !record(value.options)) return fail(`${path}.options`, "options must be an object");
       break;
     case "exec":
-      allowed = [...BASE_KEYS, "argv", "cwd", "env", "stdout"];
+      allowed = [...BASE_KEYS, "argv", "cwd", "env", "stdout", "retries"];
+      if (value.retries !== undefined && !validRetries(value.retries)) return fail(`${path}.retries`, "retries must be a non-negative integer");
       if (!Array.isArray(value.argv) || value.argv.length === 0 || value.argv.some((item) => typeof item !== "string")) return fail(`${path}.argv`, "argv must be a non-empty array of strings");
       if (value.cwd !== undefined && typeof value.cwd !== "string") return fail(`${path}.cwd`, "cwd must be a string");
       if (value.env !== undefined && (!record(value.env) || Object.values(value.env).some((item) => typeof item !== "string"))) return fail(`${path}.env`, "env must contain string values");
       if (value.stdout !== undefined && value.stdout !== "text" && value.stdout !== "json") return fail(`${path}.stdout`, "stdout must be \"text\" or \"json\"");
       break;
     case "json":
-      allowed = [...BASE_KEYS, "path"];
+      allowed = [...BASE_KEYS, "path", "retries"];
+      if (value.retries !== undefined && !validRetries(value.retries)) return fail(`${path}.retries`, "retries must be a non-negative integer");
       if (typeof value.path !== "string" || value.path.length === 0) return fail(`${path}.path`, "path must be a non-empty string");
       break;
     case "assert":
-      allowed = [...BASE_KEYS, "actual", "operator", "expected"];
+      allowed = [...BASE_KEYS, "actual", "operator", "expected", "retries"];
+      if (value.retries !== undefined && !validRetries(value.retries)) return fail(`${path}.retries`, "retries must be a non-negative integer");
       if (!("actual" in value)) return fail(`${path}.actual`, "actual is required");
       if (!ASSERT_OPERATORS.has(value.operator as AssertOperator)) return fail(`${path}.operator`, "unsupported assertion operator");
       if (value.operator !== "exists" && !("expected" in value)) return fail(`${path}.expected`, "expected is required for this operator");

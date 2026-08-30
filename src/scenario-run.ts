@@ -76,6 +76,7 @@ type ScenarioContext = {
 const INTERPOLATION = /\$\{(vars\.[A-Za-z_][\w-]*|steps\.[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\}/g;
 const WHOLE_INTERPOLATION = /^\$\{(vars\.[A-Za-z_][\w-]*|steps\.[A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)*)\}$/;
 const MISSING = Symbol("cuse-missing-field");
+const RETRY_DELAY_MS = 10;
 
 function resolveReference(reference: string, context: ScenarioContext): ScenarioValue {
   const [scope, name, ...path] = reference.split(".");
@@ -396,7 +397,20 @@ async function runStep(
     };
   }
 
-  const result = await executeStep(resolvedStep, timeoutMs, options);
+  let attempts = 0;
+  const maxAttempts = resolvedStep.type === "wait" ? 1 : 1 + (resolvedStep.retries ?? 0);
+  let result: Omit<ScenarioStepResult, "phase" | "index" | "step">;
+  do {
+    attempts++;
+    result = await executeStep(resolvedStep, timeoutMs, options);
+    if ((result.status === "failed" || result.status === "timed_out") && attempts < maxAttempts) {
+      await sleep(RETRY_DELAY_MS);
+    } else {
+      break;
+    }
+  } while (attempts < maxAttempts);
+
+  if (resolvedStep.type !== "wait") result = { ...result, attempts };
   const containsMissing = resolvedStep.type === "assert" &&
     ((resolvedStep.actual as unknown) === MISSING || (resolvedStep.expected as unknown) === MISSING);
   if (step.saveAs && !containsMissing) context.steps[step.saveAs] = savedValue(resolvedStep, result);
