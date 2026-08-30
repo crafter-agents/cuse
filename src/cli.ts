@@ -113,6 +113,7 @@ export type Result = {
 };
 
 export type ActDependencies = {
+  os?: OS;
   readSessionLockState?: (os: OS) => Promise<string | null>;
   startScenarioCapture?: (options: MacOSClickCaptureOptions) => Promise<{ stop(): void }>;
   waitForScenarioStop?: (durationMs: number) => Promise<void>;
@@ -652,7 +653,7 @@ async function act(
   opts: Options = {},
   dependencies: ActDependencies = {},
 ): Promise<Result> {
-  const os = detectOS();
+  const os = dependencies.os ?? detectOS();
   const base = { action, os };
   if (action === "fill") {
     const aimed = opts.window || opts.find || opts.element || opts.role;

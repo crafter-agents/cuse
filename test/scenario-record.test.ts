@@ -121,6 +121,7 @@ describe("record --scenario CLI", () => {
   test("refuses a locked session without starting capture", async () => {
     let captureStarted = false;
     const result = await act("record", [], { scenario: true, out: "unused.json" }, {
+      os: "macos",
       readSessionLockState: async () =>
         "<key>CGSSessionScreenIsLocked</key><true/>",
       startScenarioCapture: async () => {
@@ -138,6 +139,7 @@ describe("record --scenario CLI", () => {
     const out = join(dir, "recording.json");
     try {
       const result = await act("record", [], { scenario: true, out }, {
+        os: "macos",
         readSessionLockState: async () =>
           "<key>CGSSessionScreenIsLocked</key><false/>",
         startScenarioCapture: async ({ onError }) => {
