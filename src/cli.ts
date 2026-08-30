@@ -1065,6 +1065,7 @@ async function act(
             (onClick) => (dependencies.startScenarioCapture ?? captureMacOSClicks)({
               onClick,
               onError: (error) => captureErrors.push(error),
+              listElements: (app, timeoutMs) => listElements("macos", app, timeoutMs),
             }),
             (dependencies.waitForScenarioStop ?? sleep)(opts.durationMs ?? 30_000),
           );

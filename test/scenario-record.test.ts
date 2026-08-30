@@ -156,4 +156,24 @@ describe("record --scenario CLI", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test("injects the CLI element reader into the macOS capture", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cuse-scenario-record-test-"));
+    const out = join(dir, "recording.json");
+    let hasElementReader = false;
+    try {
+      await act("record", [], { scenario: true, out, force: true }, {
+        os: "macos",
+        startScenarioCapture: async (options) => {
+          hasElementReader = typeof options.listElements === "function";
+          return { stop() {} };
+        },
+        waitForScenarioStop: async () => {},
+      });
+
+      expect(hasElementReader).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

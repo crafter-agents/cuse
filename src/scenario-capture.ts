@@ -40,6 +40,7 @@ export type MacOSClickCaptureOptions = {
   accessibilityTimeoutMs?: number;
   onClick: (event: RecordedClickEvent) => void;
   onError?: (error: unknown) => void;
+  listElements?: (app: string, timeoutMs: number) => Promise<{ els: RecordedClickEvent["elements"] }>;
 };
 
 export type ScenarioClickCaptureStarter = (
@@ -66,7 +67,10 @@ export async function captureMacOSClicks(
   options: MacOSClickCaptureOptions,
 ): Promise<{ stop(): void }> {
   const pollers = await createMousePollers();
-  const { listElements } = await import("./cli.ts");
+  const listElements = options.listElements ?? (async (app: string, timeoutMs: number) => {
+    const cli = await import("./cli.ts");
+    return cli.listElements("macos", app, timeoutMs);
+  });
   let pending = Promise.resolve();
 
   return detectClickEdges({
@@ -79,11 +83,7 @@ export async function captureMacOSClicks(
           throw new Error("could not determine the frontmost application");
         }
         const app = parseFrontmost(result.stdout).split(" ")[0] ?? "";
-        const { els } = await listElements(
-          "macos",
-          app,
-          options.accessibilityTimeoutMs ?? 5_000,
-        );
+        const { els } = await listElements(app, options.accessibilityTimeoutMs ?? 5_000);
         options.onClick({ point, timestampMs, elements: els });
       }).catch((error) => options.onError?.(error));
     },
