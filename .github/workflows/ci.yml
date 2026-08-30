@@ -506,6 +506,26 @@ jobs:
             electron-pass.json
             electron-fail.json
 
+  electron-flake-matrix:
+    runs-on: macos-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun install
+      - run: bunx install-electron
+      - run: bun build --compile --external koffi src/cli.ts --outfile cuse
+      - name: measure Electron scenario flake rate
+        run: |
+          ./cuse scenario scenarios/electron-probe.json --repeat=20 --json \
+            | tee electron-flake-matrix.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: electron-flake-matrix
+          path: electron-flake-matrix.json
+
   # Every other Windows proof drives a window this repo builds for the purpose,
   # which is the bias the rest of this file exists to remove: a target you wrote
   # answers the way you expected. Character Map is shipped by Microsoft, is a
