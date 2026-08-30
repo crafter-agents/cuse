@@ -28,6 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      - run: bun install
       - name: the CLI, the package and the tag must agree
         run: |
           cli=$(bun -e 'const m = await import("./src/cli.ts"); console.log(m.VERSION)')
@@ -63,6 +64,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: latest }
+      - run: bun install
       - run: bun test
       - name: compile
         run: bun build --compile --external koffi --target=${{ matrix.target }} src/cli.ts --outfile ${{ matrix.name }}
