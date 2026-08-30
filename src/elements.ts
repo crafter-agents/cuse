@@ -582,6 +582,35 @@ export function pointInElement(e: Element, fx = 0.5, fy = 0.5): { x: number; y: 
   return { x: Math.round(e.x + e.width * fx), y: Math.round(e.y + e.height * fy) };
 }
 
+export type HitPoint = { x: number; y: number };
+
+/**
+ * Which element is at this point, if any.
+ *
+ * A recorder that watched a click has a pixel, not a name. This turns the
+ * pixel back into the most specific accessibility identity under it: the
+ * smallest element whose rectangle contains the point, not the first or
+ * last one in whatever order the backend happened to list them. Smallest
+ * wins because a control (a button) is normally smaller than whatever it
+ * sits inside (a toolbar, a window), and this is the one answer that does
+ * not depend on an ordering contract no backend here actually promises.
+ * Zero-area elements (width or height <= 0) never match: they cannot
+ * meaningfully contain a point. Ties break on list order (first wins),
+ * since a tie is degenerate input, not a real scenario.
+ */
+export function resolveHitElement(elements: Element[], point: HitPoint): Element | undefined {
+  let best: Element | undefined;
+  let bestArea = Infinity;
+  for (const e of elements) {
+    if (e.width <= 0 || e.height <= 0) continue;
+    if (point.x < e.x || point.x >= e.x + e.width) continue;
+    if (point.y < e.y || point.y >= e.y + e.height) continue;
+    const area = e.width * e.height;
+    if (area < bestArea) { bestArea = area; best = e; }
+  }
+  return best;
+}
+
 /** Describe one control and every state property its backend actually reported. */
 export function describeElement(e: Element): string {
   const properties: string[] = [];
