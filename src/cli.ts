@@ -26,7 +26,13 @@ import { displaysCmd, parseDisplays, frameOrigin, coverageWarning, toScreenPoint
          desktopBounds, type Display } from "./display.ts";
 import { parseArgs, tokenize, withSession, type Session } from "./args.ts";
 import { recognizeText } from "./ocr.ts";
-import { parseScenario, runScenario, type ScenarioValue } from "./scenario.ts";
+import {
+  parseScenario,
+  runScenario,
+  type Scenario,
+  type ScenarioRunResult,
+  type ScenarioValue,
+} from "./scenario.ts";
 import { runComparison, type ComparisonManifest } from "./compare-run.ts";
 import { cleanupComparisonRunDirs } from "./compare-isolation.ts";
 import { createStepEvidenceSink } from "./evidence.ts";
@@ -84,6 +90,8 @@ export type Options = {
   steps?: number;
   /** delete compare's temp evidence and work directories once the report is built */
   keepEvidence?: boolean;
+  /** run a scenario this many times and aggregate per-step reliability */
+  repeat?: number;
 };
 
 export type Result = {
@@ -97,6 +105,63 @@ function isScenarioValue(value: unknown): value is ScenarioValue {
   if (Array.isArray(value)) return value.every(isScenarioValue);
   if (typeof value !== "object") return false;
   return Object.values(value).every(isScenarioValue);
+}
+
+export type ScenarioRepeatStepResult = {
+  phase: "steps" | "finally";
+  index: number;
+  passed: number;
+  failed: number;
+  passRate: number;
+  flakeRate: number;
+  attempts: number[];
+};
+
+export type ScenarioRepeatResult = {
+  status: "passed" | "failed";
+  name: string;
+  platform: ScenarioRunResult["platform"];
+  durationMs: number;
+  runs: number;
+  passed: number;
+  failed: number;
+  steps: ScenarioRepeatStepResult[];
+};
+
+export function aggregateScenarioRuns(
+  scenario: Scenario,
+  runs: ScenarioRunResult[],
+): ScenarioRepeatResult {
+  const steps = [
+    ...scenario.steps.map((_, index) => ({ phase: "steps" as const, index })),
+    ...(scenario.finally ?? []).map((_, index) => ({ phase: "finally" as const, index })),
+  ].map(({ phase, index }) => {
+    const observed = runs.flatMap((run) =>
+      run.steps.filter((step) => step.phase === phase && step.index === index)
+    );
+    const passed = observed.filter((step) => step.status === "passed").length;
+    const failed = runs.length - passed;
+    return {
+      phase,
+      index,
+      passed,
+      failed,
+      passRate: runs.length === 0 ? 0 : passed / runs.length,
+      flakeRate: runs.length === 0 ? 0 : failed / runs.length,
+      attempts: observed.map((step) => step.attempts),
+    };
+  });
+  const passed = runs.filter((run) => run.status === "passed").length;
+  return {
+    status: passed === runs.length ? "passed" : "failed",
+    name: scenario.name,
+    platform: runs[0]?.platform,
+    durationMs: runs.reduce((total, run) => total + run.durationMs, 0),
+    runs: runs.length,
+    passed,
+    failed: runs.length - passed,
+    steps,
+  };
 }
 
 /**
@@ -654,6 +719,10 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
         if (!path) {
           return { ok: false, ...base, error: "scenario needs a path to a scenario file" };
         }
+        if (opts.repeat !== undefined &&
+            (!Number.isInteger(opts.repeat) || opts.repeat < 1)) {
+          return { ok: false, ...base, error: "--repeat must be a positive integer" };
+        }
 
         let contents: string;
         try {
@@ -675,7 +744,7 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
             error: `invalid scenario at ${parsed.error.path}: ${parsed.error.message}` };
         }
 
-        const result = await runScenario(parsed.scenario, {
+        const scenarioOptions = {
           invokeCuse: async (action, args, options) => {
             const invoked = await act(action, args, options as Options);
             return {
@@ -685,7 +754,23 @@ async function act(action: string, args: string[], opts: Options = {}): Promise<
               ...(isScenarioValue(invoked.data) ? { data: invoked.data } : {}),
             };
           },
-        });
+        };
+        if (opts.repeat !== undefined) {
+          const runs: ScenarioRunResult[] = [];
+          for (let iteration = 0; iteration < opts.repeat; iteration++) {
+            runs.push(await runScenario(parsed.scenario, scenarioOptions));
+          }
+          const repeated = aggregateScenarioRuns(parsed.scenario, runs);
+          return {
+            ok: repeated.status === "passed",
+            ...base,
+            detail: `scenario ${repeated.name}: ${repeated.passed}/${repeated.runs} runs passed in ${repeated.durationMs}ms`,
+            data: repeated,
+            ...(repeated.status === "passed" ? {} : { error: `scenario failed in ${repeated.failed} of ${repeated.runs} runs` }),
+          };
+        }
+
+        const result = await runScenario(parsed.scenario, scenarioOptions);
         const ok = result.status === "passed";
         const failedStep = result.steps.find((step) => step.status !== "passed");
         const error = failedStep
@@ -1389,6 +1474,7 @@ Batching
   run '<json>'                 several actions in one process, in order
                                [["move",10,20],["click"]] or [{"action":"click"}]
   scenario <path>              run a declarative JSON scenario file
+                               (--repeat=<n> reports per-step flake rates)
 
 Input
   type <text>                  send text to the focused window
@@ -1410,6 +1496,7 @@ Other
 
 Flags
   --json                       structured Result on stdout
+  --repeat=<n>                 run a scenario n times and report per-step flake rates
   --timeout=<ms>               deadline for this action
   --duration=<ms>              drag duration (default 150)
   --steps=<n>                  drag interpolation steps (default 5)

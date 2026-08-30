@@ -28,6 +28,53 @@ const exec = (script: string, timeoutMs?: number, cwd?: string): ScenarioStep =>
 });
 
 describe("scenario execution lifecycle", () => {
+  test("passes a cuse step on its third attempt", async () => {
+    let calls = 0;
+    const result = await runScenario(scenario([{
+      type: "cuse",
+      action: "flaky",
+      retries: 2,
+    }]), {
+      invokeCuse: async () => ({ ok: ++calls >= 3 }),
+    });
+
+    expect(result.steps[0]).toMatchObject({ status: "passed", attempts: 3 });
+    expect(calls).toBe(3);
+  });
+
+  test("reports exhausted cuse retries", async () => {
+    let calls = 0;
+    const result = await runScenario(scenario([{
+      type: "cuse",
+      action: "failing",
+      retries: 1,
+    }]), {
+      invokeCuse: async () => {
+        calls++;
+        return { ok: false };
+      },
+    });
+
+    expect(result.steps[0]).toMatchObject({ status: "failed", attempts: 2 });
+    expect(calls).toBe(2);
+  });
+
+  test("keeps one attempt when retries are omitted", async () => {
+    let calls = 0;
+    const result = await runScenario(scenario([{
+      type: "cuse",
+      action: "failing",
+    }]), {
+      invokeCuse: async () => {
+        calls++;
+        return { ok: false };
+      },
+    });
+
+    expect(result.steps[0]).toMatchObject({ status: "failed", attempts: 1 });
+    expect(calls).toBe(1);
+  });
+
   test("emits ordered events for a normal failure followed by cleanup", async () => {
     const events: ScenarioStepEvent[] = [];
     const result = await runScenario(scenario([
