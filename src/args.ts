@@ -63,6 +63,7 @@ export function parseArgs(argv: string[]): Parsed {
     limit: num(flag("limit")),
     video: argv.includes("--video"),
     out: flag("out"),
+    report: flag("report"),
     pid: num(flag("pid")),
     port: num(flag("port")),
     protocol: flag("protocol"),

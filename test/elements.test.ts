@@ -1,7 +1,8 @@
 import { test, expect, describe } from "bun:test";
 import {
   elementsCmd, parseElements, pickElement, pointInElement, resolveHitElement,
-  normalizeRole, resolveWindowsRole, describeElement, describeMisses, geometryLooksUsable, type Element,
+  normalizeRole, resolveWindowsRole, describeElement, describeMisses, presentElementSummaries,
+  geometryLooksUsable, type Element,
 } from "../src/elements.ts";
 import type { OS } from "../src/os.ts";
 
@@ -333,6 +334,19 @@ describe("when nothing matches", () => {
   });
   test("says so plainly when there is nothing named at all", () => {
     expect(describeMisses([el({ name: "" })], { name: "x" })).toContain("no named controls");
+  });
+  test("returns every named element as structured summaries", () => {
+    expect(presentElementSummaries(els, { name: "Print" })).toEqual([
+      { role: "button", name: "Save" },
+      { role: "button", name: "Cancel" },
+    ]);
+  });
+  test("narrows structured summaries by the requested role", () => {
+    const mixed = [...els, el({ name: "Print preview", role: "label" })];
+    expect(presentElementSummaries(mixed, { name: "Print", role: "button" })).toEqual([
+      { role: "button", name: "Save" },
+      { role: "button", name: "Cancel" },
+    ]);
   });
 });
 

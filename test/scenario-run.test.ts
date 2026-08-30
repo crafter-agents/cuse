@@ -429,6 +429,24 @@ describe("scenario variables and saved step results", () => {
     });
   });
 
+  test("preserves present elements from a failed cuse step", async () => {
+    const presentElements = [
+      { role: "button", name: "OK" },
+      { role: "button", name: "Cancel" },
+    ];
+    const failed = await runScenario(scenario([
+      { type: "cuse", action: "click", args: ["Save"] },
+    ]), {
+      invokeCuse: async () => ({
+        ok: false,
+        error: "no control matching 'Save' - what is there: button 'OK', button 'Cancel'",
+        data: { presentElements },
+      }),
+    });
+
+    expect(failed.steps[0].cuse?.data?.presentElements).toEqual(presentElements);
+  });
+
   test("evaluates an absent JSON field as missing instead of a resolution error", async () => {
     const result = await runScenario(scenario([
       {

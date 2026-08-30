@@ -3,9 +3,11 @@ import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { act, exitCodeFor, fillTarget, macSessionUnreachable, pointScale, VERSION, type Result } from "../src/cli.ts";
+import { buildFailureReport, formatFailureReport } from "../src/failure-report.ts";
 import type { OS } from "../src/os.ts";
 import { detectOS } from "../src/os.ts";
 import type { Plan } from "../src/plan.ts";
+import type { ScenarioRunResult } from "../src/scenario.ts";
 
 const r = (over: Partial<Result>): Result => ({ ok: false, action: "type", os: "macos", ...over });
 
@@ -166,6 +168,42 @@ test("scenario reports a failed assertion as a plain failure", async () => {
   expect(result.ok).toBe(false);
   expect(result.error).toStartWith("scenario failed: steps step 1:");
   expect(exitCodeFor(result)).toBe(1);
+});
+
+test("scenario writes its formatted failure report to the requested path", async () => {
+  const path = scenarioPath("failure-report");
+  const reportPath = scenarioPath("failure-report-output");
+  await Bun.write(path, JSON.stringify({
+    version: 1,
+    name: "failure report CLI scenario",
+    vars: {},
+    defaultTimeoutMs: 1_000,
+    steps: [{ type: "assert", actual: 1, operator: "eq", expected: 2 }],
+  }));
+
+  const result = await act("scenario", [path], { report: reportPath });
+  const report = buildFailureReport(result.data as ScenarioRunResult);
+
+  expect(result.ok).toBe(false);
+  expect(report).toBeDefined();
+  expect(await Bun.file(reportPath).text()).toBe(formatFailureReport(report!));
+});
+
+test("scenario does not write a failure report for a passing run", async () => {
+  const path = scenarioPath("passing-report");
+  const reportPath = scenarioPath("passing-report-output");
+  await Bun.write(path, JSON.stringify({
+    version: 1,
+    name: "passing report CLI scenario",
+    vars: {},
+    defaultTimeoutMs: 1_000,
+    steps: [{ type: "assert", actual: 1, operator: "eq", expected: 1 }],
+  }));
+
+  const result = await act("scenario", [path], { report: reportPath });
+
+  expect(result.ok).toBe(true);
+  expect(await Bun.file(reportPath).exists()).toBe(false);
 });
 
 test("scenario reports a missing file as bad usage", async () => {
