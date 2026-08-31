@@ -144,7 +144,7 @@ test("run routes a scenario file through repeat aggregation", async () => {
     steps: [{ type: "assert", actual: "same", operator: "eq", expected: "same" }],
   }));
 
-  const result = await act("run", [path], { repeat: 3 });
+  const result = await act("run", [path], { repeat: 3 }, { os: "linux" });
 
   expect(result.ok).toBe(true);
   expect(result.data).toMatchObject({

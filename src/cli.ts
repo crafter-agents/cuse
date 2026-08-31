@@ -655,6 +655,9 @@ async function act(
 ): Promise<Result> {
   const os = dependencies.os ?? detectOS();
   const base = { action, os };
+  if (action === "run" && args.length === 1 && args[0]?.toLowerCase().endsWith(".json")) {
+    return act("scenario", args, opts, dependencies);
+  }
   if (action === "fill") {
     const aimed = opts.window || opts.find || opts.element || opts.role;
     const hasOneCoordinate = (args[1] !== undefined) !== (args[2] !== undefined);
@@ -732,9 +735,6 @@ async function act(
       // that fails on this platform should fail with its own error, not a
       // different one invented by the batcher.
       case "run": {
-        if (args.length === 1 && args[0]?.toLowerCase().endsWith(".json")) {
-          return act("scenario", args, opts, dependencies);
-        }
         const raw = args.join(" ").trim();
         if (!raw) return { ok: false, ...base, error: "run needs a JSON array of actions, or --file" };
 
