@@ -166,6 +166,7 @@ else
 tell application "System Events"
   set panelProcess to first application process whose bundle identifier is "com.apple.appkit.xpc.openAndSavePanelService"
   set frontmost of panelProcess to true
+  log "READBACK frontmost=" & (frontmost of panelProcess)
   key code 53
 end tell
 APPLESCRIPT
