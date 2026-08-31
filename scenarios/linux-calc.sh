@@ -69,18 +69,23 @@ click_named = Calculate Equals || exit 1
 sleep 2
 "$CUSE" elements "$CALCULATOR_BIN" --json | tee calc-elements-result.json
 
-# Build two scenario documents around the live result control that AT-SPI
-# exposed. The selector must identify the same control without using its value.
+# Build two scenario documents that re-read the live tree and select the focused
+# text control. Focus is how the calculator identifies its display, independent
+# of the value the assertion expects.
 bun -e '
   const app = process.env.CALCULATOR_BIN;
   const els = (await Bun.file("calc-elements-result.json").json()).data;
-  const target = els.find((e) => String(e.value ?? "").trim() === "8");
-  if (!target) throw new Error("no accessible control reports the computed value 8");
-  const selected = els.find((e) => e.role === target.role && e.name === target.name);
-  if (selected !== target)
-    throw new Error(`the available ${target.role}/${target.name} selector does not resolve to the result control`);
-  const options = { role: target.role };
-  if (target.name) options.element = target.name;
+  const target = els.find((e) => e.role === "text" && e.focused && e.value != null);
+  if (!target) throw new Error("no focused calculator display in the accessibility tree");
+  const reader = `
+    const app = process.argv[1];
+    const run = Bun.spawnSync(["./cuse", "elements", app, "--json"]);
+    if (run.exitCode !== 0) throw new Error(new TextDecoder().decode(run.stderr));
+    const tree = JSON.parse(new TextDecoder().decode(run.stdout)).data;
+    const display = tree.find((e) => e.role === "text" && e.focused && e.value != null);
+    if (!display) throw new Error("no focused calculator display in the live accessibility tree");
+    console.log(JSON.stringify({ value: String(display.value).trim() }));
+  `;
   const scenario = (expected, suffix) => ({
     version: 1,
     name: `assert a live Linux calculator value${suffix}`,
@@ -88,8 +93,8 @@ bun -e '
     vars: {},
     defaultTimeoutMs: 20000,
     steps: [
-      { type: "cuse", action: "element", args: [app], options, saveAs: "target" },
-      { type: "assert", actual: "${steps.target.data.value}", operator: "eq", expected },
+      { type: "exec", argv: ["bun", "-e", reader, app], stdout: "json", saveAs: "target" },
+      { type: "assert", actual: "${steps.target.json.value.value}", operator: "eq", expected },
     ],
   });
   await Bun.write("calc-assert.json", JSON.stringify(scenario("8", ""), null, 2));
@@ -98,9 +103,13 @@ bun -e '
 ' | tee calc-result-selector.log
 
 "$CUSE" scenario calc-assert.json --json | tee calc-assert-pass.json
-grep -q '"ok":true' calc-assert-pass.json || {
+bun -e 'const r = await Bun.file("calc-assert-pass.json").json(); process.exit(r.ok === true ? 0 : 1)' || {
   say "the correct-value assertion did not pass against the live calculator display"; exit 1; }
 "$CUSE" scenario calc-assert-negative.json --json | tee calc-assert-fail.json
-grep -q '"ok":false' calc-assert-fail.json || {
+bun -e '
+  const r = await Bun.file("calc-assert-fail.json").json();
+  const discriminates = r.ok === false && r.error?.includes("expected \"9\", observed \"8\"");
+  process.exit(discriminates ? 0 : 1);
+' || {
   say "the wrong-value assertion did not fail; the assertion is not discriminating live state"; exit 1; }
 say "computed 5 + 3 through named buttons, observed 8, and forced the same assertion red with 9"
