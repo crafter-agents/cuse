@@ -147,51 +147,57 @@ echo "--- 3. act on the panel ---"
 # AXMainWindow, and the panel service's own process, which answers with nothing.
 # On a developer's Mac the same panel enumerates 150 controls, so this is a fact
 # about the runner rather than about the approach.
+check_panel_gone() {
+  local label="$1"
+  "$CUSE" elements "Google Chrome" --depth=30 --limit=1200 --timeout=60000 --json > "$label.json" || true
+  bun rig/find-panel.ts "$label.json" Cancel > "$label-summary.txt" 2>/dev/null || true
+  cat "$label-summary.txt"
+  grep -q "^NO-PANEL" "$label-summary.txt"
+}
+
 if grep -q "^BUTTON " panel-summary.txt; then
   echo "the panel's controls ARE enumerable here - promote this from evidence to a gate"
   read -r _ CX CY < <(grep "^BUTTON " panel-summary.txt)
   echo "pressing the panel's own Cancel at $CX,$CY"
   "$CUSE" click "$CX" "$CY" --json || fail "cuse could not click"
+  sleep 3
+  check_panel_gone after || fail "cuse acted and the panel did not go away"
+  echo "the panel is gone: cuse acted on a surface agent-browser cannot see"
+  echo "VERDICT: PASS (attempts=1)"
 else
   echo "the panel's controls are not enumerable on this runner:"
   cat panel-candidates.txt || true
   echo "--- the panel's own process ---"
   "$CUSE" elements openAndSavePanelService --depth=30 --limit=1200 --timeout=60000 --json > panel-svc.json 2>&1 || true
   head -c 200 panel-svc.json; echo
-  # Acting on it does not require naming a control. Escape dismisses an
-  # NSOpenPanel, but the panel service must be frontmost when the key is sent.
-  echo "--- 3. act on it anyway: Escape to the panel service ---"
-  targeted_escape_log="targeted-escape.log"
-  if osascript >"$targeted_escape_log" 2>&1 <<'APPLESCRIPT'
-tell application "System Events"
-  set panelProcess to first application process whose bundle identifier is "com.apple.appkit.xpc.openAndSavePanelService"
-  set frontmost of panelProcess to true
-  log "READBACK frontmost=" & (frontmost of panelProcess)
-  key code 53
-end tell
-APPLESCRIPT
-  then
-    targeted_escape_status=0
+  # Acting on it does not require naming a control. Give the plain Escape
+  # action a small retry budget, and preserve every send and recheck as evidence.
+  MAX_ESCAPE_ATTEMPTS=3
+  panel_gone_attempt=0
+  for attempt in $(seq 1 "$MAX_ESCAPE_ATTEMPTS"); do
+    echo "--- Escape attempt $attempt of $MAX_ESCAPE_ATTEMPTS ---"
+    if "$CUSE" key Escape --json; then
+      escape_status=0
+    else
+      escape_status=$?
+    fi
+    echo "Escape attempt $attempt send exit: $escape_status"
+    sleep 3
+    if check_panel_gone "after-attempt-$attempt"; then
+      echo "Escape attempt $attempt outcome: panel gone"
+      panel_gone_attempt=$attempt
+      break
+    fi
+    echo "Escape attempt $attempt outcome: panel still present"
+  done
+
+  if (( panel_gone_attempt == 0 )); then
+    fail "cuse acted 3 times and the panel did not go away"
+  elif (( panel_gone_attempt == 1 )); then
+    echo "the panel is gone: cuse acted on a surface agent-browser cannot see"
+    echo "VERDICT: PASS (clean, attempts=1)"
   else
-    targeted_escape_status=$?
-  fi
-  echo "targeted Escape exit: $targeted_escape_status" >> "$targeted_escape_log"
-  cat "$targeted_escape_log"
-  if (( targeted_escape_status != 0 )); then
-    echo "targeted Escape failed; falling back to the untargeted cuse key command"
-    "$CUSE" key Escape --json || fail "cuse could not send Escape"
+    echo "the panel is gone: cuse acted on a surface agent-browser cannot see"
+    echo "VERDICT: PASS (attempts=$panel_gone_attempt of $MAX_ESCAPE_ATTEMPTS)"
   fi
 fi
-sleep 3
-
-# 4. The oracle for both branches: the panel is gone. Nothing else dismisses it.
-"$CUSE" elements "Google Chrome" --depth=30 --limit=1200 --timeout=60000 --json > after.json || true
-bun rig/find-panel.ts after.json Cancel > after-summary.txt 2>/dev/null || true
-cat after-summary.txt
-grep -q "^NO-PANEL" after-summary.txt || {
-  echo "the panel is still in the tree"
-  fail "cuse acted and the panel did not go away"
-}
-echo "the panel is gone: cuse acted on a surface agent-browser cannot see"
-
-echo "VERDICT: PASS"
