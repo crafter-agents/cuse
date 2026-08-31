@@ -732,6 +732,9 @@ async function act(
       // that fails on this platform should fail with its own error, not a
       // different one invented by the batcher.
       case "run": {
+        if (args.length === 1 && args[0]?.toLowerCase().endsWith(".json")) {
+          return act("scenario", args, opts, dependencies);
+        }
         const raw = args.join(" ").trim();
         if (!raw) return { ok: false, ...base, error: "run needs a JSON array of actions, or --file" };
 
@@ -1615,6 +1618,8 @@ Finding things
 Batching
   run '<json>'                 several actions in one process, in order
                                [["move",10,20],["click"]] or [{"action":"click"}]
+  run <scenario.json>          run a declarative JSON scenario file
+                               (--repeat=<n> reports per-step flake rates)
   scenario <path>              run a declarative JSON scenario file
                                (--repeat=<n> reports per-step flake rates)
   scenario-draft <path>        convert recorded click events to a scenario; requires --out
