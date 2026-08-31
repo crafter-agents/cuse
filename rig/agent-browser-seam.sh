@@ -159,10 +159,27 @@ else
   "$CUSE" elements openAndSavePanelService --depth=30 --limit=1200 --timeout=60000 --json > panel-svc.json 2>&1 || true
   head -c 200 panel-svc.json; echo
   # Acting on it does not require naming a control. Escape dismisses an
-  # NSOpenPanel, and the keystroke goes to whatever is frontmost - which is the
-  # panel, in another process, that CDP cannot reach.
-  echo "--- 3. act on it anyway: Escape to the frontmost surface ---"
-  "$CUSE" key Escape --json || fail "cuse could not send Escape"
+  # NSOpenPanel, but the panel service must be frontmost when the key is sent.
+  echo "--- 3. act on it anyway: Escape to the panel service ---"
+  targeted_escape_log="targeted-escape.log"
+  if osascript >"$targeted_escape_log" 2>&1 <<'APPLESCRIPT'
+tell application "System Events"
+  set panelProcess to first application process whose bundle identifier is "com.apple.appkit.xpc.openAndSavePanelService"
+  set frontmost of panelProcess to true
+  key code 53
+end tell
+APPLESCRIPT
+  then
+    targeted_escape_status=0
+  else
+    targeted_escape_status=$?
+  fi
+  echo "targeted Escape exit: $targeted_escape_status" >> "$targeted_escape_log"
+  cat "$targeted_escape_log"
+  if (( targeted_escape_status != 0 )); then
+    echo "targeted Escape failed; falling back to the untargeted cuse key command"
+    "$CUSE" key Escape --json || fail "cuse could not send Escape"
+  fi
 fi
 sleep 3
 
