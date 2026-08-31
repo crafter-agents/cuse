@@ -403,6 +403,49 @@ jobs:
             assert-pass.json
             assert-fail.json
 
+  # A second real Linux target: a full calculator application rather than a
+  # dialog helper. The runner chooses from apt metadata and records the exact
+  # binary used, while the scenario clicks 5 + 3 = by accessible button names.
+  linux-second-target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun install
+      - run: bun build --compile --external koffi src/cli.ts --outfile cuse
+      - name: install a GTK calculator from Ubuntu
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            xvfb xdotool x11-apps at-spi2-core python3-pyatspi dbus-x11 \
+            libgtk-3-0 gsettings-desktop-schemas openbox
+          if apt-cache show gnome-calculator >/dev/null 2>&1; then
+            sudo apt-get install -y -qq --no-install-recommends gnome-calculator
+            calculator=gnome-calculator
+          else
+            sudo apt-get install -y -qq --no-install-recommends mate-calc
+            calculator=mate-calc
+          fi
+          echo "CALCULATOR_BIN=$calculator" >> "$GITHUB_ENV"
+          echo "$calculator" | tee calculator-package.txt
+      - name: compute through named GTK controls and assert the live result
+        run: |
+          timeout 180 xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            dbus-run-session -- ./scenarios/linux-calc.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-second-target
+          path: |
+            calc*.json
+            calc*.jsonl
+            calc*.log
+            calculator*.txt
+            openbox.log
+
   # Does a click land on macOS? Nothing else here asks.
   #
   # This is the one path with a history of lying: `set the position of the mouse`
