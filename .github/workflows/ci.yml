@@ -673,3 +673,23 @@ jobs:
             windows-after-drag.json
             assert-pass.json
             assert-fail.json
+
+  windows-drag-reliability:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: bun install
+      - run: bun build --compile --external koffi src/cli.ts --outfile cuse
+      - name: measure 100 live-window drags
+        shell: bash
+        run: ./cuse run scenarios/windows-drag-repeat.json --repeat=100 --json | tee windows-drag-reliability.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-drag-reliability
+          path: |
+            windows-drag-reliability.json
+            notepad-target.txt

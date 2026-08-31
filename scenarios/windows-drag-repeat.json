@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "name": "move a live classic Notepad window",
+  "platforms": ["windows"],
+  "vars": {},
+  "defaultTimeoutMs": 30000,
+  "steps": [
+    {
+      "type": "exec",
+      "name": "launch a fresh classic Notepad window",
+      "argv": [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$target = Join-Path (Get-Location) 'notepad-target.txt'; Set-Content -Path $target -Value 'cuse drag reliability target'; $process = Start-Process \"$env:SystemRoot\\System32\\notepad.exe\" -ArgumentList $target -PassThru; [Console]::Write($process.Id)"
+      ],
+      "saveAs": "notepad"
+    },
+    {
+      "type": "cuse",
+      "name": "wait for the target window",
+      "action": "wait",
+      "options": {
+        "window": "notepad-target",
+        "timeoutMs": 25000
+      }
+    },
+    {
+      "type": "exec",
+      "name": "capture the window position before the drag",
+      "argv": [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$window = ((& ./cuse windows --json | ConvertFrom-Json).data | Where-Object { $_.title -match 'notepad-target' } | Select-Object -First 1); if ($null -eq $window) { throw 'notepad-target window was not found before the drag' }; @{ x = [int]$window.x; y = [int]$window.y; fromX = [int]$window.x + [int]($window.width / 2); fromY = [int]$window.y + 10; toX = [int]$window.x + [int]($window.width / 2) + 150; toY = [int]$window.y + 130 } | ConvertTo-Json -Compress"
+      ],
+      "stdout": "json",
+      "saveAs": "before"
+    },
+    {
+      "type": "cuse",
+      "name": "drag the live window by its title bar",
+      "action": "drag",
+      "args": [
+        "${steps.before.json.value.fromX}",
+        "${steps.before.json.value.fromY}",
+        "${steps.before.json.value.toX}",
+        "${steps.before.json.value.toY}"
+      ],
+      "options": {
+        "durationMs": 250,
+        "steps": 6
+      }
+    },
+    {
+      "type": "exec",
+      "name": "capture the window position after the drag",
+      "argv": [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$window = ((& ./cuse windows --json | ConvertFrom-Json).data | Where-Object { $_.title -match 'notepad-target' } | Select-Object -First 1); if ($null -eq $window) { throw 'notepad-target window was not found after the drag' }; $deltaX = [int]$window.x - ${steps.before.json.value.x}; $deltaY = [int]$window.y - ${steps.before.json.value.y}; @{ x = [int]$window.x; y = [int]$window.y; deltaX = $deltaX; deltaY = $deltaY; maxAbsoluteDelta = [Math]::Max([Math]::Abs($deltaX), [Math]::Abs($deltaY)) } | ConvertTo-Json -Compress"
+      ],
+      "stdout": "json",
+      "saveAs": "after"
+    },
+    {
+      "type": "assert",
+      "name": "verify externally observed window movement",
+      "actual": "${steps.after.json.value.maxAbsoluteDelta}",
+      "operator": "gte",
+      "expected": 50
+    }
+  ],
+  "finally": [
+    {
+      "type": "exec",
+      "name": "stop this iteration's Notepad process",
+      "argv": [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Stop-Process -Id ${steps.notepad.stdout} -Force -ErrorAction SilentlyContinue"
+      ]
+    }
+  ]
+}

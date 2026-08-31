@@ -655,6 +655,9 @@ async function act(
 ): Promise<Result> {
   const os = dependencies.os ?? detectOS();
   const base = { action, os };
+  if (action === "run" && args.length === 1 && args[0]?.toLowerCase().endsWith(".json")) {
+    return act("scenario", args, opts, dependencies);
+  }
   if (action === "fill") {
     const aimed = opts.window || opts.find || opts.element || opts.role;
     const hasOneCoordinate = (args[1] !== undefined) !== (args[2] !== undefined);
@@ -1615,6 +1618,8 @@ Finding things
 Batching
   run '<json>'                 several actions in one process, in order
                                [["move",10,20],["click"]] or [{"action":"click"}]
+  run <scenario.json>          run a declarative JSON scenario file
+                               (--repeat=<n> reports per-step flake rates)
   scenario <path>              run a declarative JSON scenario file
                                (--repeat=<n> reports per-step flake rates)
   scenario-draft <path>        convert recorded click events to a scenario; requires --out

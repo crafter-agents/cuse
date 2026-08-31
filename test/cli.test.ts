@@ -134,6 +134,28 @@ test("scenario runs a passing file and returns structured data", async () => {
   expect(result.data).toMatchObject({ name: "passing CLI scenario", status: "passed" });
 });
 
+test("run routes a scenario file through repeat aggregation", async () => {
+  const path = scenarioPath("run-repeat");
+  await Bun.write(path, JSON.stringify({
+    version: 1,
+    name: "repeated CLI scenario",
+    vars: {},
+    defaultTimeoutMs: 1_000,
+    steps: [{ type: "assert", actual: "same", operator: "eq", expected: "same" }],
+  }));
+
+  const result = await act("run", [path], { repeat: 3 }, { os: "linux" });
+
+  expect(result.ok).toBe(true);
+  expect(result.data).toMatchObject({
+    name: "repeated CLI scenario",
+    status: "passed",
+    runs: 3,
+    passed: 3,
+    failed: 0,
+  });
+});
+
 test("scenario dispatches cuse steps through the real CLI action", async () => {
   const path = scenarioPath("cuse-os");
   await Bun.write(path, JSON.stringify({
