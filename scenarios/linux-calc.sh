@@ -76,9 +76,9 @@ bun -e '
   const els = (await Bun.file("calc-elements-result.json").json()).data;
   const target = els.find((e) => String(e.value ?? "").trim() === "8");
   if (!target) throw new Error("no accessible control reports the computed value 8");
-  const peers = els.filter((e) => e.role === target.role && e.name === target.name);
-  if (peers.length !== 1)
-    throw new Error(`result selector is ambiguous: ${peers.length} controls share ${target.role}/${target.name}`);
+  const selected = els.find((e) => e.role === target.role && e.name === target.name);
+  if (selected !== target)
+    throw new Error(`the available ${target.role}/${target.name} selector does not resolve to the result control`);
   const options = { role: target.role };
   if (target.name) options.element = target.name;
   const scenario = (expected, suffix) => ({
